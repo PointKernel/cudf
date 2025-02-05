@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2024, NVIDIA CORPORATION.
+ * Copyright (c) 2024-2025, NVIDIA CORPORATION.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -48,10 +48,12 @@ struct update_target_element_gmem<
                              cuda::std::byte* source,
                              cudf::size_type source_index) const noexcept
   {
-    using DeviceType          = cudf::detail::underlying_target_t<Source, aggregation::MIN>;
-    DeviceType* source_casted = reinterpret_cast<DeviceType*>(source);
-    cudf::detail::atomic_min(&target.element<DeviceType>(target_index),
-                             static_cast<DeviceType>(source_casted[source_index]));
+    using DeviceTarget = cudf::detail::underlying_target_t<Source, aggregation::MIN>;
+    using DeviceSource = cudf::detail::underlying_source_t<Source, aggregation::MIN>;
+
+    DeviceSource* source_casted = reinterpret_cast<DeviceSource*>(source);
+    cudf::detail::atomic_min(&target.element<DeviceTarget>(target_index),
+                             static_cast<DeviceTarget>(source_casted[source_index]));
 
     if (target.is_null(target_index)) { target.set_valid(target_index); }
   }
@@ -68,10 +70,12 @@ struct update_target_element_gmem<
                              cuda::std::byte* source,
                              cudf::size_type source_index) const noexcept
   {
-    using DeviceType          = cudf::detail::underlying_target_t<Source, aggregation::MAX>;
-    DeviceType* source_casted = reinterpret_cast<DeviceType*>(source);
-    cudf::detail::atomic_max(&target.element<DeviceType>(target_index),
-                             static_cast<DeviceType>(source_casted[source_index]));
+    using DeviceTarget = cudf::detail::underlying_target_t<Source, aggregation::MAX>;
+    using DeviceSource = cudf::detail::underlying_source_t<Source, aggregation::MAX>;
+
+    DeviceSource* source_casted = reinterpret_cast<DeviceSource*>(source);
+    cudf::detail::atomic_max(&target.element<DeviceTarget>(target_index),
+                             static_cast<DeviceTarget>(source_casted[source_index]));
 
     if (target.is_null(target_index)) { target.set_valid(target_index); }
   }
@@ -89,10 +93,12 @@ struct update_target_element_gmem<
                              cuda::std::byte* source,
                              cudf::size_type source_index) const noexcept
   {
-    using DeviceType          = cudf::detail::underlying_target_t<Source, aggregation::SUM>;
-    DeviceType* source_casted = reinterpret_cast<DeviceType*>(source);
-    cudf::detail::atomic_add(&target.element<DeviceType>(target_index),
-                             static_cast<DeviceType>(source_casted[source_index]));
+    using DeviceTarget = cudf::detail::underlying_target_t<Source, aggregation::SUM>;
+    using DeviceSource = cudf::detail::underlying_source_t<Source, aggregation::SUM>;
+
+    DeviceSource* source_casted = reinterpret_cast<DeviceSource*>(source);
+    cudf::detail::atomic_add(&target.element<DeviceTarget>(target_index),
+                             static_cast<DeviceTarget>(source_casted[source_index]));
 
     if (target.is_null(target_index)) { target.set_valid(target_index); }
   }
