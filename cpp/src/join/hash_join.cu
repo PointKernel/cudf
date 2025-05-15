@@ -298,8 +298,14 @@ std::size_t get_full_join_size(
   auto const row_hash           = cudf::experimental::row::hash::row_hasher{preprocessed_probe};
   auto const hash_probe         = row_hash.device_hasher(probe_nulls);
   auto const empty_key_sentinel = hash_table.get_empty_key_sentinel();
-  auto const iter               = cudf::detail::make_counting_transform_iterator(
-    0, make_pair_function{hash_probe, empty_key_sentinel});
+  // Materialize the input data instead of using transform iterator
+  rmm::device_uvector<cuco::pair<hash_value_type, size_type>> pairs(probe_table.num_rows(), stream);
+  thrust::transform(rmm::exec_policy_nosync(stream),
+                    thrust::counting_iterator<size_type>(0),
+                    thrust::counting_iterator<size_type>(probe_table.num_rows()),
+                    pairs.begin(),
+                    make_pair_function{hash_probe, empty_key_sentinel});
+  auto const iter = pairs.begin();
 
   cudf::size_type const probe_table_num_rows = probe_table.num_rows();
 
