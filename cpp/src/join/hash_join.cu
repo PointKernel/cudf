@@ -49,6 +49,38 @@ namespace detail {
 namespace {
 using multimap_type = cudf::hash_join::impl_type::map_type;
 
+template <typename EqualityComparator, typename Iter>
+std::size_t compute_join_output_size(size_type build_table_num_rows,
+                                     table_view const& probe_table,
+                                     cudf::detail::multimap_type const& hash_table,
+                                     join_kind join,
+                                     bool has_nulls,
+                                     cudf::null_equality nulls_equal,
+                                     EqualityComparator const& row_comparator,
+                                     Iter iter,
+                                     rmm::cuda_stream_view stream)
+{
+  // Handle empty build table case
+  if (build_table_num_rows == 0) {
+    switch (join) {
+      case join_kind::INNER_JOIN: return 0;
+      case join_kind::LEFT_JOIN: return probe_table.num_rows();
+      default: CUDF_FAIL("Unsupported join type");
+    }
+  }
+
+  // Create equality comparator for hash table lookup
+  pair_equality equality{cudf::detail::has_nested_columns(probe_table)
+                           ? row_comparator.equal_to<true>(has_nulls, nulls_equal)
+                           : row_comparator.equal_to<false>(has_nulls, nulls_equal)};
+
+  // Count matching pairs based on join type
+  auto const probe_size = probe_table.num_rows();
+  return (join == join_kind::LEFT_JOIN)
+           ? hash_table.pair_count_outer(iter, iter + probe_size, equality, stream.value())
+           : hash_table.pair_count(iter, iter + probe_size, equality, stream.value());
+}
+
 /**
  * @brief Calculates the exact size of the join output produced when
  * joining two tables together.
@@ -169,15 +201,32 @@ probe_join_hash_table(
   auto const probe_join_type =
     (join == cudf::detail::join_kind::FULL_JOIN) ? cudf::detail::join_kind::LEFT_JOIN : join;
 
+  auto const probe_nulls = cudf::nullate::DYNAMIC{has_nulls};
+
+  auto const row_hash           = cudf::experimental::row::hash::row_hasher{preprocessed_probe};
+  auto const hash_probe         = row_hash.device_hasher(probe_nulls);
+  auto const empty_key_sentinel = hash_table.get_empty_key_sentinel();
+  // Materialize the input data instead of using transform iterator
+  rmm::device_uvector<cuco::pair<hash_value_type, size_type>> pairs(probe_table.num_rows(), stream);
+  thrust::transform(rmm::exec_policy_nosync(stream),
+                    thrust::counting_iterator<size_type>(0),
+                    thrust::counting_iterator<size_type>(probe_table.num_rows()),
+                    pairs.begin(),
+                    make_pair_function{hash_probe, empty_key_sentinel});
+  auto const iter = pairs.begin();
+
+  cudf::size_type const probe_table_num_rows = probe_table.num_rows();
+  auto const row_comparator =
+    cudf::experimental::row::equality::two_table_comparator{preprocessed_probe, preprocessed_build};
   std::size_t const join_size = output_size ? *output_size
-                                            : compute_join_output_size(build_table,
+                                            : compute_join_output_size(build_table.num_rows(),
                                                                        probe_table,
-                                                                       preprocessed_build,
-                                                                       preprocessed_probe,
                                                                        hash_table,
                                                                        probe_join_type,
                                                                        has_nulls,
                                                                        compare_nulls,
+                                                                       row_comparator,
+                                                                       iter,
                                                                        stream);
 
   // If output size is zero, return immediately
@@ -191,23 +240,11 @@ probe_join_hash_table(
   cudf::experimental::prefetch::detail::prefetch("hash_join", *left_indices, stream);
   cudf::experimental::prefetch::detail::prefetch("hash_join", *right_indices, stream);
 
-  auto const probe_nulls = cudf::nullate::DYNAMIC{has_nulls};
-
-  auto const row_hash           = cudf::experimental::row::hash::row_hasher{preprocessed_probe};
-  auto const hash_probe         = row_hash.device_hasher(probe_nulls);
-  auto const empty_key_sentinel = hash_table.get_empty_key_sentinel();
-  auto const iter               = cudf::detail::make_counting_transform_iterator(
-    0, make_pair_function{hash_probe, empty_key_sentinel});
-
-  cudf::size_type const probe_table_num_rows = probe_table.num_rows();
-
   auto const out1_zip_begin = thrust::make_zip_iterator(
     thrust::make_tuple(thrust::make_discard_iterator(), left_indices->begin()));
   auto const out2_zip_begin = thrust::make_zip_iterator(
     thrust::make_tuple(thrust::make_discard_iterator(), right_indices->begin()));
 
-  auto const row_comparator =
-    cudf::experimental::row::equality::two_table_comparator{preprocessed_probe, preprocessed_build};
   auto const comparator_helper = [&](auto device_comparator) {
     pair_equality equality{device_comparator};
 

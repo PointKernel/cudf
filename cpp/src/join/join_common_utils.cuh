@@ -183,8 +183,14 @@ void build_join_hash_table(
 
   auto const empty_key_sentinel = hash_table.get_empty_key_sentinel();
   make_pair_function pair_func{hash_build, empty_key_sentinel};
-
-  auto const iter = cudf::detail::make_counting_transform_iterator(0, pair_func);
+  // Materialize the input data instead of using transform iterator
+  rmm::device_uvector<cuco::pair<hash_value_type, size_type>> pairs(build.num_rows(), stream);
+  thrust::transform(rmm::exec_policy_nosync(stream),
+                    thrust::counting_iterator<size_type>(0),
+                    thrust::counting_iterator<size_type>(build.num_rows()),
+                    pairs.begin(),
+                    pair_func);
+  auto const iter = pairs.begin();
 
   size_type const build_table_num_rows{build.num_rows()};
   if (nulls_equal == cudf::null_equality::EQUAL or (not nullable(build))) {
