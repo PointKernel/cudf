@@ -168,13 +168,15 @@ struct update_target_element<Source, aggregation::SUM_WITH_OVERFLOW> {
     auto sum_column      = target.child(0);
     auto overflow_column = target.child(1);
 
-    // Mark child columns as valid when they will be updated
-    if (sum_column.is_null(target_index)) { sum_column.set_valid(target_index); }
-    if (overflow_column.is_null(target_index)) { overflow_column.set_valid(target_index); }
+    // No need to mark child columns as valid since they have no null masks
+    // Only the struct-level null mask matters for SUM_WITH_OVERFLOW
 
     auto const source_value = source.element<Source>(source_index);
     auto const old_sum =
       cudf::detail::atomic_add(&sum_column.element<int64_t>(target_index), source_value);
+
+    // Early exit if overflow is already set to avoid unnecessary overflow checking
+    if (overflow_column.element<bool>(target_index)) { return; }
 
     // Check for overflow: if old_sum and source_value have same sign but result has different sign
     auto const new_sum  = old_sum + source_value;

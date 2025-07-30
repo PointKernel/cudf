@@ -87,10 +87,13 @@ cudf::table create_sparse_results_table(cudf::table_view const& flattened_values
         auto make_children = [&make_empty_column](cudf::size_type size,
                                                   cudf::mask_state mask_state) {
           std::vector<std::unique_ptr<cudf::column>> children;
-          // Create sum child column (int64_t)
-          children.push_back(make_empty_column(cudf::type_id::INT64, size, mask_state));
-          // Create overflow child column (bool)
-          children.push_back(make_empty_column(cudf::type_id::BOOL8, size, mask_state));
+          // Create sum child column (int64_t) - no null mask needed, struct-level mask handles
+          // nullability
+          children.push_back(
+            make_empty_column(cudf::type_id::INT64, size, cudf::mask_state::UNALLOCATED));
+          // Create overflow child column (bool) - no null mask needed, only value matters
+          children.push_back(
+            make_empty_column(cudf::type_id::BOOL8, size, cudf::mask_state::UNALLOCATED));
           return children;
         };
 
