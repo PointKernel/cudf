@@ -231,15 +231,15 @@ TYPED_TEST(GroupBySumFixedPointTest, GroupByHashSumDecimalAsValue)
   }
 }
 
-// SUM_ANSI tests - only supports int64_t input values and outputs int64_t
+// SUM_WITH_OVERFLOW tests - only supports int64_t input values and outputs int64_t
 template <typename V>
-struct groupby_sum_ansi_test : public cudf::test::BaseFixture {};
+struct groupby_sum_with_overflow_test : public cudf::test::BaseFixture {};
 
-using sum_ansi_supported_types = cudf::test::Types<int64_t>;
+using sum_with_overflow_supported_types = cudf::test::Types<int64_t>;
 
-TYPED_TEST_SUITE(groupby_sum_ansi_test, sum_ansi_supported_types);
+TYPED_TEST_SUITE(groupby_sum_with_overflow_test, sum_with_overflow_supported_types);
 
-TYPED_TEST(groupby_sum_ansi_test, basic)
+TYPED_TEST(groupby_sum_with_overflow_test, basic)
 {
   using V = TypeParam;
 
@@ -256,13 +256,13 @@ TYPED_TEST(groupby_sum_ansi_test, basic)
   children.push_back(overflow_col.release());
   auto expect_vals = cudf::make_structs_column(3, std::move(children), 0, {});
 
-  auto agg = cudf::make_sum_ansi_aggregation<cudf::groupby_aggregation>();
+  auto agg = cudf::make_sum_with_overflow_aggregation<cudf::groupby_aggregation>();
   test_single_agg(keys, vals, expect_keys, *expect_vals, std::move(agg));
 
-  // Note: SUM_ANSI only works with hash groupby, not sort groupby
+  // Note: SUM_WITH_OVERFLOW only works with hash groupby, not sort groupby
 }
 
-TYPED_TEST(groupby_sum_ansi_test, empty_cols)
+TYPED_TEST(groupby_sum_with_overflow_test, empty_cols)
 {
   using V = TypeParam;
 
@@ -279,13 +279,13 @@ TYPED_TEST(groupby_sum_ansi_test, empty_cols)
   children.push_back(overflow_col.release());
   auto expect_vals = cudf::make_structs_column(0, std::move(children), 0, {});
 
-  auto agg = cudf::make_sum_ansi_aggregation<cudf::groupby_aggregation>();
+  auto agg = cudf::make_sum_with_overflow_aggregation<cudf::groupby_aggregation>();
   test_single_agg(keys, vals, expect_keys, *expect_vals, std::move(agg));
 
-  // Note: SUM_ANSI only works with hash groupby, not sort groupby
+  // Note: SUM_WITH_OVERFLOW only works with hash groupby, not sort groupby
 }
 
-TYPED_TEST(groupby_sum_ansi_test, zero_valid_keys)
+TYPED_TEST(groupby_sum_with_overflow_test, zero_valid_keys)
 {
   using V = TypeParam;
 
@@ -302,13 +302,13 @@ TYPED_TEST(groupby_sum_ansi_test, zero_valid_keys)
   children.push_back(overflow_col.release());
   auto expect_vals = cudf::make_structs_column(0, std::move(children), 0, {});
 
-  auto agg = cudf::make_sum_ansi_aggregation<cudf::groupby_aggregation>();
+  auto agg = cudf::make_sum_with_overflow_aggregation<cudf::groupby_aggregation>();
   test_single_agg(keys, vals, expect_keys, *expect_vals, std::move(agg));
 
-  // Note: SUM_ANSI only works with hash groupby, not sort groupby
+  // Note: SUM_WITH_OVERFLOW only works with hash groupby, not sort groupby
 }
 
-TYPED_TEST(groupby_sum_ansi_test, zero_valid_values)
+TYPED_TEST(groupby_sum_with_overflow_test, zero_valid_values)
 {
   using V = TypeParam;
 
@@ -330,13 +330,13 @@ TYPED_TEST(groupby_sum_ansi_test, zero_valid_values)
   auto expect_vals =
     cudf::make_structs_column(1, std::move(children), null_count, std::move(validity_mask));
 
-  auto agg = cudf::make_sum_ansi_aggregation<cudf::groupby_aggregation>();
+  auto agg = cudf::make_sum_with_overflow_aggregation<cudf::groupby_aggregation>();
   test_single_agg(keys, vals, expect_keys, *expect_vals, std::move(agg));
 
-  // Note: SUM_ANSI only works with hash groupby, not sort groupby
+  // Note: SUM_WITH_OVERFLOW only works with hash groupby, not sort groupby
 }
 
-TYPED_TEST(groupby_sum_ansi_test, null_keys_and_values)
+TYPED_TEST(groupby_sum_with_overflow_test, null_keys_and_values)
 {
   using V = TypeParam;
 
@@ -364,13 +364,13 @@ TYPED_TEST(groupby_sum_ansi_test, null_keys_and_values)
   auto expect_vals =
     cudf::make_structs_column(4, std::move(children), null_count, std::move(validity_mask));
 
-  auto agg = cudf::make_sum_ansi_aggregation<cudf::groupby_aggregation>();
+  auto agg = cudf::make_sum_with_overflow_aggregation<cudf::groupby_aggregation>();
   test_single_agg(keys, vals, expect_keys, *expect_vals, std::move(agg));
 
-  // Note: SUM_ANSI only works with hash groupby, not sort groupby
+  // Note: SUM_WITH_OVERFLOW only works with hash groupby, not sort groupby
 }
 
-TYPED_TEST(groupby_sum_ansi_test, overflow_detection)
+TYPED_TEST(groupby_sum_with_overflow_test, overflow_detection)
 {
   using V = TypeParam;
 
@@ -405,8 +405,8 @@ TYPED_TEST(groupby_sum_ansi_test, overflow_detection)
   children.push_back(overflow_col.release());
   auto expect_vals = cudf::make_structs_column(3, std::move(children), 0, {});
 
-  auto agg = cudf::make_sum_ansi_aggregation<cudf::groupby_aggregation>();
+  auto agg = cudf::make_sum_with_overflow_aggregation<cudf::groupby_aggregation>();
   test_single_agg(keys, vals, expect_keys, *expect_vals, std::move(agg));
 
-  // Note: SUM_ANSI only works with hash groupby, not sort groupby
+  // Note: SUM_WITH_OVERFLOW only works with hash groupby, not sort groupby
 }
