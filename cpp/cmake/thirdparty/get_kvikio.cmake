@@ -15,7 +15,8 @@ function(find_and_configure_kvikio VERSION)
     GIT_REPOSITORY https://github.com/rapidsai/kvikio.git
     GIT_TAG branch-${VERSION}
     GIT_SHALLOW TRUE SOURCE_SUBDIR cpp
-    OPTIONS "KvikIO_BUILD_EXAMPLES OFF" "KvikIO_REMOTE_SUPPORT ${CUDF_KVIKIO_REMOTE_IO}"
+    OPTIONS "KvikIO_BUILD_EXAMPLES OFF" "KvikIO_BUILD_TESTS OFF" "KvikIO_BUILD_BENCHMARKS OFF"
+            "KvikIO_REMOTE_SUPPORT ${CUDF_KVIKIO_REMOTE_IO}"
   )
 
   include("${rapids-cmake-dir}/export/find_package_root.cmake")
