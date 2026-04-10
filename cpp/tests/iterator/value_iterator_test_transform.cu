@@ -1,5 +1,5 @@
 /*
- * SPDX-FileCopyrightText: Copyright (c) 2020-2025, NVIDIA CORPORATION.
+ * SPDX-FileCopyrightText: Copyright (c) 2020-2026, NVIDIA CORPORATION.
  * SPDX-License-Identifier: Apache-2.0
  */
 #include <tests/iterator/iterator_tests.cuh>
@@ -7,8 +7,8 @@
 #include <cudf_test/random.hpp>
 
 #include <cuda/functional>
-#include <thrust/host_vector.h>
 #include <cuda/iterator>
+#include <thrust/host_vector.h>
 
 struct TransformedIteratorTest : public IteratorTest<int8_t> {};
 

@@ -1,5 +1,5 @@
 /*
- * SPDX-FileCopyrightText: Copyright (c) 2019-2025, NVIDIA CORPORATION.
+ * SPDX-FileCopyrightText: Copyright (c) 2019-2026, NVIDIA CORPORATION.
  * SPDX-License-Identifier: Apache-2.0
  */
 
@@ -12,8 +12,8 @@
 #include <cudf/strings/slice.hpp>
 #include <cudf/strings/strings_column_view.hpp>
 
-#include <thrust/host_vector.h>
 #include <cuda/iterator>
+#include <thrust/host_vector.h>
 #include <thrust/sequence.h>
 
 #include <string>
@@ -25,9 +25,9 @@ TEST_F(StringsSliceTest, Substring)
 {
   std::vector<char const*> h_strings{"Héllo", "thesé", nullptr, "ARE THE", "tést strings", ""};
   cudf::test::strings_column_wrapper strings(
-    h_strings.begin(),
-    h_strings.end(),
-    cuda::transform_iterator(h_strings.begin(), [](auto str) { return str != nullptr; }));
+    h_strings.begin(), h_strings.end(), cuda::transform_iterator(h_strings.begin(), [](auto str) {
+      return str != nullptr;
+    }));
   std::vector<char const*> h_expected({"llo", "esé", nullptr, "E T", "st ", ""});
   cudf::test::strings_column_wrapper expected(
     h_expected.begin(),
@@ -126,9 +126,9 @@ TEST_P(Parameters, AllNulls)
 {
   std::vector<char const*> h_strings{nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr};
   cudf::test::strings_column_wrapper strings(
-    h_strings.begin(),
-    h_strings.end(),
-    cuda::transform_iterator(h_strings.begin(), [](auto str) { return str != nullptr; }));
+    h_strings.begin(), h_strings.end(), cuda::transform_iterator(h_strings.begin(), [](auto str) {
+      return str != nullptr;
+    }));
   cudf::size_type start = GetParam();
 
   auto strings_column = cudf::strings_column_view(strings);
@@ -136,9 +136,9 @@ TEST_P(Parameters, AllNulls)
 
   std::vector<char const*> h_expected(h_strings);
   cudf::test::strings_column_wrapper expected(
-    h_strings.begin(),
-    h_strings.end(),
-    cuda::transform_iterator(h_expected.begin(), [](auto str) { return str != nullptr; }));
+    h_strings.begin(), h_strings.end(), cuda::transform_iterator(h_expected.begin(), [](auto str) {
+      return str != nullptr;
+    }));
   CUDF_TEST_EXPECT_COLUMNS_EQUAL(*results, expected);
 
   thrust::host_vector<int32_t> starts(h_strings.size(), 1);

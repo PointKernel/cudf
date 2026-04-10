@@ -167,8 +167,7 @@ void reader_impl::setup_next_pass(read_mode mode)
     // store off how much memory we've used so far. This includes the compressed page data and the
     // decompressed dictionary data. we will subtract this from the available total memory for the
     // subpasses
-    auto chunk_iter =
-      cuda::transform_iterator(pass.chunks.d_begin(), get_chunk_compressed_size{});
+    auto chunk_iter = cuda::transform_iterator(pass.chunks.d_begin(), get_chunk_compressed_size{});
     pass.base_mem_size =
       decomp_dict_data_size +
       cudf::detail::reduce(
@@ -563,9 +562,8 @@ void reader_impl::compute_output_chunks_for_subpass()
 
   // generate row_indices and cumulative output sizes for all pages
   rmm::device_uvector<cumulative_page_info> c_info(subpass.pages.size(), _stream);
-  auto page_input =
-    cuda::transform_iterator(subpass.pages.device_begin(), get_page_output_size{});
-  auto page_keys = make_page_key_iterator(subpass.pages);
+  auto page_input = cuda::transform_iterator(subpass.pages.device_begin(), get_page_output_size{});
+  auto page_keys  = make_page_key_iterator(subpass.pages);
   thrust::inclusive_scan_by_key(rmm::exec_policy_nosync(_stream),
                                 page_keys,
                                 page_keys + subpass.pages.size(),

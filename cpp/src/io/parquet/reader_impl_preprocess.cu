@@ -1082,7 +1082,7 @@ cudf::detail::host_vector<size_t> reader_impl::calculate_page_string_offsets()
 
   // use page_index to fetch page string sizes in the proper order
   auto val_iter = cuda::transform_iterator(subpass.pages.device_begin(),
-                                                  page_to_string_size{pass.chunks.d_begin()});
+                                           page_to_string_size{pass.chunks.d_begin()});
 
   // do scan by key to calculate string offsets for each page
   thrust::exclusive_scan_by_key(rmm::exec_policy_nosync(_stream),

@@ -96,8 +96,8 @@ void print_cumulative_page_info(host_span<cumulative_page_info const> sizes,
 
     if (splits.has_value()) {
       // if we have a split at this row count and this is the last instance of this row count
-      auto start             = cuda::transform_iterator(splits->begin(),
-                                                 [](row_range const& i) { return i.skip_rows; });
+      auto start =
+        cuda::transform_iterator(splits->begin(), [](row_range const& i) { return i.skip_rows; });
       auto end               = start + splits->size();
       auto split             = std::find(start, end, sizes[idx].end_row_index);
       auto const split_index = [&]() -> int {
@@ -199,10 +199,10 @@ int64_t find_next_split(int64_t cur_pos,
                         size_t size_limit,
                         size_t min_row_count)
 {
-  auto const start = cuda::transform_iterator(
-    sizes.begin(),
-    [&](cumulative_page_info const& i) { return i.size_bytes - cur_cumulative_size; });
-  auto const end = start + sizes.size();
+  auto const start = cuda::transform_iterator(sizes.begin(), [&](cumulative_page_info const& i) {
+    return i.size_bytes - cur_cumulative_size;
+  });
+  auto const end   = start + sizes.size();
 
   int64_t split_pos = thrust::lower_bound(thrust::seq, start + cur_pos, end, size_limit) - start;
 

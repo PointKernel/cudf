@@ -7,9 +7,9 @@
 
 #include <cudf/detail/nvtx/ranges.hpp>
 
-#include <jit/cache.hpp>
-
 #include <cuda/iterator>
+
+#include <jit/cache.hpp>
 
 namespace cudf {
 namespace jit {

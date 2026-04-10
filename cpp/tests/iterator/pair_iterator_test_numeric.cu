@@ -8,8 +8,8 @@
 
 #include <rmm/exec_policy.hpp>
 
-#include <cuda/std/utility>
 #include <cuda/iterator>
+#include <cuda/std/utility>
 #include <thrust/reduce.h>
 
 using TestingTypes = cudf::test::NumericTypes;

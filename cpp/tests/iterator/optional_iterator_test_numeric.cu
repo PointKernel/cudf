@@ -8,9 +8,9 @@
 
 #include <cudf/utilities/default_stream.hpp>
 
+#include <cuda/iterator>
 #include <cuda/std/optional>
 #include <thrust/execution_policy.h>
-#include <cuda/iterator>
 #include <thrust/reduce.h>
 #include <thrust/transform.h>
 

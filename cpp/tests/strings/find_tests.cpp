@@ -1,5 +1,5 @@
 /*
- * SPDX-FileCopyrightText: Copyright (c) 2019-2025, NVIDIA CORPORATION.
+ * SPDX-FileCopyrightText: Copyright (c) 2019-2026, NVIDIA CORPORATION.
  * SPDX-License-Identifier: Apache-2.0
  */
 
@@ -217,9 +217,9 @@ TEST_F(StringsFindTest, StartsWith)
   {
     std::vector<char const*> h_targets{"éa", "th", "e", "ll", nullptr, ""};
     cudf::test::strings_column_wrapper targets(
-      h_targets.begin(),
-      h_targets.end(),
-      cuda::transform_iterator(h_targets.begin(), [](auto str) { return str != nullptr; }));
+      h_targets.begin(), h_targets.end(), cuda::transform_iterator(h_targets.begin(), [](auto str) {
+        return str != nullptr;
+      }));
 
     auto targets_view = cudf::strings_column_view(targets);
     cudf::test::fixed_width_column_wrapper<bool> expected({0, 1, 0, 0, 0, 1},
@@ -259,9 +259,9 @@ TEST_F(StringsFindTest, EndsWith)
   {
     std::vector<char const*> h_targets{"éa", "sé", "th", nullptr, "tést strings", ""};
     cudf::test::strings_column_wrapper targets(
-      h_targets.begin(),
-      h_targets.end(),
-      cuda::transform_iterator(h_targets.begin(), [](auto str) { return str != nullptr; }));
+      h_targets.begin(), h_targets.end(), cuda::transform_iterator(h_targets.begin(), [](auto str) {
+        return str != nullptr;
+      }));
 
     auto targets_view = cudf::strings_column_view(targets);
     cudf::test::fixed_width_column_wrapper<bool> expected({0, 1, 0, 0, 1, 1},
@@ -353,9 +353,9 @@ TEST_F(StringsFindTest, AllNull)
 {
   std::vector<char const*> h_strings{nullptr, nullptr, nullptr, nullptr};
   cudf::test::strings_column_wrapper strings(
-    h_strings.begin(),
-    h_strings.end(),
-    cuda::transform_iterator(h_strings.begin(), [](auto str) { return str != nullptr; }));
+    h_strings.begin(), h_strings.end(), cuda::transform_iterator(h_strings.begin(), [](auto str) {
+      return str != nullptr;
+    }));
 
   std::vector<cudf::size_type> h_expected32(h_strings.size(), -1);
   cudf::test::fixed_width_column_wrapper<cudf::size_type> expected32(
