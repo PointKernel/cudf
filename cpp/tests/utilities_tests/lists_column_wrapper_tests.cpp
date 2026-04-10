@@ -17,7 +17,6 @@
 #include <rmm/device_buffer.hpp>
 
 #include <cuda/iterator>
-#include <thrust/iterator/transform_iterator.h>
 
 struct ListColumnWrapperTest : public cudf::test::BaseFixture {};
 template <typename T>

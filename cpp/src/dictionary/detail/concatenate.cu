@@ -29,7 +29,6 @@
 #include <thrust/binary_search.h>
 #include <thrust/execution_policy.h>
 #include <thrust/iterator/permutation_iterator.h>
-#include <thrust/iterator/transform_iterator.h>
 #include <thrust/transform.h>
 #include <thrust/transform_scan.h>
 
@@ -139,7 +138,7 @@ struct dispatch_compute_indices {
     // map the concatenated indices to the concatenated keys
     auto all_itr = thrust::make_permutation_iterator(
       keys_view->begin<Element>(),
-      thrust::make_transform_iterator(
+      cuda::transform_iterator(
         cuda::counting_iterator<size_type>{0},
         cuda::proclaim_return_type<size_type>(
           [d_offsets, d_map_to_keys, d_all_indices, indices_itr] __device__(size_type idx) {

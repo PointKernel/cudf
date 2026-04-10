@@ -13,7 +13,7 @@
 #include <cudf/strings/strings_column_view.hpp>
 
 #include <thrust/host_vector.h>
-#include <thrust/iterator/transform_iterator.h>
+#include <cuda/iterator>
 #include <thrust/sequence.h>
 
 #include <string>
@@ -27,12 +27,12 @@ TEST_F(StringsSliceTest, Substring)
   cudf::test::strings_column_wrapper strings(
     h_strings.begin(),
     h_strings.end(),
-    thrust::make_transform_iterator(h_strings.begin(), [](auto str) { return str != nullptr; }));
+    cuda::transform_iterator(h_strings.begin(), [](auto str) { return str != nullptr; }));
   std::vector<char const*> h_expected({"llo", "esé", nullptr, "E T", "st ", ""});
   cudf::test::strings_column_wrapper expected(
     h_expected.begin(),
     h_expected.end(),
-    thrust::make_transform_iterator(h_expected.begin(), [](auto str) { return str != nullptr; }));
+    cuda::transform_iterator(h_expected.begin(), [](auto str) { return str != nullptr; }));
 
   auto strings_column = static_cast<cudf::strings_column_view>(strings);
   auto results        = cudf::strings::slice_strings(strings_column, 2, 5);
@@ -128,7 +128,7 @@ TEST_P(Parameters, AllNulls)
   cudf::test::strings_column_wrapper strings(
     h_strings.begin(),
     h_strings.end(),
-    thrust::make_transform_iterator(h_strings.begin(), [](auto str) { return str != nullptr; }));
+    cuda::transform_iterator(h_strings.begin(), [](auto str) { return str != nullptr; }));
   cudf::size_type start = GetParam();
 
   auto strings_column = cudf::strings_column_view(strings);
@@ -138,7 +138,7 @@ TEST_P(Parameters, AllNulls)
   cudf::test::strings_column_wrapper expected(
     h_strings.begin(),
     h_strings.end(),
-    thrust::make_transform_iterator(h_expected.begin(), [](auto str) { return str != nullptr; }));
+    cuda::transform_iterator(h_expected.begin(), [](auto str) { return str != nullptr; }));
   CUDF_TEST_EXPECT_COLUMNS_EQUAL(*results, expected);
 
   thrust::host_vector<int32_t> starts(h_strings.size(), 1);

@@ -14,6 +14,8 @@
 #include <cudf/strings/find.hpp>
 #include <cudf/strings/strings_column_view.hpp>
 
+#include <cuda/iterator>
+
 #include <vector>
 
 struct StringsFindTest : public cudf::test::BaseFixture {};
@@ -217,7 +219,7 @@ TEST_F(StringsFindTest, StartsWith)
     cudf::test::strings_column_wrapper targets(
       h_targets.begin(),
       h_targets.end(),
-      thrust::make_transform_iterator(h_targets.begin(), [](auto str) { return str != nullptr; }));
+      cuda::transform_iterator(h_targets.begin(), [](auto str) { return str != nullptr; }));
 
     auto targets_view = cudf::strings_column_view(targets);
     cudf::test::fixed_width_column_wrapper<bool> expected({0, 1, 0, 0, 0, 1},
@@ -259,7 +261,7 @@ TEST_F(StringsFindTest, EndsWith)
     cudf::test::strings_column_wrapper targets(
       h_targets.begin(),
       h_targets.end(),
-      thrust::make_transform_iterator(h_targets.begin(), [](auto str) { return str != nullptr; }));
+      cuda::transform_iterator(h_targets.begin(), [](auto str) { return str != nullptr; }));
 
     auto targets_view = cudf::strings_column_view(targets);
     cudf::test::fixed_width_column_wrapper<bool> expected({0, 1, 0, 0, 1, 1},
@@ -353,19 +355,19 @@ TEST_F(StringsFindTest, AllNull)
   cudf::test::strings_column_wrapper strings(
     h_strings.begin(),
     h_strings.end(),
-    thrust::make_transform_iterator(h_strings.begin(), [](auto str) { return str != nullptr; }));
+    cuda::transform_iterator(h_strings.begin(), [](auto str) { return str != nullptr; }));
 
   std::vector<cudf::size_type> h_expected32(h_strings.size(), -1);
   cudf::test::fixed_width_column_wrapper<cudf::size_type> expected32(
     h_expected32.begin(),
     h_expected32.end(),
-    thrust::make_transform_iterator(h_strings.begin(), [](auto str) { return str != nullptr; }));
+    cuda::transform_iterator(h_strings.begin(), [](auto str) { return str != nullptr; }));
 
   std::vector<bool> h_expected8(h_strings.size(), -1);
   cudf::test::fixed_width_column_wrapper<bool> expected8(
     h_expected8.begin(),
     h_expected8.end(),
-    thrust::make_transform_iterator(h_strings.begin(), [](auto str) { return str != nullptr; }));
+    cuda::transform_iterator(h_strings.begin(), [](auto str) { return str != nullptr; }));
 
   auto strings_view = cudf::strings_column_view(strings);
   auto results      = cudf::strings::find(strings_view, cudf::string_scalar("e"));

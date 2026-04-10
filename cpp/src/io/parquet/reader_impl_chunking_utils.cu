@@ -96,7 +96,7 @@ void print_cumulative_page_info(host_span<cumulative_page_info const> sizes,
 
     if (splits.has_value()) {
       // if we have a split at this row count and this is the last instance of this row count
-      auto start             = cuda::make_transform_iterator(splits->begin(),
+      auto start             = cuda::transform_iterator(splits->begin(),
                                                  [](row_range const& i) { return i.skip_rows; });
       auto end               = start + splits->size();
       auto split             = std::find(start, end, sizes[idx].end_row_index);
@@ -186,7 +186,7 @@ compression_type from_parquet_compression(Compression compression)
 size_t find_start_index(cudf::host_span<cumulative_page_info const> aggregated_info,
                         size_t start_row)
 {
-  auto start = cuda::make_transform_iterator(
+  auto start = cuda::transform_iterator(
     aggregated_info.begin(), [&](cumulative_page_info const& i) { return i.end_row_index; });
   return thrust::lower_bound(thrust::host, start, start + aggregated_info.size(), start_row) -
          start;
@@ -199,7 +199,7 @@ int64_t find_next_split(int64_t cur_pos,
                         size_t size_limit,
                         size_t min_row_count)
 {
-  auto const start = cuda::make_transform_iterator(
+  auto const start = cuda::transform_iterator(
     sizes.begin(),
     [&](cumulative_page_info const& i) { return i.size_bytes - cur_cumulative_size; });
   auto const end = start + sizes.size();
@@ -390,7 +390,7 @@ std::tuple<rmm::device_uvector<page_span>, size_t, size_t> compute_next_subpass(
       page_offsets, chunks, page_row_index, start_row, end_row, is_first_subpass, has_page_index});
 
   // total page count over all columns
-  auto page_count_iter   = cuda::make_transform_iterator(page_bounds.begin(), get_span_size{});
+  auto page_count_iter   = cuda::transform_iterator(page_bounds.begin(), get_span_size{});
   auto const total_pages = cudf::detail::reduce(
     page_count_iter, page_count_iter + num_columns, size_t{0}, cuda::std::plus<size_t>{}, stream);
 
@@ -642,7 +642,7 @@ void detect_malformed_pages(device_span<PageInfo const> pages,
   rmm::device_uvector<size_type> row_counts(pages.size(),
                                             stream);  // worst case:  num keys == num pages
   auto const size_iter =
-    cuda::make_transform_iterator(pages.begin(), flat_column_num_rows{chunks.data()});
+    cuda::transform_iterator(pages.begin(), flat_column_num_rows{chunks.data()});
   auto const row_counts_begin = row_counts.begin();
   auto page_keys              = make_page_key_iterator(pages);
   auto const row_counts_end   = cudf::detail::reduce_by_key(page_keys,
@@ -692,7 +692,7 @@ rmm::device_uvector<size_t> compute_decompression_scratch_sizes(
 
   // per-codec page counts and decompression sizes
   rmm::device_uvector<decompression_info> decomp_info(pages.size(), stream);
-  auto decomp_iter = cuda::make_transform_iterator(pages.begin(), get_decomp_info{chunks});
+  auto decomp_iter = cuda::transform_iterator(pages.begin(), get_decomp_info{chunks});
   thrust::inclusive_scan_by_key(rmm::exec_policy_nosync(stream),
                                 page_keys,
                                 page_keys + pages.size(),

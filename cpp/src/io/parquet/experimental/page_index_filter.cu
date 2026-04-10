@@ -248,7 +248,7 @@ struct page_stats_caster : public stats_caster_base {
     auto row_str_chars = rmm::device_buffer(total_bytes, stream, mr);
 
     // Iterator for input (page-level) string chars
-    auto src_iter = thrust::make_transform_iterator(
+    auto src_iter = cuda::transform_iterator(
       cuda::counting_iterator<std::size_t>{0},
       cuda::proclaim_return_type<char*>(
         [chars        = page_str_chars.begin(),
@@ -259,7 +259,7 @@ struct page_stats_caster : public stats_caster_base {
         }));
 
     // Iterator for output (row-level) string chars
-    auto dst_iter = thrust::make_transform_iterator(
+    auto dst_iter = cuda::transform_iterator(
       cuda::counting_iterator<std::size_t>{0},
       cuda::proclaim_return_type<char*>(
         [chars   = reinterpret_cast<char*>(row_str_chars.data()),
@@ -268,7 +268,7 @@ struct page_stats_caster : public stats_caster_base {
         }));
 
     // Iterator for string sizes
-    auto size_iter = thrust::make_transform_iterator(
+    auto size_iter = cuda::transform_iterator(
       cuda::counting_iterator<std::size_t>{0},
       cuda::proclaim_return_type<std::size_t>(
         [sizes = row_str_sizes.begin()] __device__(std::size_t index) { return sizes[index]; }));

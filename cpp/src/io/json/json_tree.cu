@@ -267,7 +267,7 @@ tree_meta_t get_tree_representation(device_span<PdaTokenT const> tokens,
   rmm::device_uvector<TreeDepthT> node_levels(num_nodes, stream, mr);
   {
     rmm::device_uvector<TreeDepthT> token_levels(num_tokens, stream);
-    auto const push_pop_it = thrust::make_transform_iterator(
+    auto const push_pop_it = cuda::transform_iterator(
       tokens.begin(),
       cuda::proclaim_return_type<size_type>(
         [does_push, does_pop] __device__(PdaTokenT const token) -> size_type {
@@ -397,7 +397,7 @@ tree_meta_t get_tree_representation(device_span<PdaTokenT const> tokens,
     rmm::device_uvector<TreeDepthT> token_levels(num_nested, stream);
     rmm::device_uvector<NodeIndexT> token_id(num_nested, stream);
     rmm::device_uvector<NodeIndexT> parent_node_ids(num_nested, stream);
-    auto const push_pop_it = thrust::make_transform_iterator(
+    auto const push_pop_it = cuda::transform_iterator(
       tokens.begin(),
       cuda::proclaim_return_type<cudf::size_type>(
         [] __device__(PdaTokenT const token) -> size_type {
@@ -467,7 +467,7 @@ tree_meta_t get_tree_representation(device_span<PdaTokenT const> tokens,
         // add +1 to include end symbol.
         return i + 1;
       });
-    auto stencil = thrust::make_transform_iterator(token_id.begin(), is_nested_end{tokens.data()});
+    auto stencil = cuda::transform_iterator(token_id.begin(), is_nested_end{tokens.data()});
     thrust::scatter_if(rmm::exec_policy_nosync(stream),
                        token_indices_it,
                        token_indices_it + num_nested,
