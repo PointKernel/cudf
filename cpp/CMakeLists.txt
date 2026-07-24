@@ -1008,6 +1008,8 @@ add_library(
   src/stream_compaction/filter/filter.cu
   src/stream_compaction/stable_distinct.cu
   src/stream_compaction/unique.cu
+  src/stream_compaction/unique_flat.cu
+  src/stream_compaction/unique_nested.cu
   src/strings/attributes.cu
   src/strings/capitalize.cu
   src/strings/case.cu
