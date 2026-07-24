@@ -1,5 +1,5 @@
 /*
- * SPDX-FileCopyrightText: Copyright (c) 2019-2025, NVIDIA CORPORATION.
+ * SPDX-FileCopyrightText: Copyright (c) 2019-2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
 
@@ -13,6 +13,8 @@
 #include <cudf/table/table.hpp>
 #include <cudf/table/table_view.hpp>
 #include <cudf/types.hpp>
+
+#include <limits>
 
 using cudf::nan_policy;
 using cudf::null_equality;
@@ -132,6 +134,45 @@ TEST_F(Unique, NonNullTable)
   auto got_unique = unique(input, keys, cudf::duplicate_keep_option::KEEP_NONE);
 
   CUDF_TEST_EXPECT_TABLES_EQUAL(expected_unique, got_unique->view());
+}
+
+TEST_F(Unique, FloatingPointNaNsCompareEqual)
+{
+  auto constexpr nan = std::numeric_limits<double>::quiet_NaN();
+  floats_col const keys{{1.0, nan, nan, 2.0}};
+  cudf::table_view const input{{keys}};
+
+  floats_col const expected_keys{{1.0, nan, 2.0}};
+  cudf::table_view const expected{{expected_keys}};
+
+  auto const result = unique(input, {0}, KEEP_FIRST);
+  CUDF_TEST_EXPECT_TABLES_EQUAL(expected, result->view());
+}
+
+TEST_F(Unique, DictionaryKeys)
+{
+  cudf::test::dictionary_column_wrapper<std::string> const keys{"a", "a", "b", "b", "a"};
+  cudf::table_view const input{{keys}};
+
+  cudf::test::dictionary_column_wrapper<std::string> const expected_keys{"a", "b", "a"};
+  cudf::table_view const expected{{expected_keys}};
+
+  auto const result = unique(input, {0}, KEEP_FIRST);
+  CUDF_TEST_EXPECT_TABLES_EQUAL(expected, result->view());
+}
+
+TEST_F(Unique, Decimal128Keys)
+{
+  using decimal128_col = cudf::test::fixed_point_column_wrapper<__int128_t>;
+  auto constexpr scale = numeric::scale_type{-2};
+  decimal128_col const keys{{1, 1, 2, 2, 1}, scale};
+  cudf::table_view const input{{keys}};
+
+  decimal128_col const expected_keys{{1, 2, 1}, scale};
+  cudf::table_view const expected{{expected_keys}};
+
+  auto const result = unique(input, {0}, KEEP_FIRST);
+  CUDF_TEST_EXPECT_TABLES_EQUAL(expected, result->view());
 }
 
 TEST_F(Unique, KeepFirstWithNull)

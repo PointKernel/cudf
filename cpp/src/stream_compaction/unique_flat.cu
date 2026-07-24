@@ -6,36 +6,93 @@
 #include "stream_compaction_common.cuh"
 #include "unique_helpers.cuh"
 
-#include <cudf/detail/device_scalar.hpp>
-#include <cudf/detail/row_operator/equality.cuh>
-#include <cudf/utilities/memory_resource.hpp>
-
-#include <rmm/device_buffer.hpp>
-
-#include <cub/device/dispatch/dispatch_select_if.cuh>
+#include <cudf/dictionary/dictionary_column_view.hpp>
+#include <cudf/table/table_device_view.cuh>
 
 namespace cudf::detail {
 
-// Limit copies of the state-heavy row comparator in each CUB agent while retaining stable,
-// single-pass selection.
-struct unique_flat_select_policy {
-  struct Policy900 : cub::ChainedPolicy<900, Policy900, Policy900> {
-    using SelectIfPolicyT = cub::AgentSelectIfPolicy<128,
-                                                     5,
-                                                     cub::BLOCK_LOAD_DIRECT,
-                                                     cub::LOAD_DEFAULT,
-                                                     cub::BLOCK_SCAN_WARP_SCANS,
-                                                     cub::detail::no_delay_constructor_t<0>>;
-  };
+__device__ bool physical_elements_equal(column_device_view const& column,
+                                        size_type lhs,
+                                        size_type rhs)
+{
+  switch (column.type().id()) {
+    case type_id::EMPTY: return true;
+    case type_id::INT8:
+    case type_id::UINT8:
+    case type_id::BOOL8: return column.element<uint8_t>(lhs) == column.element<uint8_t>(rhs);
+    case type_id::INT16:
+    case type_id::UINT16: return column.element<uint16_t>(lhs) == column.element<uint16_t>(rhs);
+    case type_id::INT32:
+    case type_id::UINT32:
+    case type_id::TIMESTAMP_DAYS:
+    case type_id::DURATION_DAYS:
+    case type_id::DECIMAL32: return column.element<uint32_t>(lhs) == column.element<uint32_t>(rhs);
+    case type_id::INT64:
+    case type_id::UINT64:
+    case type_id::TIMESTAMP_SECONDS:
+    case type_id::TIMESTAMP_MILLISECONDS:
+    case type_id::TIMESTAMP_MICROSECONDS:
+    case type_id::TIMESTAMP_NANOSECONDS:
+    case type_id::DURATION_SECONDS:
+    case type_id::DURATION_MILLISECONDS:
+    case type_id::DURATION_MICROSECONDS:
+    case type_id::DURATION_NANOSECONDS:
+    case type_id::DECIMAL64: return column.element<uint64_t>(lhs) == column.element<uint64_t>(rhs);
+    case type_id::FLOAT32: {
+      auto const lhs_value = column.element<float>(lhs);
+      auto const rhs_value = column.element<float>(rhs);
+      return (isnan(lhs_value) && isnan(rhs_value)) || lhs_value == rhs_value;
+    }
+    case type_id::FLOAT64: {
+      auto const lhs_value = column.element<double>(lhs);
+      auto const rhs_value = column.element<double>(rhs);
+      return (isnan(lhs_value) && isnan(rhs_value)) || lhs_value == rhs_value;
+    }
+    case type_id::STRING:
+      return column.element<string_view>(lhs) == column.element<string_view>(rhs);
+    case type_id::DECIMAL128:
+      return column.element<__int128_t>(lhs) == column.element<__int128_t>(rhs);
+    case type_id::DICTIONARY32:
+    case type_id::LIST:
+    case type_id::STRUCT:
+    case type_id::NUM_TYPE_IDS: CUDF_UNREACHABLE("Unexpected nested key type");
+  }
+  CUDF_UNREACHABLE("Unexpected key type");
+}
 
-  using MaxPolicy = Policy900;
-};
+struct flat_row_equality {
+  table_device_view keys;
+  bool check_nulls;
+  null_equality nulls_equal;
 
-template <typename Predicate>
-struct unique_flat_predicate {
-  mutable Predicate predicate;
+  __device__ bool operator()(size_type lhs, size_type rhs) const
+  {
+    for (size_type column_index = 0; column_index < keys.num_columns(); ++column_index) {
+      auto const column = keys.column(column_index);
+      if (check_nulls) {
+        bool const lhs_is_null = column.is_null(lhs);
+        bool const rhs_is_null = column.is_null(rhs);
+        if (lhs_is_null && rhs_is_null) {
+          if (nulls_equal == null_equality::UNEQUAL) { return false; }
+          continue;
+        }
+        if (lhs_is_null != rhs_is_null) { return false; }
+      }
 
-  __device__ bool operator()(size_type row) const { return predicate(row); }
+      auto const elements_equal = [&] {
+        if (column.type().id() != type_id::DICTIONARY32) {
+          return physical_elements_equal(column, lhs, rhs);
+        }
+
+        auto const lhs_index       = column.element<dictionary32>(lhs).value();
+        auto const rhs_index       = column.element<dictionary32>(rhs).value();
+        auto const dictionary_keys = column.child(dictionary_column_view::keys_column_index);
+        return physical_elements_equal(dictionary_keys, lhs_index, rhs_index);
+      }();
+      if (!elements_equal) { return false; }
+    }
+    return true;
+  }
 };
 
 size_type unique_flat(table_view const& keys,
@@ -44,49 +101,12 @@ size_type unique_flat(table_view const& keys,
                       null_equality nulls_equal,
                       rmm::cuda_stream_view stream)
 {
-  auto const comp = cudf::detail::row::equality::self_comparator(keys, stream);
-  auto const row_equal =
-    comp.equal_to<false>(nullate::DYNAMIC{has_nested_nulls(keys)}, nulls_equal);
-  auto const begin        = cuda::counting_iterator<size_type>{0};
-  auto const output_begin = output.begin<size_type>();
-  auto const predicate = unique_flat_predicate{unique_copy_fn<decltype(begin), decltype(row_equal)>{
-    begin, keep, row_equal, keys.num_rows() - 1}};
-  cudf::detail::device_scalar<size_type> output_count(
-    0, stream, cudf::get_current_device_resource_ref());
-
-  using dispatch_t = cub::DispatchSelectIf<decltype(begin),
-                                           cub::NullType*,
-                                           decltype(output_begin),
-                                           size_type*,
-                                           decltype(predicate),
-                                           cub::NullType,
-                                           size_type,
-                                           cub::SelectImpl::Select,
-                                           unique_flat_select_policy>;
-  std::size_t temporary_storage_bytes{};
-  CUDF_CUDA_TRY(dispatch_t::Dispatch(nullptr,
-                                     temporary_storage_bytes,
-                                     begin,
-                                     nullptr,
-                                     output_begin,
-                                     output_count.data(),
-                                     predicate,
-                                     cub::NullType{},
-                                     keys.num_rows(),
-                                     stream.value()));
-  rmm::device_buffer temporary_storage(
-    temporary_storage_bytes, stream, cudf::get_current_device_resource_ref());
-  CUDF_CUDA_TRY(dispatch_t::Dispatch(temporary_storage.data(),
-                                     temporary_storage_bytes,
-                                     begin,
-                                     nullptr,
-                                     output_begin,
-                                     output_count.data(),
-                                     predicate,
-                                     cub::NullType{},
-                                     keys.num_rows(),
-                                     stream.value()));
-  return output_count.value(stream);
+  auto const d_keys    = table_device_view::create(keys, stream);
+  auto const row_equal = flat_row_equality{*d_keys, has_nested_nulls(keys), nulls_equal};
+  auto const begin     = cuda::counting_iterator<size_type>{0};
+  auto const result_end =
+    unique_copy(begin, begin + keys.num_rows(), output.begin<size_type>(), row_equal, keep, stream);
+  return static_cast<size_type>(cuda::std::distance(output.begin<size_type>(), result_end));
 }
 
 }  // namespace cudf::detail
