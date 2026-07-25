@@ -661,8 +661,8 @@ add_library(
   src/groupby/common/utils.cpp
   src/groupby/groupby.cu
   src/groupby/hash/compute_global_memory_aggs.cu
-  src/groupby/hash/compute_global_memory_aggs_dense.cu
   src/groupby/hash/compute_global_memory_aggs_null.cu
+  src/groupby/hash/compute_global_memory_aggs_null_dense.cu
   src/groupby/hash/compute_groupby.cu
   src/groupby/hash/compute_mapping_indices.cu
   src/groupby/hash/compute_mapping_indices_null.cu

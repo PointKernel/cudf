@@ -1,5 +1,5 @@
 /*
- * SPDX-FileCopyrightText: Copyright (c) 2024-2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2024-2026, NVIDIA CORPORATION.
  * SPDX-License-Identifier: Apache-2.0
  */
 
@@ -10,8 +10,6 @@
 #include "single_pass_functors.cuh"
 
 #include <cudf/detail/gather.hpp>
-#include <cudf/detail/utilities/cuda.hpp>
-#include <cudf/detail/utilities/grid_1d.cuh>
 #include <cudf/types.hpp>
 
 #include <rmm/cuda_stream_view.hpp>
@@ -27,18 +25,6 @@
 #include <utility>
 
 namespace cudf::groupby::detail::hash {
-
-template <int block_size, int items_per_thread, typename SetRef>
-CUDF_KERNEL void __launch_bounds__(block_size, 2) compute_single_pass_aggs_sparse_output_kernel(
-  size_type num_rows, compute_single_pass_aggs_sparse_output_fn<SetRef> fn)
-{
-  auto const start = cudf::detail::grid_1d::global_thread_id<block_size>() * items_per_thread;
-#pragma unroll
-  for (auto item = 0; item < items_per_thread; ++item) {
-    auto const idx = start + item;
-    if (idx < num_rows) { fn(idx); }
-  }
-}
 
 /**
  * @brief Compute and return an array mapping each input row to its corresponding key index in
@@ -150,18 +136,15 @@ std::pair<std::unique_ptr<table>, rmm::device_uvector<size_type>> compute_aggs_s
     create_results_table(num_rows, values, h_agg_kinds, is_agg_intermediate, stream, mr);
   auto d_results_ptr = mutable_table_device_view::create(*agg_results, stream);
 
-  constexpr auto block_size       = 256;
-  constexpr auto items_per_thread = 2;
-  cudf::detail::grid_1d const grid{num_rows, block_size, items_per_thread};
-  compute_single_pass_aggs_sparse_output_kernel<block_size, items_per_thread>
-    <<<grid.num_blocks, grid.num_threads_per_block, 0, stream.value()>>>(
-      num_rows,
-      compute_single_pass_aggs_sparse_output_fn{key_set.ref(cuco::op::insert_and_find),
-                                                row_bitmask,
-                                                d_agg_kinds.data(),
-                                                *d_values,
-                                                *d_results_ptr});
-  CUDF_CUDA_TRY(cudaGetLastError());
+  thrust::for_each_n(
+    rmm::exec_policy_nosync(stream, cudf::get_current_device_resource_ref()),
+    cuda::counting_iterator<cudf::size_type>{0},
+    num_rows,
+    compute_single_pass_aggs_sparse_output_fn{key_set.ref(cuco::op::insert_and_find),
+                                              row_bitmask,
+                                              d_agg_kinds.data(),
+                                              *d_values,
+                                              *d_results_ptr});
 
   auto unique_keys   = extract_populated_keys(key_set, num_rows, stream, mr);
   auto dense_results = cudf::detail::gather(agg_results->view(),
@@ -172,16 +155,6 @@ std::pair<std::unique_ptr<table>, rmm::device_uvector<size_type>> compute_aggs_s
                                             mr);
   return {std::move(dense_results), std::move(unique_keys)};
 }
-
-extern template std::pair<std::unique_ptr<table>, rmm::device_uvector<size_type>>
-compute_aggs_dense_output<global_set_t>(bitmask_type const* row_bitmask,
-                                        table_view const& values,
-                                        global_set_t const& key_set,
-                                        host_span<aggregation::Kind const> h_agg_kinds,
-                                        device_span<aggregation::Kind const> d_agg_kinds,
-                                        std::span<int8_t const> is_agg_intermediate,
-                                        rmm::cuda_stream_view stream,
-                                        rmm::device_async_resource_ref mr);
 
 template <typename SetType>
 std::pair<std::unique_ptr<table>, rmm::device_uvector<size_type>> compute_global_memory_aggs(
