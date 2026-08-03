@@ -31,6 +31,7 @@ class GatherTest : public cudf::test::BaseFixture {};
 TYPED_TEST_SUITE(GatherTest, cudf::test::NumericTypes);
 
 struct GatherZeroColumnTest : public cudf::test::BaseFixture {};
+struct GatherFallbackTest : public cudf::test::BaseFixture {};
 
 TEST_F(GatherZeroColumnTest, PreservesRowCount)
 {
@@ -39,6 +40,21 @@ TEST_F(GatherZeroColumnTest, PreservesRowCount)
   auto result = cudf::gather(source, gather_map);
   EXPECT_EQ(result->num_columns(), 0);
   EXPECT_EQ(result->num_rows(), 4);
+}
+
+TEST_F(GatherFallbackTest, WideStrings)
+{
+  constexpr cudf::size_type num_columns = 64;
+  cudf::test::strings_column_wrapper source{"a", "bb", "ccc"};
+  std::vector<cudf::column_view> source_columns(num_columns, source);
+  cudf::test::fixed_width_column_wrapper<cudf::size_type> gather_map{{2, 0}};
+  cudf::test::strings_column_wrapper expected{"ccc", "a"};
+
+  auto result = cudf::gather(cudf::table_view{source_columns}, gather_map);
+
+  for (auto const& result_column : result->view()) {
+    CUDF_TEST_EXPECT_COLUMNS_EQUAL(expected, result_column);
+  }
 }
 
 TYPED_TEST(GatherTest, IdentityTest)
@@ -244,6 +260,45 @@ TYPED_TEST(GatherTest, MultiColNulls)
 
   for (auto i = 0; i < source_table.num_columns(); ++i) {
     CUDF_TEST_EXPECT_COLUMNS_EQUAL(expect_column, result->view().column(i));
+  }
+}
+
+TYPED_TEST(GatherTest, WideFixedWidthTable)
+{
+  constexpr cudf::size_type num_columns = 64;
+  cudf::test::fixed_width_column_wrapper<TypeParam> source{{10, 20, 30, 40, 50, 60}};
+  auto const sliced_source = cudf::slice(source, {1, 5}).front();
+  std::vector<cudf::column_view> source_columns(num_columns, sliced_source);
+  cudf::table_view source_table{source_columns};
+
+  {
+    cudf::test::fixed_width_column_wrapper<int32_t> gather_map{{3, 2, 1, 0}};
+    auto result = cudf::gather(source_table,
+                               gather_map,
+                               cudf::out_of_bounds_policy::DONT_CHECK,
+                               cudf::negative_index_policy::NOT_ALLOWED);
+    cudf::test::fixed_width_column_wrapper<TypeParam> expected{{50, 40, 30, 20}};
+
+    ASSERT_EQ(result->num_columns(), num_columns);
+    for (auto const& result_column : result->view()) {
+      CUDF_TEST_EXPECT_COLUMNS_EQUAL(expected, result_column);
+    }
+  }
+
+  {
+    cudf::test::fixed_width_column_wrapper<int32_t> gather_map{{-1, 0, 2, -5, 4}};
+    std::vector<bool> const validity{true, true, true, false, false};
+    cudf::test::fixed_width_column_wrapper<TypeParam> expected({50, 20, 40, 0, 0},
+                                                               validity.begin());
+    auto result = cudf::gather(source_table,
+                               gather_map,
+                               cudf::out_of_bounds_policy::NULLIFY,
+                               cudf::negative_index_policy::ALLOWED);
+
+    ASSERT_EQ(result->num_columns(), num_columns);
+    for (auto const& result_column : result->view()) {
+      CUDF_TEST_EXPECT_COLUMNS_EQUAL(expected, result_column);
+    }
   }
 }
 
