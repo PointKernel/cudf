@@ -10,7 +10,6 @@
 #include <cudf/utilities/span.hpp>
 
 #include <cuda/iterator>
-#include <thrust/iterator/transform_output_iterator.h>
 
 namespace cudf::detail {
 
@@ -50,7 +49,7 @@ std::size_t get_full_join_size(
 
   auto right_matches =
     cudf::detail::make_zeroed_device_uvector_async<size_type>(right_table.num_rows(), stream, mr);
-  auto const out_build_begin = thrust::make_transform_output_iterator(
+  auto const out_build_begin = cuda::make_transform_output_iterator(
     cuda::make_discard_iterator(),
     mark_matched_output_fn{right_matches.data(), right_table.num_rows()});
 

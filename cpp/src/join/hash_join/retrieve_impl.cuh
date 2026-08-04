@@ -23,7 +23,6 @@
 
 #include <cuda/iterator>
 #include <cuda/std/iterator>
-#include <thrust/iterator/transform_output_iterator.h>
 
 namespace cudf::detail {
 
@@ -79,17 +78,17 @@ probe_join_hash_table(
 
   auto const left_table_num_rows = left_table.num_rows();
   auto const out_probe_begin =
-    thrust::make_transform_output_iterator(left_indices->begin(), output_fn{});
+    cuda::make_transform_output_iterator(left_indices->begin(), output_fn{});
   auto const out_build_begin = [&] {
     if constexpr (Join == join_kind::FULL_JOIN) {
       CUDF_EXPECTS(right_matches.size() == static_cast<std::size_t>(right_table.num_rows()),
                    "full join requires one match flag per right row",
                    std::invalid_argument);
-      return thrust::make_transform_output_iterator(
+      return cuda::make_transform_output_iterator(
         right_indices->begin(),
         mark_matched_output_fn{right_matches.data(), right_table.num_rows()});
     } else {
-      return thrust::make_transform_output_iterator(right_indices->begin(), output_fn{});
+      return cuda::make_transform_output_iterator(right_indices->begin(), output_fn{});
     }
   }();
 
