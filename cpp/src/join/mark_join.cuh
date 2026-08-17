@@ -165,7 +165,16 @@ using storage_ref_type =
   cuco::bucket_storage_ref<mark_key_type, mark_join_bucket_size, cuco::extent<std::size_t>>;
 using right_key_type = cuco::pair<hash_value_type, rhs_index_type>;
 
-using bloom_filter_policy_type    = cuco::bloom_filter_policy<hash_value_type>;
+using bloom_filter_policy_type    = cuco::parametric_filter_policy<cuco::xxhash_64<hash_value_type>,
+                                                                   std::uint32_t,
+                                                                   8,
+                                                                   8,
+                                                                   8,
+                                                                   1,
+                                                                   1,
+                                                                   8,
+                                                                   false,
+                                                                   false>;
 using bloom_filter_allocator_type = rmm::mr::polymorphic_allocator<cuda::std::byte>;
 using bloom_filter_type           = cuco::bloom_filter<hash_value_type,
                                                        cuco::extent<std::size_t>,
