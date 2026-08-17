@@ -10,6 +10,7 @@
 #include <cudf/detail/row_operator/hashing.cuh>
 #include <cudf/detail/row_operator/primitive_row_operators.cuh>
 #include <cudf/join/join.hpp>
+#include <cudf/reduction/bloom_filter.cuh>
 #include <cudf/table/table_view.hpp>
 #include <cudf/types.hpp>
 #include <cudf/utilities/memory_resource.hpp>
@@ -165,16 +166,7 @@ using storage_ref_type =
   cuco::bucket_storage_ref<mark_key_type, mark_join_bucket_size, cuco::extent<std::size_t>>;
 using right_key_type = cuco::pair<hash_value_type, rhs_index_type>;
 
-using bloom_filter_policy_type    = cuco::parametric_filter_policy<cuco::xxhash_64<hash_value_type>,
-                                                                   std::uint32_t,
-                                                                   8,
-                                                                   8,
-                                                                   8,
-                                                                   1,
-                                                                   1,
-                                                                   8,
-                                                                   false,
-                                                                   false>;
+using bloom_filter_policy_type    = cudf::arrow_filter_policy<cuco::xxhash_64<hash_value_type>>;
 using bloom_filter_allocator_type = rmm::mr::polymorphic_allocator<cuda::std::byte>;
 using bloom_filter_type           = cuco::bloom_filter<hash_value_type,
                                                        cuco::extent<std::size_t>,
