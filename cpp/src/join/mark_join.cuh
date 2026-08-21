@@ -168,7 +168,7 @@ using storage_ref_type =
 using right_key_type = cuco::pair<hash_value_type, rhs_index_type>;
 
 using bloom_filter_policy_type =
-  cudf::arrow_filter_policy<hash_value_type, cuco::xxhash_64<hash_value_type>>;
+  cudf::arrow_bloom_filter_policy<hash_value_type, cuco::xxhash_64<hash_value_type>>;
 using bloom_filter_allocator_type = rmm::mr::polymorphic_allocator<cuda::std::byte>;
 using bloom_filter_type           = cuco::bloom_filter<hash_value_type,
                                                        cuco::extent<std::size_t>,
