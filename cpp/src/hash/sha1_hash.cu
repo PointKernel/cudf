@@ -1,5 +1,5 @@
 /*
- * SPDX-FileCopyrightText: Copyright (c) 2024-2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2024-2026, NVIDIA CORPORATION.
  * SPDX-License-Identifier: Apache-2.0
  */
 
@@ -10,9 +10,8 @@
 #include <cudf/table/table_view.hpp>
 #include <cudf/utilities/memory_resource.hpp>
 
+#include <rmm/cuda_stream_view.hpp>
 #include <rmm/exec_policy.hpp>
-
-#include <cuda/stream_ref>
 
 #include <memory>
 
@@ -51,7 +50,7 @@ struct SHA1Hash : HashBase<SHA1Hash> {
 }  // namespace
 
 std::unique_ptr<column> sha1(table_view const& input,
-                             cuda::stream_ref stream,
+                             rmm::cuda_stream_view stream,
                              rmm::device_async_resource_ref mr)
 {
   return sha_hash<SHA1Hash>(input, stream, mr);
@@ -60,7 +59,7 @@ std::unique_ptr<column> sha1(table_view const& input,
 }  // namespace detail
 
 std::unique_ptr<column> sha1(table_view const& input,
-                             cuda::stream_ref stream,
+                             rmm::cuda_stream_view stream,
                              rmm::device_async_resource_ref mr)
 {
   CUDF_FUNC_RANGE();
