@@ -11,7 +11,7 @@
 #include <cudf/table/table_device_view.cuh>
 #include <cudf/types.hpp>
 
-#include <rmm/cuda_stream_view.hpp>
+#include <cuda/stream>
 
 #include <cstdint>
 
@@ -25,7 +25,7 @@ void launch_null_sparse_non_dictionary(nullable_insert_and_find_ref set_ref,
                                        table_device_view const& input_values,
                                        mutable_table_device_view const& output_values,
                                        size_type num_rows,
-                                       rmm::cuda_stream_view stream);
+                                       cuda::stream_ref stream);
 
 void launch_null_sparse_dictionary(nullable_insert_and_find_ref set_ref,
                                    bitmask_type const* row_bitmask,
@@ -33,20 +33,20 @@ void launch_null_sparse_dictionary(nullable_insert_and_find_ref set_ref,
                                    table_device_view const& input_values,
                                    mutable_table_device_view const& output_values,
                                    size_type num_rows,
-                                   rmm::cuda_stream_view stream);
+                                   cuda::stream_ref stream);
 
 void launch_null_dense_non_dictionary(size_type const* target_indices,
                                       aggregation::Kind const* aggs,
                                       table_device_view const& input_values,
                                       mutable_table_device_view const& output_values,
                                       int64_t num_items,
-                                      rmm::cuda_stream_view stream);
+                                      cuda::stream_ref stream);
 
 void launch_null_dense_dictionary(size_type const* target_indices,
                                   aggregation::Kind const* aggs,
                                   table_device_view const& input_values,
                                   mutable_table_device_view const& output_values,
                                   int64_t num_items,
-                                  rmm::cuda_stream_view stream);
+                                  cuda::stream_ref stream);
 
 }  // namespace cudf::groupby::detail::hash

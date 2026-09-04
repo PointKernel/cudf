@@ -12,7 +12,7 @@ void launch_null_dense_non_dictionary(size_type const* target_indices,
                                       table_device_view const& input_values,
                                       mutable_table_device_view const& output_values,
                                       int64_t num_items,
-                                      rmm::cuda_stream_view stream)
+                                      cuda::stream_ref stream)
 {
   launch_null_dense_filtered<false>(
     target_indices, aggs, input_values, output_values, num_items, stream);

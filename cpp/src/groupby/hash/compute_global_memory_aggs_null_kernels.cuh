@@ -23,7 +23,7 @@ CUDF_KERNEL void filtered_single_pass_aggs_kernel(Index num_items, Function fn)
 }
 
 template <typename Index, typename Function>
-void launch_filtered_single_pass_aggs(Index num_items, Function fn, rmm::cuda_stream_view stream)
+void launch_filtered_single_pass_aggs(Index num_items, Function fn, cuda::stream_ref stream)
 {
   if (num_items == 0) { return; }
 
@@ -34,7 +34,7 @@ void launch_filtered_single_pass_aggs(Index num_items, Function fn, rmm::cuda_st
   filtered_single_pass_aggs_kernel<<<config.num_blocks,
                                      config.num_threads_per_block,
                                      0,
-                                     stream.value()>>>(num_items, fn);
+                                     stream.get()>>>(num_items, fn);
   CUDF_CUDA_TRY(cudaGetLastError());
 }
 
@@ -45,7 +45,7 @@ void launch_null_sparse_filtered(nullable_insert_and_find_ref set_ref,
                                  table_device_view const& input_values,
                                  mutable_table_device_view const& output_values,
                                  size_type num_rows,
-                                 rmm::cuda_stream_view stream)
+                                 cuda::stream_ref stream)
 {
   launch_filtered_single_pass_aggs(
     num_rows,
@@ -60,7 +60,7 @@ void launch_null_dense_filtered(size_type const* target_indices,
                                 table_device_view const& input_values,
                                 mutable_table_device_view const& output_values,
                                 int64_t num_items,
-                                rmm::cuda_stream_view stream)
+                                cuda::stream_ref stream)
 {
   launch_filtered_single_pass_aggs(num_items,
                                    compute_filtered_single_pass_aggs_dense_output_fn<IsDictionary>{
