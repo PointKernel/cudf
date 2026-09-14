@@ -8,8 +8,8 @@
 namespace cudf::groupby::detail::hash::single_pass {
 
 template std::unique_ptr<column> compute_reduction<aggregation::ARGMIN>(
-  reduction_context const& ctx);
+  reduction_context const& ctx, cudf::memory_resources mr);
 template std::unique_ptr<column> compute_reduction<aggregation::ARGMAX>(
-  reduction_context const& ctx);
+  reduction_context const& ctx, cudf::memory_resources mr);
 
 }  // namespace cudf::groupby::detail::hash::single_pass

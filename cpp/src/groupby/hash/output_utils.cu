@@ -93,12 +93,8 @@ struct result_column_creator {
       }
       return {rmm::device_buffer{}, 0};
     }();
-    return create_structs_hierarchy(output_size,
-                                    make_children(output_size),
-                                    null_count,
-                                    std::move(null_mask),
-                                    stream,
-                                    cudf::get_current_device_resource_ref());
+    return create_structs_hierarchy(
+      output_size, make_children(output_size), null_count, std::move(null_mask), stream, mr);
   }
 };
 

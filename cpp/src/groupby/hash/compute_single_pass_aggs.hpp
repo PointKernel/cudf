@@ -54,10 +54,13 @@ struct grouped_rows {
  * @param rows Input row index at each grouped position
  * @param offsets `num_groups + 1` offsets delimiting the groups
  * @param stream CUDA stream used for device memory operations and kernel launches
+ * @param mr Device memory resources used to allocate the returned arrays and temporary storage
+ * @return Grouped rows with the arrays required by the chosen reduction strategy
  */
 grouped_rows make_grouped_rows(device_span<size_type const> rows,
                                device_span<size_type const> offsets,
-                               cuda::stream_ref stream);
+                               cuda::stream_ref stream,
+                               cudf::memory_resources mr);
 
 /**
  * @brief Computes one single-pass aggregation per values column as a reduction over the grouped
@@ -70,7 +73,7 @@ grouped_rows make_grouped_rows(device_span<size_type const> rows,
  * @param is_agg_intermediate Whether each aggregation is only an intermediate result
  * @param grouped The input rows grouped by key
  * @param stream CUDA stream used for device memory operations and kernel launches
- * @param mr Device memory resource used to allocate the result columns
+ * @param mr Device memory resources used to allocate the result columns and temporary storage
  * @return One result column per aggregation with one row per group
  */
 std::vector<std::unique_ptr<column>> compute_single_pass_aggs(
@@ -79,6 +82,6 @@ std::vector<std::unique_ptr<column>> compute_single_pass_aggs(
   std::span<int8_t const> is_agg_intermediate,
   grouped_rows const& grouped,
   cuda::stream_ref stream,
-  rmm::device_async_resource_ref mr);
+  cudf::memory_resources mr);
 
 }  // namespace cudf::groupby::detail::hash

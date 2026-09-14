@@ -278,11 +278,10 @@ using cub_mr_prop_t =
   cuda::std::execution::prop<cuda::mr::get_memory_resource_t, rmm::device_async_resource_ref>;
 using cub_env_t = cuda::std::execution::env<cub_stream_prop_t, cub_mr_prop_t>;
 
-inline cub_env_t make_cub_env(cuda::stream_ref stream)
+inline cub_env_t make_cub_env(cuda::stream_ref stream, rmm::device_async_resource_ref mr)
 {
-  return cub_env_t{
-    cub_stream_prop_t{cuda::get_stream_t{}, stream},
-    cub_mr_prop_t{cuda::mr::get_memory_resource_t{}, cudf::get_current_device_resource_ref()}};
+  return cub_env_t{cub_stream_prop_t{cuda::get_stream_t{}, stream},
+                   cub_mr_prop_t{cuda::mr::get_memory_resource_t{}, mr}};
 }
 
 /**
@@ -304,7 +303,8 @@ void reduce_segments(device_span<size_type const> offsets,
                      OutputIterator output,
                      Op op,
                      T init,
-                     cuda::stream_ref stream)
+                     cuda::stream_ref stream,
+                     rmm::device_async_resource_ref mr)
 {
   using offset_type   = cub::detail::common_iterator_value_t<size_type const*, size_type const*>;
   using accum_type    = cuda::std::__accumulator_t<Op, cub::detail::it_value_t<ValueIterator>, T>;
@@ -321,7 +321,7 @@ void reduce_segments(device_span<size_type const> offsets,
     hint = avg_rows <= small_tile ? std::size_t{1} : static_cast<std::size_t>(small_tile) + 1;
   }
   CUDF_CUDA_TRY(cub::detail::dispatch_with_env(
-    make_cub_env(stream),
+    make_cub_env(stream, mr),
     [&](auto, void* d_temp_storage, std::size_t& temp_storage_bytes, cudaStream_t launch_stream) {
       return cub::detail::segmented_reduce::dispatch<accum_type, offset_type>(
         d_temp_storage,
@@ -348,22 +348,24 @@ void reduce_groups(grouped_rows const& grouped,
                    OutputIterator output,
                    Op op,
                    T init,
-                   cuda::stream_ref stream)
+                   cuda::stream_ref stream,
+                   rmm::device_async_resource_ref mr)
 {
   if (grouped.group_chunks.is_empty()) {
-    reduce_segments(grouped.offsets, packed_rows, values, output, op, init, stream);
+    reduce_segments(grouped.offsets, packed_rows, values, output, op, init, stream, mr);
     return;
   }
-  rmm::device_uvector<T> partials(
-    grouped.chunk_offsets.size() - 1, stream, cudf::get_current_device_resource_ref());
-  reduce_segments(grouped.chunk_offsets, packed_rows, values, partials.begin(), op, init, stream);
+  rmm::device_uvector<T> partials(grouped.chunk_offsets.size() - 1, stream, mr);
+  reduce_segments(
+    grouped.chunk_offsets, packed_rows, values, partials.begin(), op, init, stream, mr);
   reduce_segments(grouped.group_chunks,
                   packed_rows > 0 ? packed_rows_per_chunk : 0,
                   partials.begin(),
                   output,
                   op,
                   init,
-                  stream);
+                  stream,
+                  mr);
 }
 
 /// The device representation of a column element. Chrono and fixed-point columns reduce as their
@@ -405,7 +407,7 @@ struct reduce_fn {
     requires(is_reduction_supported<K, T>() &&
              (K == aggregation::SUM || K == aggregation::PRODUCT ||
               K == aggregation::SUM_OF_SQUARES || K == aggregation::MIN || K == aggregation::MAX))
-  std::unique_ptr<column> operator()(reduction_context const& ctx) const
+  std::unique_ptr<column> operator()(reduction_context const& ctx, cudf::memory_resources mr) const
   {
     using Source = rep_type_t<T>;
     using Result = rep_type_t<cudf::detail::target_type_t<T, K>>;
@@ -415,7 +417,7 @@ struct reduce_fn {
                                           ctx.num_groups,
                                           mask_state::UNALLOCATED,
                                           ctx.stream,
-                                          ctx.mr);
+                                          mr.get_output_mr());
     if (ctx.num_groups == 0) { return result; }
 
     using value_fn      = grouped_value_fn<Source, Result, K == aggregation::SUM_OF_SQUARES>;
@@ -430,13 +432,13 @@ struct reduce_fn {
                     output,
                     Op{},
                     identity,
-                    ctx.stream);
+                    ctx.stream,
+                    mr.get_temporary_mr());
       return result;
     }
 
     // The validity of a group (any valid row) rides along with its value in one pass.
-    rmm::device_uvector<bool> group_valid(
-      ctx.num_groups, ctx.stream, cudf::get_current_device_resource_ref());
+    rmm::device_uvector<bool> group_valid(ctx.num_groups, ctx.stream, mr.get_temporary_mr());
     auto const values = cudf::detail::make_counting_transform_iterator(
       0, grouped_valid_value_fn < Source, Result, K == aggregation::SUM_OF_SQUARES > {value});
     auto const outputs = cuda::transform_output_iterator{
@@ -457,9 +459,10 @@ struct reduce_fn {
                   outputs,
                   valid_value_op<Op, Result>{},
                   valid_value<Result>{identity, false},
-                  ctx.stream);
+                  ctx.stream,
+                  mr.get_temporary_mr());
     auto [null_mask, null_count] = cudf::detail::valid_if(
-      group_valid.begin(), group_valid.end(), cuda::std::identity{}, ctx.stream, ctx.mr);
+      group_valid.begin(), group_valid.end(), cuda::std::identity{}, ctx.stream, mr);
     result->set_null_mask(std::move(null_mask), null_count);
     return result;
   }
@@ -467,9 +470,9 @@ struct reduce_fn {
   template <typename T>
     requires(is_reduction_supported<K, T>() &&
              (K == aggregation::ARGMIN || K == aggregation::ARGMAX))
-  std::unique_ptr<column> operator()(reduction_context const& ctx) const
+  std::unique_ptr<column> operator()(reduction_context const& ctx, cudf::memory_resources mr) const
   {
-    auto result = make_size_type_column(ctx);
+    auto result = make_size_type_column(ctx, mr);
     if (ctx.num_groups == 0) { return result; }
 
     // The grouped rows are the input row indices themselves, so reducing them with the
@@ -483,22 +486,26 @@ struct reduce_fn {
                   cudf::detail::element_argminmax_fn<rep_type_t<T>>{
                     ctx.d_values, ctx.values.has_nulls(), is_argmin},
                   is_argmin ? cudf::detail::ARGMIN_SENTINEL : cudf::detail::ARGMAX_SENTINEL,
-                  ctx.stream);
-    set_group_null_mask(*result, ctx);
+                  ctx.stream,
+                  mr.get_temporary_mr());
+    set_group_null_mask(*result, ctx, mr);
     return result;
   }
 
   template <typename T>
     requires(is_reduction_supported<K, T>() && K == aggregation::SUM_OVERFLOW)
-  std::unique_ptr<column> operator()(reduction_context const& ctx) const
+  std::unique_ptr<column> operator()(reduction_context const& ctx, cudf::memory_resources mr) const
   {
     using Source      = rep_type_t<T>;
     using accumulator = cudf::reduction::detail::sum_overflow_result<Source>;
 
     auto sum_child = make_fixed_width_column(
-      ctx.values_type, ctx.num_groups, mask_state::UNALLOCATED, ctx.stream, ctx.mr);
-    auto overflow_child = make_fixed_width_column(
-      data_type{type_id::BOOL8}, ctx.num_groups, mask_state::UNALLOCATED, ctx.stream, ctx.mr);
+      ctx.values_type, ctx.num_groups, mask_state::UNALLOCATED, ctx.stream, mr.get_output_mr());
+    auto overflow_child = make_fixed_width_column(data_type{type_id::BOOL8},
+                                                  ctx.num_groups,
+                                                  mask_state::UNALLOCATED,
+                                                  ctx.stream,
+                                                  mr.get_output_mr());
     if (ctx.num_groups > 0) {
       auto const values = cudf::detail::make_counting_transform_iterator(
         0,
@@ -514,22 +521,27 @@ struct reduce_fn {
                     children,
                     cudf::reduction::detail::overflow_sum_op<Source>{},
                     accumulator{},
-                    ctx.stream);
+                    ctx.stream,
+                    mr.get_temporary_mr());
     }
 
     auto [null_mask, null_count] = ctx.nullable && ctx.num_groups > 0
-                                     ? reduce_group_validity(ctx)
+                                     ? reduce_group_validity(ctx, mr)
                                      : std::pair{rmm::device_buffer{}, size_type{0}};
     std::vector<std::unique_ptr<column>> children;
     children.push_back(std::move(sum_child));
     children.push_back(std::move(overflow_child));
-    return create_structs_hierarchy(
-      ctx.num_groups, std::move(children), null_count, std::move(null_mask), ctx.stream, ctx.mr);
+    return create_structs_hierarchy(ctx.num_groups,
+                                    std::move(children),
+                                    null_count,
+                                    std::move(null_mask),
+                                    ctx.stream,
+                                    mr.get_output_mr());
   }
 
   template <typename T>
     requires(!is_reduction_supported<K, T>())
-  std::unique_ptr<column> operator()(reduction_context const&) const
+  std::unique_ptr<column> operator()(reduction_context const&, cudf::memory_resources) const
   {
     CUDF_FAIL("Unsupported type for hash groupby aggregation");
   }
@@ -542,7 +554,8 @@ struct fused_sums_fn {
     requires(cudf::detail::is_product_supported<T>())
   std::vector<std::unique_ptr<column>> operator()(reduction_context const& ctx,
                                                   host_span<aggregation::Kind const> kinds,
-                                                  std::span<int8_t const> is_intermediate) const
+                                                  std::span<int8_t const> is_intermediate,
+                                                  cudf::memory_resources mr) const
   {
     using Source = rep_type_t<T>;
     using Result = rep_type_t<cudf::detail::target_type_t<T, aggregation::SUM>>;
@@ -557,7 +570,7 @@ struct fused_sums_fn {
                                      ctx.num_groups,
                                      mask_state::UNALLOCATED,
                                      ctx.stream,
-                                     requested ? ctx.mr : cudf::get_current_device_resource_ref());
+                                     requested ? mr.get_output_mr() : mr.get_temporary_mr());
     };
     auto sum            = make_output(aggregation::SUM);
     auto sum_of_squares = make_output(aggregation::SUM_OF_SQUARES);
@@ -579,7 +592,8 @@ struct fused_sums_fn {
                     outputs,
                     fused_sums_plus<Result>{},
                     fused_sums<Result>{Result{0}, Result{0}, 0},
-                    ctx.stream);
+                    ctx.stream,
+                    mr.get_temporary_mr());
     }
 
     std::vector<std::unique_ptr<column>> results;
@@ -596,7 +610,7 @@ struct fused_sums_fn {
           counts + ctx.num_groups,
           [] __device__(size_type count) { return count > 0; },
           ctx.stream,
-          ctx.mr);
+          mr);
         result->set_null_mask(std::move(null_mask), null_count);
       }
       results.push_back(std::move(result));
@@ -608,16 +622,17 @@ struct fused_sums_fn {
     requires(!cudf::detail::is_product_supported<T>())
   std::vector<std::unique_ptr<column>> operator()(reduction_context const&,
                                                   host_span<aggregation::Kind const>,
-                                                  std::span<int8_t const>) const
+                                                  std::span<int8_t const>,
+                                                  cudf::memory_resources) const
   {
     CUDF_FAIL("Unsupported type for fused hash groupby sums");
   }
 };
 
 template <aggregation::Kind K>
-std::unique_ptr<column> compute_reduction(reduction_context const& ctx)
+std::unique_ptr<column> compute_reduction(reduction_context const& ctx, cudf::memory_resources mr)
 {
-  return type_dispatcher(ctx.values_type, reduce_fn<K>{}, ctx);
+  return type_dispatcher(ctx.values_type, reduce_fn<K>{}, ctx, mr);
 }
 
 }  // namespace cudf::groupby::detail::hash::single_pass

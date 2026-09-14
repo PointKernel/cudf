@@ -25,7 +25,7 @@ hash_compound_agg_finalizer::hash_compound_agg_finalizer(column_view const& col,
                                                          cudf::detail::result_cache* cache,
                                                          bitmask_type const* d_row_bitmask,
                                                          cuda::stream_ref stream,
-                                                         rmm::device_async_resource_ref mr)
+                                                         cudf::memory_resources mr)
   : col{col},
     input_type{is_dictionary(col.type()) ? dictionary_column_view(col).keys().type() : col.type()},
     cache{cache},
@@ -114,10 +114,10 @@ void hash_compound_agg_finalizer::operator()<aggregation::MEAN>(aggregation cons
                                    binary_operator::DIV,
                                    cudf::detail::target_type(input_type, aggregation::MEAN),
                                    stream,
-                                   mr);
+                                   mr.get_output_mr());
   // SUM result only has nulls if it is an input aggregation, not intermediate-only aggregation.
   if (sum_result.has_nulls()) {
-    result->set_null_mask(cudf::detail::copy_bitmask(sum_result, stream, mr),
+    result->set_null_mask(cudf::detail::copy_bitmask(sum_result, stream, mr.get_output_mr()),
                           sum_result.null_count());
   } else if (col.has_nulls()) {  // SUM aggregation is only intermediate result, thus it is
                                  // forced to be non-nullable
