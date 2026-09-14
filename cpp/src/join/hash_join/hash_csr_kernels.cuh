@@ -43,8 +43,8 @@ CUDF_KERNEL void hash_csr_probe_count_kernel(size_type num_rows,
     auto const index = static_cast<size_type>(row);
     auto slot        = hash_set.capacity;
     if (valid_rows == nullptr || cudf::bit_is_set(valid_rows, index)) {
-      auto const hash = hasher(index);
-      slot            = hash_set.find(hash_set_key_type{hash, index}, hash, equal);
+      auto const hash_value = hasher(index);
+      slot = hash_set.find(hash_set_key_type{hash_value, index}, hash_value, equal);
     }
 
     auto const found = slot != hash_set.capacity;

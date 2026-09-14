@@ -12,13 +12,11 @@
 #include <cuco/pair.cuh>
 #include <cuda/atomic>
 #include <cuda/std/cstdint>
+#include <cuda/std/limits>
 #include <cuda/std/type_traits>
 #include <cuda/std/utility>
 
 namespace cudf::detail::hash_csr {
-
-/// Slot marker for an excluded row or an unsuccessful insertion.
-inline constexpr cuda::std::uint32_t no_slot = static_cast<cuda::std::uint32_t>(-1);
 
 /// Count index and rank within that count, recorded for each input row.
 using build_position_type = cuco::pair<cuda::std::uint32_t, size_type>;
@@ -31,16 +29,16 @@ using build_position_type = cuco::pair<cuda::std::uint32_t, size_type>;
  * probing. Cached keys retain power-of-two capacities and CAS-first probing of the full set.
  *
  * The caller initializes every entry byte to 0xff and keeps the referenced rows alive. Capacity
- * must be nonzero and less than `no_slot`. Equality compares keys of type Key, and equivalent
- * keys must have equal hashes. Concurrent insertion uses device-scope atomic access to entries.
+ * must be nonzero and less than the maximum `cuda::std::uint32_t` value. Equality compares keys
+ * of type Key, and equivalent keys must have equal hashes. Concurrent insertion uses
+ * device-scope atomic access to entries.
  */
 template <typename Key>
 struct hash_set_ref {
   static_assert(cuda::std::is_same_v<Key, size_type> ||
                 cuda::std::is_same_v<Key, cuco::pair<hash_value_type, size_type>>);
 
-  using key_type   = Key;
-  using value_type = Key;
+  using key_type = Key;
 
   /// Position and stored key captured by insertion, without another load of the set.
   struct insertion_position {
@@ -60,55 +58,59 @@ struct hash_set_ref {
    * Exhausting the probe limit returns `{capacity, empty_key}` and false, leaving earlier
    * insertions intact. The caller must discard that partial build or handle the missing key.
    * The position is a snapshot, not an iterator into storage that other threads may access.
-   * `hash` is the precomputed hash of `key`.
+   * `hash_value` is the precomputed hash of `key`.
    */
   template <typename Equal>
-  __device__ insert_result insert(key_type key, hash_value_type hash, Equal const& equal) const
+  __device__ insert_result insert(key_type key,
+                                  hash_value_type hash_value,
+                                  Equal const& equal) const
   {
     constexpr bool cached = !cuda::std::is_same_v<key_type, size_type>;
-    auto const empty      = [] {
+    auto const empty_key  = [] {
       if constexpr (cached) {
-        return key_type{static_cast<hash_value_type>(-1), size_type{CUDF_SIZE_TYPE_SENTINEL}};
+        return key_type{cuda::std::numeric_limits<hash_value_type>::max(),
+                        size_type{CUDF_SIZE_TYPE_SENTINEL}};
       } else {
         return size_type{CUDF_SIZE_TYPE_SENTINEL};
       }
     }();
-    auto slot        = cached ? static_cast<cuda::std::uint32_t>(hash) & (capacity - 1)
-                              : static_cast<cuda::std::uint32_t>(hash % capacity);
+    auto slot        = cached ? static_cast<cuda::std::uint32_t>(hash_value) & (capacity - 1)
+                              : static_cast<cuda::std::uint32_t>(hash_value % capacity);
     auto const limit = cached ? capacity : max_probes;
     for (cuda::std::uint32_t step = 0; step < limit; ++step) {
       auto entry   = cuda::atomic_ref<key_type, cuda::thread_scope_device>{entries[slot]};
-      auto current = empty;
+      auto current = empty_key;
       if constexpr (!cached) { current = entry.load(cuda::memory_order_relaxed); }
-      if ((cached || current == empty) &&
+      if ((cached || current == empty_key) &&
           entry.compare_exchange_strong(current, key, cuda::memory_order_relaxed)) {
         return {{slot, key}, true};
       }
       if (equal(key, current)) { return {{slot, current}, false}; }
       if constexpr (cached) {
-        slot = (static_cast<cuda::std::uint32_t>(hash) + step + 1) & (capacity - 1);
+        slot = (static_cast<cuda::std::uint32_t>(hash_value) + step + 1) & (capacity - 1);
       } else {
         slot = slot + 1 == capacity ? 0 : slot + 1;
       }
     }
-    return {{capacity, empty}, false};
+    return {{capacity, empty_key}, false};
   }
 
   /**
    * @brief Finds a key in a completed set, returning capacity if absent.
    *
    * Uses ordinary loads and must not run concurrently with insertion or initialization.
-   * `hash` is the precomputed hash of `key`.
+   * `hash_value` is the precomputed hash of `key`.
    */
   template <typename Equal>
-  __device__ cuda::std::uint32_t find(key_type key, hash_value_type hash, Equal equal) const
+  __device__ cuda::std::uint32_t find(key_type key, hash_value_type hash_value, Equal equal) const
   {
     constexpr bool cached = !cuda::std::is_same_v<key_type, size_type>;
-    auto slot = cached ? cuda::std::uint32_t{0} : static_cast<cuda::std::uint32_t>(hash % capacity);
+    auto slot =
+      cached ? cuda::std::uint32_t{0} : static_cast<cuda::std::uint32_t>(hash_value % capacity);
     auto const limit = cached ? capacity : max_probes;
     for (cuda::std::uint32_t step = 0; step < limit; ++step) {
       if constexpr (cached) {
-        slot = (static_cast<cuda::std::uint32_t>(hash) + step) & (capacity - 1);
+        slot = (static_cast<cuda::std::uint32_t>(hash_value) + step) & (capacity - 1);
       }
       auto const current = entries[slot];
       auto const empty   = [&] {

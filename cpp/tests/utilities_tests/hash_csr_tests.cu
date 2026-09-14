@@ -126,7 +126,8 @@ void check_membership(validity mask_kind, bool by_representative = false, size_t
   ASSERT_EQ(ends.back(), included);
   for (size_type row = 0; row < num_rows; ++row) {
     if ((mask[row / 32] & (cudf::bitmask_type{1} << (row % 32))) == 0) {
-      EXPECT_EQ(h_positions[row].first, csr::no_slot);
+      EXPECT_EQ(h_positions[row].first,
+                static_cast<cuda::std::uint32_t>(cudf::detail::CUDF_SIZE_TYPE_SENTINEL));
       EXPECT_EQ(h_positions[row].second, cudf::detail::CUDF_SIZE_TYPE_SENTINEL);
     } else {
       ASSERT_LT(h_positions[row].first, num_counts);
@@ -238,11 +239,11 @@ void check_insertions()
                     results.begin(),
                     [hash_set, equal = key_equal<Key>{d_keys.data()}] __device__(auto row) ->
                     typename set_ref::insert_result {
-                      auto const hash = hash_set.capacity - 1;
+                      auto const hash_value = hash_set.capacity - 1;
                       if constexpr (cuda::std::is_same_v<Key, cached_key>) {
-                        return hash_set.insert(Key{hash, row}, hash, equal);
+                        return hash_set.insert(Key{hash_value, row}, hash_value, equal);
                       } else {
-                        return hash_set.insert(row, hash, equal);
+                        return hash_set.insert(row, hash_value, equal);
                       }
                     });
   auto const h_results     = make_pinned_vector(results, stream);
@@ -289,11 +290,11 @@ void check_insertions()
     cuda::counting_iterator{num_rows + 1},
     found.begin(),
     [hash_set, equal = key_equal<Key>{d_keys.data()}] __device__(auto row) -> cuda::std::uint32_t {
-      auto const hash = hash_set.capacity - 1;
+      auto const hash_value = hash_set.capacity - 1;
       if constexpr (cuda::std::is_same_v<Key, cached_key>) {
-        return hash_set.find(Key{hash, row}, hash, equal);
+        return hash_set.find(Key{hash_value, row}, hash_value, equal);
       } else {
-        return hash_set.find(row, hash, equal);
+        return hash_set.find(row, hash_value, equal);
       }
     });
   auto const h_found = make_pinned_vector(found, stream);
@@ -344,11 +345,11 @@ void check_insertions()
                     results.begin(),
                     [full_set, equal = key_equal<Key>{d_keys.data()}] __device__(auto row) ->
                     typename set_ref::insert_result {
-                      constexpr cudf::hash_value_type hash = 0;
+                      constexpr cudf::hash_value_type hash_value = 0;
                       if constexpr (cuda::std::is_same_v<Key, cached_key>) {
-                        return full_set.insert(Key{hash, row}, hash, equal);
+                        return full_set.insert(Key{hash_value, row}, hash_value, equal);
                       } else {
-                        return full_set.insert(row, hash, equal);
+                        return full_set.insert(row, hash_value, equal);
                       }
                     });
   auto const full_results = make_pinned_vector(results, stream);

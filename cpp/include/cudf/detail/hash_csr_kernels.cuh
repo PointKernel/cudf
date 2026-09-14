@@ -53,18 +53,18 @@ CUDF_KERNEL void build_count_kernel(size_type num_rows,
     auto const active =
       row < num_rows &&
       (valid_rows == nullptr || cudf::bit_is_set(valid_rows, static_cast<size_type>(row)));
-    auto slot = no_slot;
+    auto slot = static_cast<cuda::std::uint32_t>(CUDF_SIZE_TYPE_SENTINEL);
     if (active) {
-      auto const index = static_cast<size_type>(row);
-      auto const hash  = hasher(index);
-      auto const key   = [&] {
+      auto const index      = static_cast<size_type>(row);
+      auto const hash_value = hasher(index);
+      auto const key        = [&] {
         if constexpr (cuda::std::is_same_v<typename Set::key_type, size_type>) {
           return index;
         } else {
-          return typename Set::key_type{hash, index};
+          return typename Set::key_type{hash_value, index};
         }
       }();
-      auto const position = set.insert(key, hash, equal).first;
+      auto const position = set.insert(key, hash_value, equal).first;
       if (position.slot != set.capacity) {
         slot = position.slot;
         if constexpr (warp_count) {
@@ -87,7 +87,7 @@ CUDF_KERNEL void build_count_kernel(size_type num_rows,
       // Keys-only builds need the set, but neither positions nor counts.
       if (positions == nullptr) { continue; }
     }
-    auto const has_slot = slot != no_slot;
+    auto const has_slot = slot != static_cast<cuda::std::uint32_t>(CUDF_SIZE_TYPE_SENTINEL);
     unsigned int active_mask{};
     if constexpr (warp_count) { active_mask = __ballot_sync(0xffff'ffffu, has_slot); }
     if (has_slot) {
@@ -109,7 +109,8 @@ CUDF_KERNEL void build_count_kernel(size_type num_rows,
       }
       positions[row] = {slot, rank};
     } else if (row < num_rows) {
-      positions[row] = {cuda::std::uint32_t{no_slot}, size_type{CUDF_SIZE_TYPE_SENTINEL}};
+      positions[row] = {static_cast<cuda::std::uint32_t>(CUDF_SIZE_TYPE_SENTINEL),
+                        size_type{CUDF_SIZE_TYPE_SENTINEL}};
     }
   }
 }
@@ -160,7 +161,7 @@ CUDF_KERNEL void fill_kernel(size_type num_rows,
   auto const stride = grid_1d::grid_stride();
   for (auto row = grid_1d::global_thread_id(); row < num_rows; row += stride) {
     auto const position = positions[row];
-    if (position.first == no_slot) { continue; }
+    if (position.first == static_cast<cuda::std::uint32_t>(CUDF_SIZE_TYPE_SENTINEL)) { continue; }
     values[starts[position.first] + position.second] = static_cast<size_type>(row);
   }
 }
