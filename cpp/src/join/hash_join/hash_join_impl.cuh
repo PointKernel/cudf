@@ -4,8 +4,7 @@
  */
 #pragma once
 
-#include "hash_csr.cuh"
-
+#include <cudf/detail/hash_csr.cuh>
 #include <cudf/detail/join/hash_join.hpp>
 #include <cudf/types.hpp>
 
@@ -17,6 +16,11 @@
 #include <utility>
 
 namespace cudf::detail {
+
+using hash_table_ref        = hash_csr::table_ref<hash_csr::key_storage::hash_and_row>;
+using hash_table_entry_type = hash_table_ref::entry_type;
+using build_position_type   = hash_csr::build_position_type;
+using csr_ref               = hash_csr::csr_ref;
 
 template <typename Hasher>
 struct hash_join<Hasher>::impl {

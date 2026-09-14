@@ -5,10 +5,11 @@
 
 #include "common.cuh"
 #include "dispatch.cuh"
-#include "hash_csr_kernels.cuh"
 #include "join/join_common_utils.cuh"
 
 #include <cudf/detail/cuco_helpers.hpp>
+#include <cudf/detail/hash_csr_kernels.cuh>
+#include <cudf/detail/iterator.cuh>
 #include <cudf/detail/null_mask.hpp>
 #include <cudf/detail/nvtx/ranges.hpp>
 #include <cudf/detail/row_operator/hashing.cuh>
@@ -50,6 +51,13 @@ bool is_trivial_join(table_view const& left, table_view const& right, join_kind 
 }
 
 namespace {
+// NVCC does not support an extended device lambda inside the join constructor.
+struct csr_begin {
+  csr_ref csr;
+
+  __device__ size_type operator()(size_type slot) const { return csr.begin(slot); }
+};
+
 cuda::std::uint32_t hash_csr_capacity(size_type rows, double load_factor)
 {
   auto const checked   = checked_load_factor(load_factor);
@@ -112,14 +120,16 @@ hash_join<Hasher>::hash_join(cudf::table_view const& right,
                              : nullptr;
   rmm::device_uvector<build_position_type> build_positions(right.num_rows(), stream, temp_mr);
   auto build = [&](auto equality, auto hasher) {
-    launch_hash_csr_build_count_kernel(right.num_rows(),
-                                       valid_rows,
-                                       build_positions.data(),
-                                       _impl->_cumulative_ends.data(),
-                                       _impl->hash_table(),
-                                       equality,
-                                       hasher,
-                                       stream);
+    hash_csr::build_count<hash_csr::count_mode::per_row>(right.num_rows(),
+                                                         valid_rows,
+                                                         build_positions.data(),
+                                                         _impl->_cumulative_ends.data(),
+                                                         false,
+                                                         _impl->hash_table(),
+                                                         equality,
+                                                         hasher,
+                                                         nullptr,
+                                                         stream);
   };
   dispatch_join_comparator(
     right, right, _preprocessed_right, _preprocessed_right, _has_nulls, _nulls_equal, build);
@@ -137,11 +147,9 @@ hash_join<Hasher>::hash_join(cudf::table_view const& right,
                                               _impl->_cumulative_ends.data(),
                                               _impl->_capacity,
                                               stream.get()));
-  launch_hash_csr_build_fill_kernel(right.num_rows(),
-                                    build_positions.data(),
-                                    _impl->_cumulative_ends.data(),
-                                    _impl->_values.data(),
-                                    stream);
+  auto const starts =
+    cudf::detail::make_counting_transform_iterator(size_type{0}, csr_begin{_impl->csr()});
+  hash_csr::fill(right.num_rows(), build_positions.data(), starts, _impl->_values.data(), stream);
 }
 
 template hash_join<hash_join_hasher>::hash_join(

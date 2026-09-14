@@ -5,7 +5,7 @@
 
 #pragma once
 
-#include "hash_csr.cuh"
+#include "hash_join_impl.cuh"
 
 #include <cudf/detail/utilities/cuda.cuh>
 #include <cudf/detail/utilities/cuda.hpp>
@@ -25,51 +25,6 @@ constexpr thread_index_type hash_csr_block_size = 256;
 constexpr thread_index_type hash_csr_warps_per_block =
   hash_csr_block_size / cudf::detail::warp_size;
 constexpr thread_index_type hash_csr_outputs_per_lane = 32;
-
-template <typename Equal, typename Hasher>
-CUDF_KERNEL void hash_csr_build_count_kernel(size_type num_rows,
-                                             bitmask_type const* valid_rows,
-                                             build_position_type* build_positions,
-                                             size_type* slot_counts,
-                                             hash_table_ref map,
-                                             Equal equal,
-                                             Hasher hasher)
-{
-  auto const stride = grid_1d::grid_stride();
-  for (auto row = grid_1d::global_thread_id(); row < num_rows; row += stride) {
-    auto const index = static_cast<size_type>(row);
-    if (valid_rows != nullptr && !cudf::bit_is_set(valid_rows, index)) {
-      build_positions[index] = {cuda::std::uint32_t{-1}, size_type{CUDF_SIZE_TYPE_SENTINEL}};
-      continue;
-    }
-
-    auto const slot = map.insert(hash_table_entry_type{hasher(index), index}, equal);
-    if (slot == map.capacity) {
-      build_positions[index] = {cuda::std::uint32_t{-1}, size_type{CUDF_SIZE_TYPE_SENTINEL}};
-      continue;
-    }
-    auto slot_count_ref = cuda::atomic_ref<size_type, cuda::thread_scope_device>{slot_counts[slot]};
-    auto const rank     = slot_count_ref.fetch_add(size_type{1}, cuda::memory_order_relaxed);
-    build_positions[index] = {slot, rank};
-  }
-}
-
-CUDF_KERNEL void hash_csr_build_fill_kernel(size_type num_rows,
-                                            build_position_type const* build_positions,
-                                            size_type const* cumulative_ends,
-                                            size_type* values)
-{
-  auto const stride = grid_1d::grid_stride();
-  for (auto row = grid_1d::global_thread_id(); row < num_rows; row += stride) {
-    auto const index    = static_cast<size_type>(row);
-    auto const position = build_positions[index];
-    if (position.first == cuda::std::uint32_t{-1}) { continue; }
-    auto const slot      = position.first;
-    auto const rank      = position.second;
-    auto const begin     = slot == 0 ? size_type{0} : cumulative_ends[slot - 1];
-    values[begin + rank] = index;
-  }
-}
 
 template <bool IsOuter, typename Equal, typename Hasher>
 CUDF_KERNEL void hash_csr_probe_count_kernel(size_type num_rows,
@@ -116,36 +71,6 @@ CUDF_KERNEL void hash_csr_probe_count_kernel(size_type num_rows,
       }
     }
   }
-}
-
-template <typename Equal, typename Hasher>
-void launch_hash_csr_build_count_kernel(size_type num_rows,
-                                        bitmask_type const* valid_rows,
-                                        build_position_type* build_positions,
-                                        size_type* slot_counts,
-                                        hash_table_ref map,
-                                        Equal equal,
-                                        Hasher hasher,
-                                        cuda::stream_ref stream)
-{
-  if (num_rows == 0) { return; }
-  auto const config = grid_1d{num_rows, hash_csr_block_size};
-  hash_csr_build_count_kernel<<<config.num_blocks, config.num_threads_per_block, 0, stream.get()>>>(
-    num_rows, valid_rows, build_positions, slot_counts, map, equal, hasher);
-  CUDF_CUDA_TRY(cudaGetLastError());
-}
-
-inline void launch_hash_csr_build_fill_kernel(size_type num_rows,
-                                              build_position_type const* build_positions,
-                                              size_type const* cumulative_ends,
-                                              size_type* values,
-                                              cuda::stream_ref stream)
-{
-  if (num_rows == 0) { return; }
-  auto const config = grid_1d{num_rows, hash_csr_block_size};
-  hash_csr_build_fill_kernel<<<config.num_blocks, config.num_threads_per_block, 0, stream.get()>>>(
-    num_rows, build_positions, cumulative_ends, values);
-  CUDF_CUDA_TRY(cudaGetLastError());
 }
 
 template <bool IsOuter, typename Equal, typename Hasher>
