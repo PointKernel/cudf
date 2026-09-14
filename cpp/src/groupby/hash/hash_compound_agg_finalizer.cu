@@ -17,6 +17,8 @@
 #include <cudf/dictionary/dictionary_column_view.hpp>
 #include <cudf/types.hpp>
 
+#include <rmm/device_buffer.hpp>
+
 #include <cuda/stream>
 
 namespace cudf::groupby::detail::hash {
@@ -99,11 +101,8 @@ void hash_compound_agg_finalizer::operator()<aggregation::MEAN>(aggregation cons
   auto const count_agg         = make_count_aggregation();
   auto const sum_result        = cache->get_result(col, *sum_agg);
   auto const count_result      = cache->get_result(col, *count_agg);
-  auto const sum_without_nulls = [&] {
-    if (sum_result.null_count() == 0) { return sum_result; }
-    return column_view{
-      sum_result.type(), sum_result.size(), sum_result.head(), nullptr, 0, sum_result.offset()};
-  }();
+  auto const sum_without_nulls = column_view{
+    sum_result.type(), sum_result.size(), sum_result.head(), nullptr, 0, sum_result.offset()};
 
   // Perform division without any null masks, and generate the null mask for the result later.
   // This is because the null mask (if exists) is just needed to be copied from the sum result,
@@ -126,8 +125,10 @@ void hash_compound_agg_finalizer::operator()<aggregation::MEAN>(aggregation cons
       count_result.end<size_type>(),
       [] __device__(size_type const count) -> bool { return count > 0; },
       stream,
-      mr);
-    if (null_count > 0) { result->set_null_mask(std::move(null_mask), null_count); }
+      cudf::memory_resources{mr.get_temporary_mr(), mr.get_temporary_mr()});
+    if (null_count > 0) {
+      result->set_null_mask(rmm::device_buffer{null_mask, stream, mr.get_output_mr()}, null_count);
+    }
   }
   cache->add_result(col, agg, std::move(result));
 }

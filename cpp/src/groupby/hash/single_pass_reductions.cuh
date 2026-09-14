@@ -563,9 +563,10 @@ struct fused_sums_fn {
       cuda::std::
         is_same_v<Result, rep_type_t<cudf::detail::target_type_t<T, aggregation::SUM_OF_SQUARES>>>);
 
-    // Every sum is reduced even when it is not requested; those land in temporary columns.
+    // Every sum is reduced, but only explicitly requested results use the output resource.
     auto const make_output = [&](aggregation::Kind kind) {
-      auto const requested = std::find(kinds.begin(), kinds.end(), kind) != kinds.end();
+      auto const it        = std::find(kinds.begin(), kinds.end(), kind);
+      auto const requested = it != kinds.end() && !is_intermediate[it - kinds.begin()];
       return make_fixed_width_column(cudf::detail::target_type(ctx.values_type, kind),
                                      ctx.num_groups,
                                      mask_state::UNALLOCATED,

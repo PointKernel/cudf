@@ -15,12 +15,15 @@
 #include <cudf_test/type_lists.hpp>
 
 #include <cudf/aggregation.hpp>
-#include <cudf/detail/groupby.hpp>
+#include <cudf/copying.hpp>
+#include <cudf/groupby.hpp>
 #include <cudf/sorting.hpp>
 
 #include <cuda/iterator>
 
 #include <cmath>
+#include <initializer_list>
+#include <span>
 #include <tuple>
 #include <vector>
 
@@ -600,16 +603,44 @@ TEST_F(groupby_sampling_test, NullableMaxConsumesFullPackedSegment)
                   cudf::make_max_aggregation<cudf::groupby_aggregation>());
 }
 
-// Distinct output/temporary resources must cover the HashCSR build, reduction strategy arrays,
-// CUB scratch and nullable aggregation outputs without falling back to the current resource.
+template <typename ResultValidator>
+void test_groupby_memory_resources(cudf::table_view const& keys,
+                                   std::span<cudf::groupby::aggregation_request const> requests,
+                                   rmm::device_async_resource_ref upstream,
+                                   ResultValidator&& validate)
+{
+  auto const stream = cudf::test::get_default_stream();
+  auto harness      = cudf::test::memory_resource_test_harness{upstream};
+  {
+    auto result = [&] {
+      // The public API accepts an output resource and uses the current resource for scratch.
+      cudf::test::scoped_current_device_resource temporary_scope{harness.temporary_mr()};
+      cudf::groupby::groupby gb(keys);
+      return gb.aggregate(requests, stream, harness.output_mr());
+    }();
+    auto bytes = result.first->alloc_size();
+    for (auto const& request : result.second) {
+      for (auto const& column : request.results) {
+        bytes += column->alloc_size();
+      }
+    }
+    harness.expect_resource_usage(bytes,
+                                  {cudf::test::output_allocation_expectation::EXACT,
+                                   cudf::test::temporary_allocation_expectation::SOME},
+                                  stream);
+    validate(result);
+  }
+  harness.expect_no_live_allocations(stream);
+}
+
+// Public groupby must use the output resource only for returned allocations and release all
+// allocations made through the current temporary resource before returning.
 struct HashGroupbyMemoryResourcesTest
   : cudf::test::BaseFixtureWithParam<std::tuple<cudf::size_type, cudf::size_type, bool>> {};
 
 TEST_P(HashGroupbyMemoryResourcesTest, ExplicitOutputAndTemporaryResources)
 {
   auto const [num_rows, num_groups, keys_only] = GetParam();
-  auto const stream                            = cudf::test::get_default_stream();
-  auto harness = cudf::test::memory_resource_test_harness{this->mr()};
   std::vector<int32_t> key_data(num_rows);
   std::vector<int32_t> value_data(num_rows);
   std::vector<bool> validity(num_rows);
@@ -656,22 +687,8 @@ TEST_P(HashGroupbyMemoryResourcesTest, ExplicitOutputAndTemporaryResources)
   auto const expect_all_counts =
     cudf::test::fixed_width_column_wrapper<int32_t>(all_counts.begin(), all_counts.end());
 
-  cudf::test::expect_api_uses_memory_resources(
-    harness,
-    [&](cudf::memory_resources mr) {
-      return cudf::groupby::detail::hash::groupby(
-        cudf::table_view{{keys}}, requests, cudf::null_policy::EXCLUDE, stream, mr);
-    },
-    [](auto const& result) {
-      auto bytes = result.first->alloc_size();
-      for (auto const& request : result.second) {
-        for (auto const& column : request.results) {
-          bytes += column->alloc_size();
-        }
-      }
-      return bytes;
-    },
-    [&](auto const& result) {
+  test_groupby_memory_resources(
+    cudf::table_view{{keys}}, requests, this->mr(), [&](auto const& result) {
       std::vector<cudf::column_view> actual{result.first->view().column(0)};
       std::vector<cudf::column_view> expected{expect_keys};
       if (!keys_only) {
@@ -683,10 +700,7 @@ TEST_P(HashGroupbyMemoryResourcesTest, ExplicitOutputAndTemporaryResources)
       }
       auto const sorted = cudf::sort(cudf::table_view{actual});
       CUDF_TEST_EXPECT_TABLES_EQUAL(cudf::table_view{expected}, sorted->view());
-    },
-    {cudf::test::output_allocation_expectation::EXACT,
-     cudf::test::temporary_allocation_expectation::SOME},
-    stream);
+    });
 }
 
 INSTANTIATE_TEST_SUITE_P(
@@ -702,8 +716,6 @@ struct HashGroupbyCompoundMemoryResourcesTest : public cudf::test::BaseFixture {
 
 TEST_F(HashGroupbyCompoundMemoryResourcesTest, NullableMeanVarianceAndStd)
 {
-  auto const stream = cudf::test::get_default_stream();
-  auto harness      = cudf::test::memory_resource_test_harness{this->mr()};
   cudf::test::fixed_width_column_wrapper<int32_t> keys{0, 0, 1, 1, 2, 2};
   cudf::test::fixed_width_column_wrapper<int32_t> values({10, 20, 4, 6, 99, 99},
                                                          {1, 1, 1, 1, 0, 0});
@@ -720,20 +732,8 @@ TEST_F(HashGroupbyCompoundMemoryResourcesTest, NullableMeanVarianceAndStd)
   cudf::test::fixed_width_column_wrapper<double> expect_std({std::sqrt(50.0), std::sqrt(2.0), 0.0},
                                                             {1, 1, 0});
 
-  cudf::test::expect_api_uses_memory_resources(
-    harness,
-    [&](cudf::memory_resources mr) {
-      return cudf::groupby::detail::hash::groupby(
-        cudf::table_view{{keys}}, requests, cudf::null_policy::EXCLUDE, stream, mr);
-    },
-    [](auto const& result) {
-      auto bytes = result.first->alloc_size();
-      for (auto const& column : result.second.front().results) {
-        bytes += column->alloc_size();
-      }
-      return bytes;
-    },
-    [&](auto const& result) {
+  test_groupby_memory_resources(
+    cudf::table_view{{keys}}, requests, this->mr(), [&](auto const& result) {
       std::vector<cudf::column_view> actual{result.first->view().column(0)};
       for (auto const& column : result.second.front().results) {
         actual.push_back(*column);
@@ -741,10 +741,131 @@ TEST_F(HashGroupbyCompoundMemoryResourcesTest, NullableMeanVarianceAndStd)
       auto const sorted = cudf::sort(cudf::table_view{actual});
       CUDF_TEST_EXPECT_TABLES_EQUAL(
         cudf::table_view{{expect_keys, expect_mean, expect_variance, expect_std}}, sorted->view());
-    },
-    // Cached intermediate columns retain their existing allocation resource; they are released
-    // before groupby returns. Local finalization scratch must use the temporary resource.
-    {cudf::test::output_allocation_expectation::AT_LEAST_LIVE,
-     cudf::test::temporary_allocation_expectation::SOME},
-    stream);
+    });
+}
+
+struct HashGroupbyRepeatedMemoryResourcesTest
+  : cudf::test::BaseFixtureWithParam<std::tuple<bool, bool>> {};
+
+TEST_P(HashGroupbyRepeatedMemoryResourcesTest, SharedValuesAndRepeatedResults)
+{
+  auto const [reverse_requests, moments] = GetParam();
+  cudf::test::fixed_width_column_wrapper<int32_t> keys{0, 0, 1, 1, 2, 2};
+  cudf::test::fixed_width_column_wrapper<int32_t> values(
+    {10, 20, 4, 6, 99, 99, 30, 50, 8, 12, 2, 4}, {1, 1, 1, 1, 0, 0, 1, 1, 1, 1, 1, 1});
+  auto const value_views = cudf::slice(values, {0, 6, 6, 12});
+  auto make_compound     = [&]() -> std::unique_ptr<cudf::groupby_aggregation> {
+    if (moments) { return cudf::make_variance_aggregation<cudf::groupby_aggregation>(1); }
+    return cudf::make_mean_aggregation<cudf::groupby_aggregation>();
+  };
+  auto make_dependency = [&]() -> std::unique_ptr<cudf::groupby_aggregation> {
+    if (moments) { return cudf::make_m2_aggregation<cudf::groupby_aggregation>(); }
+    return cudf::make_sum_aggregation<cudf::groupby_aggregation>();
+  };
+
+  // Both requests share a cache key for their dependency; duplicates must still produce two
+  // independently owned output columns. The third request uses a different slice of the same
+  // input allocation and must not share either result with the first two requests.
+  std::vector<cudf::groupby::aggregation_request> requests(3);
+  for (auto i = 0; i < 3; ++i) {
+    requests[i].values = value_views[i == 2 ? 1 : 0];
+    for (auto repeat = 0; repeat < 2; ++repeat) {
+      requests[i].aggregations.push_back(i == 1 ? make_dependency() : make_compound());
+    }
+  }
+  if (reverse_requests) { std::swap(requests[0], requests[1]); }
+
+  cudf::test::fixed_width_column_wrapper<int32_t> expect_keys{0, 1, 2};
+  cudf::test::fixed_width_column_wrapper<double> expect_compound(
+    moments ? std::initializer_list<double>{50, 2, 0} : std::initializer_list<double>{15, 5, 0},
+    std::initializer_list<bool>{true, true, false});
+  cudf::test::fixed_width_column_wrapper<double> expect_m2{50, 2, 0};
+  cudf::test::fixed_width_column_wrapper<int64_t> expect_sum({30, 10, 0}, {1, 1, 0});
+  cudf::test::fixed_width_column_wrapper<double> expect_other(
+    moments ? std::initializer_list<double>{200, 8, 2} : std::initializer_list<double>{40, 10, 3});
+  auto const dependency_view =
+    moments ? cudf::column_view{expect_m2} : cudf::column_view{expect_sum};
+
+  test_groupby_memory_resources(
+    cudf::table_view{{keys}}, requests, this->mr(), [&](auto const& result) {
+      ASSERT_EQ(result.second.size(), 3);
+      for (std::size_t i = 0; i < result.second.size(); ++i) {
+        auto const expected = i == 2                  ? cudf::column_view{expect_other}
+                              : i == reverse_requests ? cudf::column_view{expect_compound}
+                                                      : dependency_view;
+        ASSERT_EQ(result.second[i].results.size(), 2);
+        auto const actual = cudf::table_view{{result.first->view().column(0),
+                                              *result.second[i].results[0],
+                                              *result.second[i].results[1]}};
+        auto const sorted = cudf::sort(actual);
+        CUDF_TEST_EXPECT_TABLES_EQUAL(cudf::table_view{{expect_keys, expected, expected}},
+                                      sorted->view());
+      }
+    });
+}
+
+INSTANTIATE_TEST_SUITE_P(HashCSR,
+                         HashGroupbyRepeatedMemoryResourcesTest,
+                         ::testing::Combine(::testing::Bool(), ::testing::Bool()));
+
+struct HashGroupbyValidGroupsMemoryResourcesTest : cudf::test::BaseFixtureWithParam<bool> {};
+
+TEST_P(HashGroupbyValidGroupsMemoryResourcesTest, NullableInputWithNoInvalidOutputGroups)
+{
+  auto const request_sum = GetParam();
+  cudf::test::fixed_width_column_wrapper<int32_t> keys{0, 0, 0, 1, 1, 1};
+  cudf::test::fixed_width_column_wrapper<int32_t> values({10, 20, 99, 4, 6, 99},
+                                                         {1, 1, 0, 1, 1, 0});
+  std::vector<cudf::groupby::aggregation_request> requests(1);
+  requests.front().values = values;
+  requests.front().aggregations.push_back(cudf::make_mean_aggregation<cudf::groupby_aggregation>());
+  requests.front().aggregations.push_back(
+    cudf::make_variance_aggregation<cudf::groupby_aggregation>(1));
+  requests.front().aggregations.push_back(cudf::make_std_aggregation<cudf::groupby_aggregation>(1));
+  if (request_sum) {
+    requests.front().aggregations.push_back(
+      cudf::make_sum_aggregation<cudf::groupby_aggregation>());
+  }
+
+  cudf::test::fixed_width_column_wrapper<int32_t> expect_keys{0, 1};
+  cudf::test::fixed_width_column_wrapper<double> expect_mean{15, 5};
+  cudf::test::fixed_width_column_wrapper<double> expect_variance{50, 2};
+  cudf::test::fixed_width_column_wrapper<double> expect_std{std::sqrt(50.0), std::sqrt(2.0)};
+  cudf::test::fixed_width_column_wrapper<int64_t> expect_sum({30, 10}, {1, 1});
+  test_groupby_memory_resources(
+    cudf::table_view{{keys}}, requests, this->mr(), [&](auto const& result) {
+      std::vector<cudf::column_view> actual{result.first->view().column(0)};
+      for (auto const& column : result.second.front().results) {
+        actual.push_back(*column);
+      }
+      std::vector<cudf::column_view> expected{
+        expect_keys, expect_mean, expect_variance, expect_std};
+      if (request_sum) { expected.push_back(expect_sum); }
+      auto const sorted = cudf::sort(cudf::table_view{actual});
+      CUDF_TEST_EXPECT_TABLES_EQUAL(cudf::table_view{expected}, sorted->view());
+    });
+}
+
+INSTANTIATE_TEST_SUITE_P(HashCSR, HashGroupbyValidGroupsMemoryResourcesTest, ::testing::Bool());
+
+TEST_F(HashGroupbyCompoundMemoryResourcesTest, StringMinMaxIntermediateIndices)
+{
+  cudf::test::fixed_width_column_wrapper<int32_t> keys{0, 0, 1, 1, 2, 2};
+  cudf::test::strings_column_wrapper values({"z", "a", "q", "r", "", ""}, {1, 1, 1, 1, 0, 0});
+  std::vector<cudf::groupby::aggregation_request> requests(1);
+  requests.front().values = values;
+  requests.front().aggregations.push_back(cudf::make_min_aggregation<cudf::groupby_aggregation>());
+  requests.front().aggregations.push_back(cudf::make_max_aggregation<cudf::groupby_aggregation>());
+  cudf::test::fixed_width_column_wrapper<int32_t> expect_keys{0, 1, 2};
+  cudf::test::strings_column_wrapper expect_min({"a", "q", ""}, {1, 1, 0});
+  cudf::test::strings_column_wrapper expect_max({"z", "r", ""}, {1, 1, 0});
+  test_groupby_memory_resources(
+    cudf::table_view{{keys}}, requests, this->mr(), [&](auto const& result) {
+      auto const actual = cudf::table_view{{result.first->view().column(0),
+                                            *result.second.front().results[0],
+                                            *result.second.front().results[1]}};
+      auto const sorted = cudf::sort(actual);
+      CUDF_TEST_EXPECT_TABLES_EQUAL(cudf::table_view{{expect_keys, expect_min, expect_max}},
+                                    sorted->view());
+    });
 }

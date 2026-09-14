@@ -271,7 +271,10 @@ std::vector<std::unique_ptr<column>> compute_single_pass_aggs(
         mr);
       std::move(fused.begin(), fused.end(), std::back_inserter(results));
     } else {
-      results.push_back(single_pass::compute_aggregation(kind, ctx, mr));
+      auto const resources = is_agg_intermediate[i] ? cudf::memory_resources{mr.get_temporary_mr(),
+                                                                             mr.get_temporary_mr()}
+                                                    : mr;
+      results.push_back(single_pass::compute_aggregation(kind, ctx, resources));
     }
     i = end;
   }

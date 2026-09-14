@@ -41,15 +41,62 @@
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
+#include <functional>
 #include <limits>
 #include <numeric>
 #include <optional>
 #include <stdexcept>
+#include <unordered_set>
 #include <utility>
+#include <vector>
 
 namespace cudf::groupby::detail::hash {
 
 namespace {
+
+// The result cache shares results across requests on the same values column. Normalize the
+// extracted reductions with the same equality so an earlier compound request cannot choose the
+// resource or nullability of a later requested result, or allocate a result that the cache drops.
+auto extract_hash_groupby_aggs(std::span<aggregation_request const> requests,
+                               cuda::stream_ref stream)
+{
+  if (requests.size() <= 1) { return extract_single_pass_aggs(requests, stream); }
+
+  using aggregation_set =
+    std::unordered_set<std::pair<column_view, std::reference_wrapper<aggregation const>>,
+                       cudf::detail::pair_column_aggregation_hash,
+                       cudf::detail::pair_column_aggregation_equal_to>;
+  aggregation_set requested;
+  for (auto const& request : requests) {
+    for (auto const& agg : request.aggregations) {
+      requested.emplace(request.values, *agg);
+    }
+  }
+
+  auto [values, kinds, aggs, is_intermediate, has_compound] =
+    extract_single_pass_aggs(requests, stream);
+  aggregation_set extracted;
+  std::vector<column_view> unique_values;
+  unique_values.reserve(aggs.size());
+  for (std::size_t i = 0; i < aggs.size(); ++i) {
+    auto const key =
+      std::pair<column_view, std::reference_wrapper<aggregation const>>{values.column(i), *aggs[i]};
+    if (!extracted.insert(key).second) { continue; }
+    auto const output       = unique_values.size();
+    kinds[output]           = kinds[i];
+    is_intermediate[output] = !requested.contains(key);
+    if (output != i) { aggs[output] = std::move(aggs[i]); }
+    unique_values.push_back(values.column(i));
+  }
+  kinds.resize(unique_values.size());
+  aggs.resize(unique_values.size());
+  is_intermediate.resize(unique_values.size());
+  return std::tuple{table_view{unique_values},
+                    std::move(kinds),
+                    std::move(aggs),
+                    std::move(is_intermediate),
+                    has_compound};
+}
 
 /// The keys grouped by the HashCSR build.
 struct grouped_keys {
@@ -368,7 +415,7 @@ std::unique_ptr<table> compute_groupby(table_view const& keys,
 
   // Compute all single pass aggs first.
   auto const [values, agg_kinds, aggs, is_agg_intermediate, has_compound_aggs] =
-    extract_single_pass_aggs(requests, stream);
+    extract_hash_groupby_aggs(requests, stream);
 
   auto const grouped =
     make_grouped_rows(groups.grouped_rows, groups.group_offsets, stream, temporary_resources);
@@ -379,6 +426,17 @@ std::unique_ptr<table> compute_groupby(table_view const& keys,
   }
 
   if (has_compound_aggs) {
+    // Requested M2 results must be cached on the output resource before VARIANCE or STD asks
+    // for an intermediate M2, regardless of the order of requests on a shared values column.
+    for (auto const& request : requests) {
+      auto const finalizer =
+        hash_compound_agg_finalizer(request.values, cache, row_bitmask, stream, mr);
+      for (auto const& agg : request.aggregations) {
+        if (agg->kind == aggregation::M2) {
+          cudf::detail::aggregation_dispatcher(agg->kind, finalizer, *agg);
+        }
+      }
+    }
     for (auto const& request : requests) {
       auto const& agg_v = request.aggregations;
       auto const& col   = request.values;
@@ -387,6 +445,14 @@ std::unique_ptr<table> compute_groupby(table_view const& keys,
       // addition/multiplication (e.g. for variance/stddev); they do not aggregate further.
       auto const finalizer = hash_compound_agg_finalizer(col, cache, row_bitmask, stream, mr);
       for (auto&& agg : agg_v) {
+        if (agg->kind == aggregation::VARIANCE || agg->kind == aggregation::STD) {
+          // Explicit M2 outputs were finalized above. Any missing M2 is only an intermediate
+          // for this ordinary groupby; the shared finalizer also serves streaming groupby.
+          auto const m2_agg = make_m2_aggregation();
+          auto const m2_finalizer =
+            hash_compound_agg_finalizer(col, cache, row_bitmask, stream, temporary_resources);
+          cudf::detail::aggregation_dispatcher(m2_agg->kind, m2_finalizer, *m2_agg);
+        }
         cudf::detail::aggregation_dispatcher(agg->kind, finalizer, *agg);
       }
     }
