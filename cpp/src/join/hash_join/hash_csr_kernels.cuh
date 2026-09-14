@@ -33,7 +33,7 @@ CUDF_KERNEL void hash_csr_probe_count_kernel(size_type num_rows,
                                              size_type* match_counts,
                                              cuda::std::uint32_t* matched_slots,
                                              cuda::std::uint64_t* matched_build_rows,
-                                             hash_table_ref map,
+                                             hash_set_ref hash_set,
                                              csr_ref csr,
                                              Equal equal,
                                              Hasher hasher)
@@ -41,12 +41,13 @@ CUDF_KERNEL void hash_csr_probe_count_kernel(size_type num_rows,
   auto const stride = grid_1d::grid_stride();
   for (auto row = grid_1d::global_thread_id(); row < num_rows; row += stride) {
     auto const index = static_cast<size_type>(row);
-    auto slot        = map.capacity;
+    auto slot        = hash_set.capacity;
     if (valid_rows == nullptr || cudf::bit_is_set(valid_rows, index)) {
-      slot = map.find(hash_table_entry_type{hasher(index), index}, equal);
+      auto const hash = hasher(index);
+      slot            = hash_set.find(hash_set_key_type{hash, index}, hash, equal);
     }
 
-    auto const found = slot != map.capacity;
+    auto const found = slot != hash_set.capacity;
     auto const count = found ? csr.size(static_cast<size_type>(slot)) : size_type{0};
     if (probe_slots != nullptr) {
       probe_slots[index] = found ? static_cast<size_type>(slot) : CUDF_SIZE_TYPE_SENTINEL;
@@ -80,7 +81,7 @@ void launch_hash_csr_probe_count_kernel(size_type num_rows,
                                         size_type* match_counts,
                                         cuda::std::uint32_t* matched_slots,
                                         cuda::std::uint64_t* matched_build_rows,
-                                        hash_table_ref map,
+                                        hash_set_ref hash_set,
                                         csr_ref csr,
                                         Equal equal,
                                         Hasher hasher,
@@ -95,7 +96,7 @@ void launch_hash_csr_probe_count_kernel(size_type num_rows,
                                                                            match_counts,
                                                                            matched_slots,
                                                                            matched_build_rows,
-                                                                           map,
+                                                                           hash_set,
                                                                            csr,
                                                                            equal,
                                                                            hasher);

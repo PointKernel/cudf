@@ -13,6 +13,7 @@
 #include <cuda/atomic>
 #include <cuda/std/cstdint>
 #include <cuda/std/type_traits>
+#include <cuda/std/utility>
 
 namespace cudf::detail::hash_csr {
 
@@ -23,61 +24,51 @@ inline constexpr cuda::std::uint32_t no_slot = static_cast<cuda::std::uint32_t>(
 using build_position_type = cuco::pair<cuda::std::uint32_t, size_type>;
 
 /**
- * @brief Storage and probing choices for a row-key table.
+ * @brief Non-owning, linearly probed set of unique row keys.
  *
- * Cached hashes use power-of-two capacities and CAS-first insertion. Compact row entries use
- * arbitrary capacities and read before CAS, avoiding writes when repeated keys are found.
- */
-enum class key_storage { hash_and_row, row };
-
-/// Result of inserting a row key or finding its existing representative.
-struct insertion_result {
-  cuda::std::uint32_t slot;  ///< Table capacity when the probe limit is exhausted
-  size_type representative;  ///< Stored input row, or CUDF_SIZE_TYPE_SENTINEL on failure
-  bool inserted;             ///< Whether this insertion claimed an empty slot
-};
-
-/**
- * @brief Non-owning, linearly probed table mapping equal row keys to a representative row.
+ * Key is either `size_type` (a row index) or `cuco::pair<hash_value_type, size_type>` (a cached
+ * hash and row index). Row indices use arbitrary capacities and bounded, load-before-CAS
+ * probing. Cached keys retain power-of-two capacities and CAS-first probing of the full set.
  *
- * The caller initializes every byte of the entries to 0xff and keeps the referenced row keys
- * alive. Capacity must be nonzero, less than `no_slot`, and a power of two for cached hashes.
- * Compact tables probe at most `max_probes` slots; cached tables probe their entire capacity.
- * Equality compares `{hash, row}` entries for cached storage and row indices for compact storage.
- * Concurrent insertions require a device-scope atomic load or CAS for every accessed entry.
+ * The caller initializes every entry byte to 0xff and keeps the referenced rows alive. Capacity
+ * must be nonzero and less than `no_slot`. Equality compares keys of type Key, and equivalent
+ * keys must have equal hashes. Concurrent insertion uses device-scope atomic access to entries.
  */
-template <key_storage Storage>
-struct table_ref {
-  using entry_type = cuda::std::conditional_t<Storage == key_storage::hash_and_row,
-                                              cuco::pair<hash_value_type, size_type>,
-                                              size_type>;
+template <typename Key>
+struct hash_set_ref {
+  static_assert(cuda::std::is_same_v<Key, size_type> ||
+                cuda::std::is_same_v<Key, cuco::pair<hash_value_type, size_type>>);
 
-  entry_type* entries;
+  using key_type   = Key;
+  using value_type = Key;
+
+  /// Position and stored key captured by insertion, without another load of the set.
+  struct insertion_position {
+    cuda::std::uint32_t slot;  ///< Capacity when the probe limit is exhausted
+    key_type key;              ///< Atomic key snapshot, or the empty key on failure
+  };
+  using insert_result = cuda::std::pair<insertion_position, bool>;
+
+  key_type* entries;
   cuda::std::uint32_t capacity;
   cuda::std::uint32_t max_probes{};  ///< Used only by compact row storage
 
   /**
-   * @brief Inserts a row key or returns the slot and representative of an equal key.
+   * @brief Inserts a key if absent and returns its position and whether it was inserted.
    *
-   * An unsuccessful bounded insertion leaves any earlier successful insertions intact. The
-   * caller must discard that partial build or otherwise handle the missing row.
+   * For an existing equivalent key, the position contains that stored key and the flag is false.
+   * Exhausting the probe limit returns `{capacity, empty_key}` and false, leaving earlier
+   * insertions intact. The caller must discard that partial build or handle the missing key.
+   * The position is a snapshot, not an iterator into storage that other threads may access.
+   * `hash` is the precomputed hash of `key`.
    */
   template <typename Equal>
-  __device__ insertion_result insert_or_find(size_type row,
-                                             hash_value_type hash,
-                                             Equal const& equal) const
+  __device__ insert_result insert(key_type key, hash_value_type hash, Equal const& equal) const
   {
-    constexpr bool cached = Storage == key_storage::hash_and_row;
-    auto const key        = [&] {
+    constexpr bool cached = !cuda::std::is_same_v<key_type, size_type>;
+    auto const empty      = [] {
       if constexpr (cached) {
-        return entry_type{hash, row};
-      } else {
-        return row;
-      }
-    }();
-    auto const empty = [] {
-      if constexpr (cached) {
-        return entry_type{static_cast<hash_value_type>(-1), size_type{CUDF_SIZE_TYPE_SENTINEL}};
+        return key_type{static_cast<hash_value_type>(-1), size_type{CUDF_SIZE_TYPE_SENTINEL}};
       } else {
         return size_type{CUDF_SIZE_TYPE_SENTINEL};
       }
@@ -86,43 +77,50 @@ struct table_ref {
                               : static_cast<cuda::std::uint32_t>(hash % capacity);
     auto const limit = cached ? capacity : max_probes;
     for (cuda::std::uint32_t step = 0; step < limit; ++step) {
-      auto entry   = cuda::atomic_ref<entry_type, cuda::thread_scope_device>{entries[slot]};
+      auto entry   = cuda::atomic_ref<key_type, cuda::thread_scope_device>{entries[slot]};
       auto current = empty;
       if constexpr (!cached) { current = entry.load(cuda::memory_order_relaxed); }
       if ((cached || current == empty) &&
           entry.compare_exchange_strong(current, key, cuda::memory_order_relaxed)) {
-        return {slot, row, true};
+        return {{slot, key}, true};
       }
-      if (equal(key, current)) {
-        if constexpr (cached) {
-          return {slot, current.second, false};
-        } else {
-          return {slot, current, false};
-        }
-      }
+      if (equal(key, current)) { return {{slot, current}, false}; }
       if constexpr (cached) {
         slot = (static_cast<cuda::std::uint32_t>(hash) + step + 1) & (capacity - 1);
       } else {
         slot = slot + 1 == capacity ? 0 : slot + 1;
       }
     }
-    return {capacity, CUDF_SIZE_TYPE_SENTINEL, false};
+    return {{capacity, empty}, false};
   }
 
   /**
-   * @brief Finds a key in a completed table, returning capacity if absent.
+   * @brief Finds a key in a completed set, returning capacity if absent.
    *
    * Uses ordinary loads and must not run concurrently with insertion or initialization.
+   * `hash` is the precomputed hash of `key`.
    */
   template <typename Equal>
-  __device__ cuda::std::uint32_t find(entry_type key, Equal equal) const
+  __device__ cuda::std::uint32_t find(key_type key, hash_value_type hash, Equal equal) const
   {
-    static_assert(Storage == key_storage::hash_and_row);
-    for (cuda::std::uint32_t step = 0; step < capacity; ++step) {
-      auto const slot    = (static_cast<cuda::std::uint32_t>(key.first) + step) & (capacity - 1);
+    constexpr bool cached = !cuda::std::is_same_v<key_type, size_type>;
+    auto slot = cached ? cuda::std::uint32_t{0} : static_cast<cuda::std::uint32_t>(hash % capacity);
+    auto const limit = cached ? capacity : max_probes;
+    for (cuda::std::uint32_t step = 0; step < limit; ++step) {
+      if constexpr (cached) {
+        slot = (static_cast<cuda::std::uint32_t>(hash) + step) & (capacity - 1);
+      }
       auto const current = entries[slot];
-      if (current.second == CUDF_SIZE_TYPE_SENTINEL) { return capacity; }
+      auto const empty   = [&] {
+        if constexpr (cached) {
+          return current.second == CUDF_SIZE_TYPE_SENTINEL;
+        } else {
+          return current == CUDF_SIZE_TYPE_SENTINEL;
+        }
+      }();
+      if (empty) { return capacity; }
       if (equal(key, current)) { return slot; }
+      if constexpr (!cached) { slot = slot + 1 == capacity ? 0 : slot + 1; }
     }
     return capacity;
   }

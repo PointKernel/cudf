@@ -21,13 +21,13 @@ inline constexpr thread_index_type block_size = 256;
 /// Allocate ranks individually, or combine increments for equal count indices within a warp.
 enum class count_mode { per_row, per_warp };
 
-template <count_mode Mode, typename Table, typename Equal, typename Hasher>
+template <count_mode Mode, typename Set, typename Equal, typename Hasher>
 CUDF_KERNEL void build_count_kernel(size_type num_rows,
                                     bitmask_type const* valid_rows,
                                     build_position_type* positions,
                                     size_type* slot_counts,
                                     bool count_by_representative,
-                                    Table table,
+                                    Set set,
                                     Equal equal,
                                     Hasher hasher,
                                     int* overflow)
@@ -55,13 +55,25 @@ CUDF_KERNEL void build_count_kernel(size_type num_rows,
       (valid_rows == nullptr || cudf::bit_is_set(valid_rows, static_cast<size_type>(row)));
     auto slot = no_slot;
     if (active) {
-      auto const index  = static_cast<size_type>(row);
-      auto const result = table.insert_or_find(index, hasher(index), equal);
-      if (result.slot != table.capacity) {
-        slot = result.slot;
+      auto const index = static_cast<size_type>(row);
+      auto const hash  = hasher(index);
+      auto const key   = [&] {
+        if constexpr (cuda::std::is_same_v<typename Set::key_type, size_type>) {
+          return index;
+        } else {
+          return typename Set::key_type{hash, index};
+        }
+      }();
+      auto const position = set.insert(key, hash, equal).first;
+      if (position.slot != set.capacity) {
+        slot = position.slot;
         if constexpr (warp_count) {
           if (count_by_representative) {
-            slot = static_cast<cuda::std::uint32_t>(result.representative);
+            if constexpr (cuda::std::is_same_v<typename Set::key_type, size_type>) {
+              slot = static_cast<cuda::std::uint32_t>(position.key);
+            } else {
+              slot = static_cast<cuda::std::uint32_t>(position.key.second);
+            }
           }
         }
       } else if constexpr (warp_count) {
@@ -72,7 +84,7 @@ CUDF_KERNEL void build_count_kernel(size_type num_rows,
       }
     }
     if constexpr (warp_count) {
-      // Keys-only builds need the table, but neither positions nor counts.
+      // Keys-only builds need the set, but neither positions nor counts.
       if (positions == nullptr) { continue; }
     }
     auto const has_slot = slot != no_slot;
@@ -105,20 +117,20 @@ CUDF_KERNEL void build_count_kernel(size_type num_rows,
 /**
  * @brief Inserts valid input rows and records each row's count index and rank within that count.
  *
- * Counts must initially be zero. Positions has `num_rows` entries and counts covers the table
+ * Counts must initially be zero. Positions has `num_rows` entries and counts covers the set
  * capacity, or `num_rows` when counting by representative. A null validity mask includes all rows.
  * Per-row mode requires positions/counts and indexes counts by slot. Per-warp mode also supports
  * keys-only builds (null positions/counts), representative indexing, and bounded-build cancellation
  * through an optional, initially zero overflow flag. On overflow the caller must discard the
  * incomplete positions/counts. Neither mode guarantees input order within a key.
  */
-template <count_mode Mode, typename Table, typename Equal, typename Hasher>
+template <count_mode Mode, typename Set, typename Equal, typename Hasher>
 void build_count(size_type num_rows,
                  bitmask_type const* valid_rows,
                  build_position_type* positions,
                  size_type* slot_counts,
                  bool count_by_representative,
-                 Table table,
+                 Set set,
                  Equal equal,
                  Hasher hasher,
                  int* overflow,
@@ -132,7 +144,7 @@ void build_count(size_type num_rows,
                                                                            positions,
                                                                            slot_counts,
                                                                            count_by_representative,
-                                                                           table,
+                                                                           set,
                                                                            equal,
                                                                            hasher,
                                                                            overflow);

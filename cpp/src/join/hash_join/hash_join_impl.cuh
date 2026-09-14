@@ -17,10 +17,10 @@
 
 namespace cudf::detail {
 
-using hash_table_ref        = hash_csr::table_ref<hash_csr::key_storage::hash_and_row>;
-using hash_table_entry_type = hash_table_ref::entry_type;
-using build_position_type   = hash_csr::build_position_type;
-using csr_ref               = hash_csr::csr_ref;
+using hash_set_key_type   = cuco::pair<hash_value_type, size_type>;
+using hash_set_ref        = hash_csr::hash_set_ref<hash_set_key_type>;
+using build_position_type = hash_csr::build_position_type;
+using csr_ref             = hash_csr::csr_ref;
 
 template <typename Hasher>
 struct hash_join<Hasher>::impl {
@@ -36,15 +36,15 @@ struct hash_join<Hasher>::impl {
   {
   }
 
-  hash_table_ref hash_table() const
+  hash_set_ref hash_set() const
   {
-    return {const_cast<hash_table_entry_type*>(_entries.data()), _capacity};
+    return {const_cast<hash_set_key_type*>(_entries.data()), _capacity};
   }
 
   csr_ref csr() const { return {_cumulative_ends.data(), _values.data()}; }
 
   cuda::mr::any_resource<cuda::mr::device_accessible> _mr;
-  rmm::device_uvector<hash_table_entry_type> _entries;
+  rmm::device_uvector<hash_set_key_type> _entries;
   rmm::device_uvector<size_type> _cumulative_ends;
   rmm::device_uvector<size_type> _values;
   cuda::std::uint32_t _capacity;
