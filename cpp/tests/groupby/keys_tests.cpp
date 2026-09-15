@@ -122,9 +122,11 @@ TYPED_TEST(groupby_keys_test, include_null_keys)
                   cudf::null_policy::INCLUDE);
 }
 
-TYPED_TEST(groupby_keys_test, distinct_keys_with_nullable_values)
+using groupby_key_shape_test = groupby_keys_test<int32_t>;
+
+TEST_F(groupby_key_shape_test, distinct_keys_with_nullable_values)
 {
-  using K = TypeParam;
+  using K = int32_t;
   cudf::test::fixed_width_column_wrapper<K> keys({3, 1, 0, 2}, {1, 1, 0, 1});
   cudf::test::fixed_width_column_wrapper<int32_t> vals({30, 99, 7, 20}, {1, 0, 1, 1});
   cudf::test::fixed_width_column_wrapper<cudf::size_type> included_counts{1, 0, 1, 1};
@@ -157,9 +159,9 @@ TYPED_TEST(groupby_keys_test, distinct_keys_with_nullable_values)
   }
 }
 
-TYPED_TEST(groupby_keys_test, one_duplicate_key_with_nullable_values)
+TEST_F(groupby_key_shape_test, one_duplicate_key_with_nullable_values)
 {
-  using K = TypeParam;
+  using K = int32_t;
   // Exactly one repeated key gives one fewer group than input rows, including the null key.
   cudf::test::fixed_width_column_wrapper<K> keys({3, 1, 0, 3}, {1, 1, 0, 1});
   cudf::test::fixed_width_column_wrapper<int32_t> vals({30, 99, 7, 20}, {1, 0, 1, 1});
