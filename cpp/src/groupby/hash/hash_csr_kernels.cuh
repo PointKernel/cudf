@@ -115,7 +115,7 @@ CUDF_KERNEL void hash_csr_build_kernel(size_type num_rows,
                                        hash_set_ref set,
                                        Equal equal,
                                        Hasher hasher,
-                                       int* overflow)
+                                       cuda::std::int32_t* overflow)
 {
   auto const lane   = static_cast<cuda::std::uint32_t>(threadIdx.x % cudf::detail::warp_size);
   auto const stride = cudf::detail::grid_1d::grid_stride();
@@ -123,8 +123,9 @@ CUDF_KERNEL void hash_csr_build_kernel(size_type num_rows,
   // finishes its bounded probes; the host still discards the partial build and retries.
   if (overflow != nullptr) {
     auto const stop =
-      threadIdx.x == 0 && cuda::atomic_ref<int, cuda::thread_scope_device>{*overflow}.load(
-                            cuda::memory_order_relaxed) != 0;
+      threadIdx.x == 0 &&
+      cuda::atomic_ref<cuda::std::int32_t, cuda::thread_scope_device>{*overflow}.load(
+        cuda::memory_order_relaxed) != 0;
     if (__syncthreads_or(stop)) { return; }
   }
   // Every lane of a warp runs the same number of iterations so the warp-wide match and shuffle
@@ -141,7 +142,7 @@ CUDF_KERNEL void hash_csr_build_kernel(size_type num_rows,
       size_type representative{};
       slot = set.insert(index, hasher(index), equal, representative).first;
       if (slot == set.capacity) {
-        cuda::atomic_ref<int, cuda::thread_scope_device>{*overflow}.store(
+        cuda::atomic_ref<cuda::std::int32_t, cuda::thread_scope_device>{*overflow}.store(
           1, cuda::memory_order_relaxed);
         slot = hash_csr_no_slot;
       } else if (count_by_representative) {
@@ -238,7 +239,7 @@ void launch_hash_csr_build_kernel(size_type num_rows,
                                   hash_set_ref set,
                                   Equal equal,
                                   Hasher hasher,
-                                  int* overflow,
+                                  cuda::std::int32_t* overflow,
                                   cuda::stream_ref stream)
 {
   if (num_rows == 0) { return; }

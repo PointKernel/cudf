@@ -224,7 +224,7 @@ grouped_keys group_keys(size_type num_rows,
   rmm::device_uvector<build_position_type> positions(
     need_grouped_rows ? num_rows : 0, stream, temp_mr);
   // Set by the build when the estimated table turns out to be too small.
-  std::optional<cudf::detail::device_scalar<int>> overflow;
+  std::optional<cudf::detail::device_scalar<cuda::std::int32_t>> overflow;
   if (capacity < full_capacity) { overflow.emplace(0, stream, temp_mr); }
   // The occupied slots, in slot order, are the groups: without aggregations the slots hold the
   // one row wanted for each group, otherwise the slot indices lead to the counts and rows.
