@@ -117,7 +117,10 @@ streaming_groupby::impl::impl(host_span<size_type const> key_indices,
                               size_type max_distinct_keys,
                               null_policy null_handling,
                               cuda::mr::any_resource<cuda::mr::device_accessible> mr)
-  : _max_distinct_keys{max_distinct_keys}, _null_handling{null_handling}, _mr{std::move(mr)}
+  : _max_distinct_keys{max_distinct_keys},
+    _null_handling{null_handling},
+    _mr{std::move(mr)},
+    _d_agg_results{nullptr, +[](mutable_table_device_view*) {}}
 {
   CUDF_EXPECTS(max_distinct_keys > 0, "max_distinct_keys must be positive.", std::invalid_argument);
   if (!key_indices.empty()) { _key_indices.assign(key_indices.begin(), key_indices.end()); }
@@ -193,7 +196,11 @@ void streaming_groupby::impl::initialize(table_view const& data, cuda::stream_re
   // Cache the mutable_table_device_view once; the underlying table is fixed-size and
   // never reallocated, so the device-side descriptor stays valid for the whole
   // lifetime of this impl.
-  _d_agg_results = mutable_table_device_view::create(*_agg_results, stream);
+  {
+    auto raii = mutable_table_device_view::create(*_agg_results, stream);
+    _d_agg_results =
+      decltype(_d_agg_results){raii.release(), +[](mutable_table_device_view* t) { t->destroy(); }};
+  }
 
   _d_agg_kinds = std::make_unique<rmm::device_uvector<aggregation::Kind>>(
     cudf::detail::make_device_uvector_async(_agg_kinds, stream, mr));

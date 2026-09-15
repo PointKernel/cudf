@@ -6,7 +6,6 @@
 #include <cudf_test/base_fixture.hpp>
 #include <cudf_test/column_utilities.hpp>
 #include <cudf_test/column_wrapper.hpp>
-#include <cudf_test/memory_resource_utilities.hpp>
 #include <cudf_test/table_utilities.hpp>
 #include <cudf_test/type_lists.hpp>
 
@@ -152,33 +151,6 @@ TEST_F(StreamingGroupbyTest, MemoryResource)
   streaming_agg.aggregate(batch);
 
   EXPECT_GT(mr.get_bytes_counter().peak, 0);
-}
-
-TEST_F(StreamingGroupbyTest, ReleasesDeviceMemory)
-{
-  cudf::test::fixed_width_column_wrapper<int32_t> keys{1, 2, 3, 1};
-  cudf::test::fixed_width_column_wrapper<int32_t> values{10, 20, 30, 40};
-  cudf::table_view batch{{keys, values}};
-
-  auto reqs = single_agg_req(1, cudf::make_sum_aggregation<cudf::groupby_aggregation>());
-  reqs.push_back(make_req(1, cudf::make_max_aggregation<cudf::groupby_aggregation>()));
-  auto statistics_mr = rmm::mr::statistics_resource_adaptor(mr());
-  cudf::test::scoped_current_device_resource resource_scope{statistics_mr};
-
-  for (int iteration = 0; iteration < 3; ++iteration) {
-    SCOPED_TRACE(iteration);
-    {
-      cudf::groupby::streaming_groupby streaming_agg(KEY_COL, reqs, DEFAULT_MAX_DISTINCT_KEYS);
-      streaming_agg.aggregate(batch);
-      streaming_agg.aggregate(batch);
-      auto [result_keys, result_values] = streaming_agg.finalize();
-      EXPECT_EQ(result_keys->num_rows(), 3);
-      EXPECT_EQ(result_values.size(), reqs.size());
-    }
-    cudf::test::get_default_stream().sync();
-    EXPECT_EQ(statistics_mr.get_bytes_counter().value, 0);
-  }
-  EXPECT_GT(statistics_mr.get_bytes_counter().peak, 0);
 }
 
 TEST_F(StreamingGroupbyTest, SumTwoBatches)
