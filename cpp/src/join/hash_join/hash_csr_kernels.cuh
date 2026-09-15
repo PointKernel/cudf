@@ -21,11 +21,17 @@
 
 namespace cudf::detail {
 
-constexpr thread_index_type hash_csr_block_size = 256;
+/// Warps per retrieval block.
 constexpr thread_index_type hash_csr_warps_per_block =
   hash_csr_block_size / cudf::detail::warp_size;
+/// Maximum output pairs written by each retrieval lane.
 constexpr thread_index_type hash_csr_outputs_per_lane = 32;
 
+/**
+ * @brief Device implementation of launch_hash_csr_probe_count_kernel.
+ *
+ * Uses the launcher's buffer contract with a one-dimensional launch.
+ */
 template <bool IsOuter, typename Equal, typename Hasher>
 CUDF_KERNEL void hash_csr_probe_count_kernel(size_type num_rows,
                                              bitmask_type const* valid_rows,
@@ -33,7 +39,7 @@ CUDF_KERNEL void hash_csr_probe_count_kernel(size_type num_rows,
                                              size_type* match_counts,
                                              cuda::std::uint32_t* matched_slots,
                                              cuda::std::uint64_t* matched_build_rows,
-                                             hash_set_ref hash_set,
+                                             hash_set_ref<hash_set_key_type> hash_set,
                                              csr_ref csr,
                                              Equal equal,
                                              Hasher hasher)
@@ -56,9 +62,7 @@ CUDF_KERNEL void hash_csr_probe_count_kernel(size_type num_rows,
       match_counts[index] = IsOuter ? cuda::std::max(count, size_type{1}) : count;
     }
 
-    // Only right and full joins consume the matched-row tally, and `matched_slots` is null for
-    // every other kind, so this whole block compiles away outside outer joins rather than costing
-    // a branch per probe row.
+    // Tally each matched build slot once, regardless of how many probe rows match it.
     if constexpr (IsOuter) {
       if (found && matched_slots != nullptr) {
         auto matched_slot_ref =
@@ -74,6 +78,29 @@ CUDF_KERNEL void hash_csr_probe_count_kernel(size_type num_rows,
   }
 }
 
+/**
+ * @brief Enqueues probe slots, output counts, and optional matched-build tracking.
+ *
+ * Invalid or unmatched rows count once in outer mode and zero times in inner mode. The set and
+ * CSR must describe the same completed build. Zero flags and counter before a fresh tally;
+ * each matched build row is counted once. Does nothing when num_rows is zero.
+ *
+ * @tparam IsOuter Whether unmatched probe rows produce an output pair
+ * @tparam Equal Device callable comparing a probe key with a stored build key
+ * @tparam Hasher Device callable hashing a probe row index
+ *
+ * @param num_rows Number of probe rows
+ * @param valid_rows Probe validity mask, or nullptr to include every row
+ * @param probe_slots Optional num_rows slots; unmatched rows receive CUDF_SIZE_TYPE_SENTINEL
+ * @param match_counts Optional num_rows output counts
+ * @param matched_slots Optional capacity-sized match flags; ignored in inner mode
+ * @param matched_build_rows Counter required with matched_slots in outer mode; otherwise optional
+ * @param hash_set Completed set of build keys
+ * @param csr Build row indices grouped by set slot
+ * @param equal Probe-to-build key equality predicate
+ * @param hasher Probe row hash function, consistent with the build hashes
+ * @param stream CUDA stream used for the kernel launch
+ */
 template <bool IsOuter, typename Equal, typename Hasher>
 void launch_hash_csr_probe_count_kernel(size_type num_rows,
                                         bitmask_type const* valid_rows,
@@ -81,7 +108,7 @@ void launch_hash_csr_probe_count_kernel(size_type num_rows,
                                         size_type* match_counts,
                                         cuda::std::uint32_t* matched_slots,
                                         cuda::std::uint64_t* matched_build_rows,
-                                        hash_set_ref hash_set,
+                                        hash_set_ref<hash_set_key_type> hash_set,
                                         csr_ref csr,
                                         Equal equal,
                                         Hasher hasher,
@@ -103,6 +130,14 @@ void launch_hash_csr_probe_count_kernel(size_type num_rows,
   CUDF_CUDA_TRY(cudaGetLastError());
 }
 
+/**
+ * @brief Device implementation of launch_hash_csr_retrieve_kernel.
+ *
+ * Uses the launcher's buffer contract. Launch one-dimensional blocks of hash_csr_block_size
+ * threads with enough warps to cover output_size.
+ *
+ * `outputs_per_warp` ranges from 1 through `warp_size * hash_csr_outputs_per_lane`.
+ */
 template <bool IsOuter>
 CUDF_KERNEL void hash_csr_retrieve_kernel(cuda::std::int64_t output_size,
                                           size_type num_probe_rows,
@@ -158,6 +193,25 @@ CUDF_KERNEL void hash_csr_retrieve_kernel(cuda::std::int64_t output_size,
   }
 }
 
+/**
+ * @brief Enqueues probe/build index pairs from CSR matches.
+ *
+ * Offsets must prefix-sum probe counts for the same IsOuter mode, from zero to output_size.
+ * Outer mode writes JoinNoMatch for unmatched probes; full-join callers append unmatched build rows
+ * separately. Does nothing when output_size is zero.
+ *
+ * @tparam IsOuter Whether unmatched probe rows produce a JoinNoMatch right index
+ *
+ * @param output_size Number of output pairs
+ * @param num_probe_rows Number of probe rows
+ * @param offsets Nondecreasing num_probe_rows + 1 exclusive output offsets
+ * @param probe_slots Build slot per probe row, or CUDF_SIZE_TYPE_SENTINEL for an unmatched row
+ * @param csr Completed CSR of build row indices
+ * @param left_index_offset Added to each partition-local probe row index
+ * @param left_indices Output buffer with space for output_size probe indices
+ * @param right_indices Output buffer with space for output_size build indices
+ * @param stream CUDA stream used for the kernel launch
+ */
 template <bool IsOuter>
 void launch_hash_csr_retrieve_kernel(cuda::std::int64_t output_size,
                                      size_type num_probe_rows,

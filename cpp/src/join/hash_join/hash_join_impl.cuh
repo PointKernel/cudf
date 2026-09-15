@@ -4,8 +4,8 @@
  */
 #pragma once
 
-#include <cudf/detail/hash_csr.cuh>
 #include <cudf/detail/join/hash_join.hpp>
+#include <cudf/detail/utilities/hash_csr.cuh>
 #include <cudf/types.hpp>
 
 #include <rmm/device_uvector.hpp>
@@ -17,10 +17,7 @@
 
 namespace cudf::detail {
 
-using hash_set_key_type   = cuco::pair<hash_value_type, size_type>;
-using hash_set_ref        = hash_csr::hash_set_ref<hash_set_key_type>;
-using build_position_type = hash_csr::build_position_type;
-using csr_ref             = hash_csr::csr_ref;
+using hash_set_key_type = cuco::pair<hash_value_type, size_type>;
 
 template <typename Hasher>
 struct hash_join<Hasher>::impl {
@@ -29,22 +26,22 @@ struct hash_join<Hasher>::impl {
        cuda::stream_ref stream,
        cuda::mr::any_resource<cuda::mr::device_accessible> mr)
     : _mr(std::move(mr)),
-      _entries(capacity, stream, _mr),
+      _slots(capacity, stream, _mr),
       _cumulative_ends(capacity, stream, _mr),
       _values(rows, stream, _mr),
       _capacity(capacity)
   {
   }
 
-  hash_set_ref hash_set() const
+  hash_set_ref<hash_set_key_type> hash_set() const
   {
-    return {const_cast<hash_set_key_type*>(_entries.data()), _capacity};
+    return {const_cast<hash_set_key_type*>(_slots.data()), _capacity};
   }
 
   csr_ref csr() const { return {_cumulative_ends.data(), _values.data()}; }
 
   cuda::mr::any_resource<cuda::mr::device_accessible> _mr;
-  rmm::device_uvector<hash_set_key_type> _entries;
+  rmm::device_uvector<hash_set_key_type> _slots;
   rmm::device_uvector<size_type> _cumulative_ends;
   rmm::device_uvector<size_type> _values;
   cuda::std::uint32_t _capacity;

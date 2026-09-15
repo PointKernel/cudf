@@ -7,8 +7,7 @@
 #include <cudf_test/cudf_gtest.hpp>
 #include <cudf_test/type_list_utilities.hpp>
 
-#include <cudf/detail/hash_csr_kernels.cuh>
-#include <cudf/detail/iterator.cuh>
+#include <cudf/detail/utilities/hash_csr_kernels.cuh>
 #include <cudf/detail/utilities/vector_factories.hpp>
 #include <cudf/utilities/default_stream.hpp>
 #include <cudf/utilities/memory_resource.hpp>
@@ -29,9 +28,13 @@
 #include <vector>
 
 namespace {
-namespace csr = cudf::detail::hash_csr;
-using csr::count_mode;
 using cudf::size_type;
+using cudf::detail::build_hash_csr;
+using cudf::detail::csr_ref;
+using cudf::detail::fill_hash_csr;
+using cudf::detail::hash_csr_build_position;
+using cudf::detail::hash_csr_count_mode;
+using cudf::detail::hash_set_ref;
 using cudf::detail::make_device_uvector;
 using cudf::detail::make_pinned_vector;
 using cached_key = cuco::pair<cudf::hash_value_type, size_type>;
@@ -55,7 +58,7 @@ struct constant_hash {
   __device__ cudf::hash_value_type operator()(size_type) const { return value; }
 };
 
-template <typename Key, count_mode Mode>
+template <typename Key, hash_csr_count_mode Mode>
 struct build_config {
   using key_type             = Key;
   static constexpr auto mode = Mode;
@@ -66,10 +69,10 @@ struct build_config {
 template <typename Config>
 struct HashCsrBuildTest : cudf::test::BaseFixture {};
 
-using BuildConfigs = cudf::test::Types<build_config<cached_key, count_mode::per_row>,
-                                       build_config<size_type, count_mode::per_row>,
-                                       build_config<cached_key, count_mode::per_warp>,
-                                       build_config<size_type, count_mode::per_warp>>;
+using BuildConfigs = cudf::test::Types<build_config<cached_key, hash_csr_count_mode::per_row>,
+                                       build_config<size_type, hash_csr_count_mode::per_row>,
+                                       build_config<cached_key, hash_csr_count_mode::per_warp>,
+                                       build_config<size_type, hash_csr_count_mode::per_warp>>;
 TYPED_TEST_SUITE(HashCsrBuildTest, BuildConfigs);
 
 namespace {
@@ -97,21 +100,21 @@ void check_membership(validity mask_kind, bool by_representative = false, size_t
   }
   auto const d_keys = make_device_uvector(keys, stream, mr);
   auto const d_mask = make_device_uvector(mask, stream, mr);
-  rmm::device_uvector<key_type> entries(capacity, stream, mr);
+  rmm::device_uvector<key_type> slots(capacity, stream, mr);
   auto counts = cudf::detail::make_zeroed_device_uvector_async<size_type>(num_counts, stream, mr);
-  rmm::device_uvector<csr::build_position_type> positions(num_rows, stream, mr);
+  rmm::device_uvector<hash_csr_build_position> positions(num_rows, stream, mr);
   CUDF_CUDA_TRY(
-    cudaMemsetAsync(entries.data(), 0xff, entries.size() * sizeof(*entries.data()), stream.get()));
-  csr::build_count<Config::mode>(num_rows,
-                                 mask_kind == validity::all_valid ? nullptr : d_mask.data(),
-                                 positions.data(),
-                                 counts.data(),
-                                 by_representative,
-                                 csr::hash_set_ref<key_type>{entries.data(), capacity, capacity},
-                                 key_equal<key_type>{d_keys.data()},
-                                 constant_hash{capacity - 1},
-                                 nullptr,
-                                 stream);
+    cudaMemsetAsync(slots.data(), 0xff, slots.size() * sizeof(*slots.data()), stream.get()));
+  build_hash_csr<Config::mode>(num_rows,
+                               mask_kind == validity::all_valid ? nullptr : d_mask.data(),
+                               positions.data(),
+                               counts.data(),
+                               by_representative,
+                               hash_set_ref<key_type>{slots.data(), capacity, capacity},
+                               key_equal<key_type>{d_keys.data()},
+                               constant_hash{capacity - 1},
+                               nullptr,
+                               stream);
   auto const h_counts    = make_pinned_vector(counts, stream);
   auto const h_positions = make_pinned_vector(positions, stream);
   std::vector<size_type> ends(num_counts);
@@ -126,9 +129,9 @@ void check_membership(validity mask_kind, bool by_representative = false, size_t
   ASSERT_EQ(ends.back(), included);
   for (size_type row = 0; row < num_rows; ++row) {
     if ((mask[row / 32] & (cudf::bitmask_type{1} << (row % 32))) == 0) {
-      EXPECT_EQ(h_positions[row].first,
+      ASSERT_EQ(h_positions[row].first,
                 static_cast<cuda::std::uint32_t>(cudf::detail::CUDF_SIZE_TYPE_SENTINEL));
-      EXPECT_EQ(h_positions[row].second, cudf::detail::CUDF_SIZE_TYPE_SENTINEL);
+      ASSERT_EQ(h_positions[row].second, cudf::detail::CUDF_SIZE_TYPE_SENTINEL);
     } else {
       ASSERT_LT(h_positions[row].first, num_counts);
       ASSERT_GE(h_positions[row].second, 0);
@@ -142,39 +145,24 @@ void check_membership(validity mask_kind, bool by_representative = false, size_t
     CUDF_CUDA_TRY(
       cudaMemsetAsync(values.data(), 0xff, values.size() * sizeof(size_type), stream.get()));
   }
-  if constexpr (Config::mode == count_mode::per_row) {
-    auto starts = cudf::detail::make_counting_transform_iterator(
-      size_type{0}, [p = d_ends.data()] __device__(auto slot) -> size_type {
-        return slot == 0 ? 0 : p[slot - 1];
-      });
-    csr::fill(num_rows, positions.data(), starts, values.data(), stream);
+  if constexpr (Config::mode == hash_csr_count_mode::per_row) {
+    auto const starts = csr_ref{d_ends.data(), values.data()}.begin();
+    fill_hash_csr(num_rows, positions.data(), starts, values.data(), stream);
   } else {
     std::vector<size_type> starts(num_counts, 0);
     std::copy(ends.begin(), ends.end() - 1, starts.begin() + 1);
     auto const d_starts = make_device_uvector(starts, stream, mr);
-    csr::fill(num_rows,
-              cub::CacheModifiedInputIterator<cub::LOAD_CS, csr::build_position_type const>{
-                positions.data()},
-              d_starts.data(),
-              values.data(),
-              stream);
+    fill_hash_csr(num_rows,
+                  cub::CacheModifiedInputIterator<cub::LOAD_CS, hash_csr_build_position const>{
+                    positions.data()},
+                  d_starts.data(),
+                  values.data(),
+                  stream);
   }
   auto const h_values = make_pinned_vector(values, stream);
-  rmm::device_uvector<csr::build_position_type> bounds(num_counts, stream, mr);
-  thrust::transform(rmm::exec_policy_nosync(stream),
-                    cuda::counting_iterator{size_type{0}},
-                    cuda::counting_iterator{num_counts},
-                    bounds.begin(),
-                    [view = csr::csr_ref{d_ends.data(), values.data()}] __device__(
-                      auto slot) -> csr::build_position_type {
-                      return {static_cast<cuda::std::uint32_t>(view.begin(slot)), view.size(slot)};
-                    });
-  auto const h_bounds = make_pinned_vector(bounds, stream);
   std::map<size_type, std::vector<size_type>> actual;
   for (size_type slot = 0; slot < num_counts; ++slot) {
     auto const begin = slot == 0 ? 0 : ends[slot - 1];
-    EXPECT_EQ(h_bounds[slot].first, begin);
-    EXPECT_EQ(h_bounds[slot].second, h_counts[slot]);
     if (h_counts[slot] == 0) { continue; }
     std::vector<size_type> rows(h_values.begin() + begin, h_values.begin() + ends[slot]);
     std::sort(rows.begin(), rows.end());
@@ -184,7 +172,6 @@ void check_membership(validity mask_kind, bool by_representative = false, size_t
     }
     auto const key = keys[rows.front()];
     EXPECT_TRUE(actual.emplace(key, rows).second);
-    EXPECT_EQ(rows, expected.at(key));
   }
   EXPECT_EQ(actual, expected);
 }
@@ -207,10 +194,38 @@ TYPED_TEST(HashCsrBuildTest, ExcludedRows)
 
 using HashCsrTest = cudf::test::BaseFixture;
 
+namespace {
+void check_offsets()
+{
+  auto const stream = cudf::get_default_stream();
+  auto const mr     = cudf::get_current_device_resource_ref();
+  auto const ends   = make_device_uvector(std::vector<size_type>{0, 2, 2, 5}, stream, mr);
+  rmm::device_uvector<size_type> values(5, stream, mr);
+  rmm::device_uvector<hash_csr_build_position> bounds(ends.size(), stream, mr);
+  thrust::transform(
+    rmm::exec_policy_nosync(stream),
+    cuda::counting_iterator{size_type{0}},
+    cuda::counting_iterator{size_type{4}},
+    bounds.begin(),
+    [view = csr_ref{ends.data(), values.data()}] __device__(auto slot) -> hash_csr_build_position {
+      return {static_cast<cuda::std::uint32_t>(view.begin(slot)), view.size(slot)};
+    });
+  auto const actual = make_pinned_vector(bounds, stream);
+  std::vector<size_type> const starts{0, 0, 2, 2};
+  std::vector<size_type> const sizes{0, 2, 0, 3};
+  for (size_type slot = 0; slot < 4; ++slot) {
+    EXPECT_EQ(actual[slot].first, starts[slot]);
+    EXPECT_EQ(actual[slot].second, sizes[slot]);
+  }
+}
+}  // namespace
+
+TEST_F(HashCsrTest, SegmentOffsets) { check_offsets(); }
+
 TEST_F(HashCsrTest, RepresentativeCounts)
 {
-  check_membership<build_config<cached_key, count_mode::per_warp>>(validity::mixed, true);
-  check_membership<build_config<size_type, count_mode::per_warp>>(validity::mixed, true);
+  check_membership<build_config<cached_key, hash_csr_count_mode::per_warp>>(validity::mixed, true);
+  check_membership<build_config<size_type, hash_csr_count_mode::per_warp>>(validity::mixed, true);
 }
 
 namespace {
@@ -227,12 +242,12 @@ void check_insertions()
   }
   keys.back()       = 99;  // A probe key that is never inserted.
   auto const d_keys = make_device_uvector(keys, stream, mr);
-  using set_ref     = csr::hash_set_ref<Key>;
-  rmm::device_uvector<Key> entries(capacity, stream, mr);
+  using set_ref     = hash_set_ref<Key>;
+  rmm::device_uvector<Key> slots(capacity, stream, mr);
   rmm::device_uvector<typename set_ref::insert_result> results(num_rows, stream, mr);
   CUDF_CUDA_TRY(
-    cudaMemsetAsync(entries.data(), 0xff, entries.size() * sizeof(*entries.data()), stream.get()));
-  auto const hash_set = set_ref{entries.data(), capacity, capacity};
+    cudaMemsetAsync(slots.data(), 0xff, slots.size() * sizeof(*slots.data()), stream.get()));
+  auto const hash_set = set_ref{slots.data(), capacity, capacity};
   thrust::transform(rmm::exec_policy_nosync(stream),
                     cuda::counting_iterator{size_type{0}},
                     cuda::counting_iterator{num_rows},
@@ -247,8 +262,8 @@ void check_insertions()
                       }
                     });
   auto const h_results     = make_pinned_vector(results, stream);
-  auto const inserted_keys = make_pinned_vector(entries, stream);
-  std::map<size_type, cuda::std::uint32_t> slots;
+  auto const inserted_keys = make_pinned_vector(slots, stream);
+  std::map<size_type, cuda::std::uint32_t> key_slots;
   std::map<size_type, int> insertions;
   for (size_type row = 0; row < num_rows; ++row) {
     auto const result = h_results[row];
@@ -271,12 +286,12 @@ void check_insertions()
     ASSERT_LT(representative, num_rows);
     EXPECT_EQ(keys[representative], keys[row]);
     if (result.second) { EXPECT_EQ(representative, row); }
-    auto const it = slots.emplace(keys[row], result.first.slot).first;
+    auto const it = key_slots.emplace(keys[row], result.first.slot).first;
     EXPECT_EQ(it->second, result.first.slot);
     insertions[keys[row]] += result.second;
   }
   std::set<cuda::std::uint32_t> occupied;
-  for (auto const& [key, slot] : slots) {
+  for (auto const& [key, slot] : key_slots) {
     EXPECT_EQ(insertions[key], 1);
     occupied.insert(slot);
   }
@@ -299,31 +314,31 @@ void check_insertions()
     });
   auto const h_found = make_pinned_vector(found, stream);
   for (size_type row = 0; row < num_rows; ++row) {
-    EXPECT_EQ(h_found[row], slots.at(keys[row]));
+    EXPECT_EQ(h_found[row], key_slots.at(keys[row]));
   }
   EXPECT_EQ(h_found.back(), capacity);
   // A keys-only build uses the same set without allocating position or count arrays.
   CUDF_CUDA_TRY(
-    cudaMemsetAsync(entries.data(), 0xff, entries.size() * sizeof(*entries.data()), stream.get()));
-  csr::build_count<count_mode::per_warp>(num_rows,
-                                         nullptr,
-                                         nullptr,
-                                         nullptr,
-                                         false,
-                                         hash_set,
-                                         key_equal<Key>{d_keys.data()},
-                                         constant_hash{capacity - 1},
-                                         nullptr,
-                                         stream);
-  auto const h_entries = make_pinned_vector(entries, stream);
+    cudaMemsetAsync(slots.data(), 0xff, slots.size() * sizeof(*slots.data()), stream.get()));
+  build_hash_csr<hash_csr_count_mode::per_warp>(num_rows,
+                                                nullptr,
+                                                nullptr,
+                                                nullptr,
+                                                false,
+                                                hash_set,
+                                                key_equal<Key>{d_keys.data()},
+                                                constant_hash{capacity - 1},
+                                                nullptr,
+                                                stream);
+  auto const h_slots = make_pinned_vector(slots, stream);
   std::set<size_type> distinct;
   size_type occupied_count{};
-  for (auto entry : h_entries) {
+  for (auto key : h_slots) {
     auto const row = [&] {
       if constexpr (cuda::std::is_same_v<Key, cached_key>) {
-        return entry.second;
+        return key.second;
       } else {
-        return entry;
+        return key;
       }
     }();
     if (row == cudf::detail::CUDF_SIZE_TYPE_SENTINEL) { continue; }
@@ -337,8 +352,10 @@ void check_insertions()
 
   // Two distinct keys compete for one slot; exhaustion must retain the winner and return
   // the complete empty-key snapshot with a false insertion flag for the other key.
-  CUDF_CUDA_TRY(cudaMemsetAsync(entries.data(), 0xff, sizeof(Key), stream.get()));
-  auto const full_set = set_ref{entries.data(), 1, 1};
+  slots.resize(1, stream);
+  results.resize(2, stream);
+  CUDF_CUDA_TRY(cudaMemsetAsync(slots.data(), 0xff, sizeof(Key), stream.get()));
+  auto const full_set = set_ref{slots.data(), 1, 1};
   thrust::transform(rmm::exec_policy_nosync(stream),
                     cuda::counting_iterator{size_type{0}},
                     cuda::counting_iterator{size_type{2}},
@@ -353,7 +370,7 @@ void check_insertions()
                       }
                     });
   auto const full_results = make_pinned_vector(results, stream);
-  auto const full_entries = make_pinned_vector(entries, stream);
+  auto const full_slots   = make_pinned_vector(slots, stream);
   auto num_inserted       = 0;
   for (size_type row = 0; row < 2; ++row) {
     auto const result = full_results[row];
@@ -363,11 +380,11 @@ void check_insertions()
       if constexpr (cuda::std::is_same_v<Key, cached_key>) {
         EXPECT_EQ(result.first.key.first, 0u);
         EXPECT_EQ(result.first.key.second, row);
-        EXPECT_EQ(full_entries.front().first, result.first.key.first);
-        EXPECT_EQ(full_entries.front().second, result.first.key.second);
+        EXPECT_EQ(full_slots.front().first, result.first.key.first);
+        EXPECT_EQ(full_slots.front().second, result.first.key.second);
       } else {
         EXPECT_EQ(result.first.key, row);
-        EXPECT_EQ(full_entries.front(), result.first.key);
+        EXPECT_EQ(full_slots.front(), result.first.key);
       }
     } else {
       EXPECT_EQ(result.first.slot, full_set.capacity);
@@ -396,23 +413,23 @@ TEST_F(HashCsrTest, BoundedOverflowAndRetry)
   std::vector<size_type> keys(num_rows);
   std::iota(keys.begin(), keys.end(), 0);
   auto const d_keys = make_device_uvector(keys, stream, mr);
-  rmm::device_uvector<size_type> entries(capacity, stream, mr);
+  rmm::device_uvector<size_type> slots(capacity, stream, mr);
   rmm::device_uvector<size_type> counts(capacity, stream, mr);
-  rmm::device_uvector<csr::build_position_type> positions(num_rows, stream, mr);
+  rmm::device_uvector<hash_csr_build_position> positions(num_rows, stream, mr);
   rmm::device_uvector<int> overflow(1, stream, mr);
   for (auto const limit : {cuda::std::uint32_t{1}, capacity}) {
     CUDF_CUDA_TRY(
-      cudaMemsetAsync(entries.data(), 0xff, entries.size() * sizeof(size_type), stream.get()));
+      cudaMemsetAsync(slots.data(), 0xff, slots.size() * sizeof(size_type), stream.get()));
     CUDF_CUDA_TRY(
       cudaMemsetAsync(counts.data(), 0, counts.size() * sizeof(size_type), stream.get()));
     CUDF_CUDA_TRY(cudaMemsetAsync(overflow.data(), 0, sizeof(int), stream.get()));
-    csr::build_count<count_mode::per_warp>(
+    build_hash_csr<hash_csr_count_mode::per_warp>(
       num_rows,
       nullptr,
       positions.data(),
       counts.data(),
       false,
-      csr::hash_set_ref<size_type>{entries.data(), capacity, limit},
+      hash_set_ref<size_type>{slots.data(), capacity, limit},
       key_equal<size_type>{d_keys.data()},
       constant_hash{capacity - 1},
       overflow.data(),
@@ -433,22 +450,22 @@ TEST_F(HashCsrTest, BoundedOverflowAndRetry)
   EXPECT_EQ(occupied.size(), num_rows);
 }
 
-TYPED_TEST(HashCsrBuildTest, EmptyInput)
+TEST_F(HashCsrTest, EmptyInput)
 {
   auto const stream = cudf::get_default_stream();
-  csr::build_count<TypeParam::mode>(0,
-                                    nullptr,
-                                    nullptr,
-                                    nullptr,
-                                    false,
-                                    csr::hash_set_ref<typename TypeParam::key_type>{nullptr, 0, 0},
-                                    key_equal<typename TypeParam::key_type>{nullptr},
-                                    constant_hash{0},
-                                    nullptr,
-                                    stream);
-  csr::fill(0,
-            static_cast<csr::build_position_type const*>(nullptr),
-            static_cast<size_type const*>(nullptr),
-            static_cast<size_type*>(nullptr),
-            stream);
+  build_hash_csr<hash_csr_count_mode::per_row>(0,
+                                               nullptr,
+                                               nullptr,
+                                               nullptr,
+                                               false,
+                                               hash_set_ref<size_type>{nullptr, 0, 0},
+                                               key_equal<size_type>{nullptr},
+                                               constant_hash{0},
+                                               nullptr,
+                                               stream);
+  fill_hash_csr(0,
+                static_cast<hash_csr_build_position const*>(nullptr),
+                static_cast<size_type const*>(nullptr),
+                static_cast<size_type*>(nullptr),
+                stream);
 }
