@@ -425,8 +425,8 @@ bool is_streaming_groupby_supported(data_type values_type, aggregation::Kind kin
       break;
     default: return false;
   }
-  // decimal128 MIN/MAX needs unsupported 128-bit atomics; SUM has its own atomic addition.
-  if ((kind == aggregation::MIN || kind == aggregation::MAX) &&
+  // decimal128 SUM/MIN/MAX needs 128-bit atomics, which aren't supported.
+  if ((kind == aggregation::SUM || kind == aggregation::MIN || kind == aggregation::MAX) &&
       values_type.id() == type_id::DECIMAL128) {
     return false;
   }

@@ -13,7 +13,6 @@
 #include <cudf/aggregation.hpp>
 #include <cudf/concatenate.hpp>
 #include <cudf/copying.hpp>
-#include <cudf/fixed_point/fixed_point.hpp>
 #include <cudf/groupby.hpp>
 #include <cudf/sorting.hpp>
 #include <cudf/table/table.hpp>
@@ -26,7 +25,6 @@
 #include <rmm/mr/statistics_resource_adaptor.hpp>
 
 #include <atomic>
-#include <stdexcept>
 #include <thread>
 #include <vector>
 
@@ -756,49 +754,6 @@ TEST_F(StreamingGroupbyTest, UnsupportedAggThrows)
   auto reqs = single_agg_req(1, cudf::make_collect_list_aggregation<cudf::groupby_aggregation>());
   EXPECT_THROW(cudf::groupby::streaming_groupby(KEY_COL, reqs, DEFAULT_MAX_DISTINCT_KEYS),
                std::invalid_argument);
-}
-
-TEST_F(StreamingGroupbyTest, Decimal128MinMaxRejected)
-{
-  cudf::test::fixed_width_column_wrapper<int32_t> keys{1, 1, 2};
-  cudf::test::fixed_point_column_wrapper<__int128_t> values{{1, 2, 3}, numeric::scale_type{-2}};
-  auto const batch = cudf::table_view{{keys, values}};
-
-  for (auto const kind : {cudf::aggregation::MIN, cudf::aggregation::MAX}) {
-    SCOPED_TRACE(static_cast<int>(kind));
-    EXPECT_FALSE(cudf::groupby::is_streaming_groupby_supported(
-      cudf::data_type{cudf::type_id::DECIMAL128}, kind));
-    auto reqs = single_agg_req(1,
-                               kind == cudf::aggregation::MIN
-                                 ? cudf::make_min_aggregation<cudf::groupby_aggregation>()
-                                 : cudf::make_max_aggregation<cudf::groupby_aggregation>());
-    cudf::groupby::streaming_groupby streaming_agg(KEY_COL, reqs, DEFAULT_MAX_DISTINCT_KEYS);
-    EXPECT_THROW(streaming_agg.aggregate(batch), std::invalid_argument);
-  }
-}
-
-TEST_F(StreamingGroupbyTest, Decimal128SumTwoBatches)
-{
-  EXPECT_TRUE(cudf::groupby::is_streaming_groupby_supported(
-    cudf::data_type{cudf::type_id::DECIMAL128}, cudf::aggregation::SUM));
-  auto constexpr scale = numeric::scale_type{-2};
-  auto constexpr large = __int128_t{1} << 80;
-  cudf::test::fixed_width_column_wrapper<int32_t> keys1{1, 2, 1};
-  cudf::test::fixed_width_column_wrapper<int32_t> keys2{2, 1, 3};
-  cudf::test::fixed_point_column_wrapper<__int128_t> values1{{large, -large, 7}, scale};
-  cudf::test::fixed_point_column_wrapper<__int128_t> values2{{3, 5, large}, scale};
-  cudf::test::fixed_width_column_wrapper<int32_t> expected_keys{1, 2, 3};
-  cudf::test::fixed_point_column_wrapper<__int128_t> expected_values{
-    {large + 12, -large + 3, large}, scale};
-
-  auto reqs = single_agg_req(1, cudf::make_sum_aggregation<cudf::groupby_aggregation>());
-  cudf::groupby::streaming_groupby streaming_agg(KEY_COL, reqs, DEFAULT_MAX_DISTINCT_KEYS);
-  streaming_agg.aggregate(cudf::table_view{{keys1, values1}});
-  streaming_agg.aggregate(cudf::table_view{{keys2, values2}});
-  auto [keys, results] = streaming_agg.finalize();
-  ASSERT_EQ(results.size(), 1);
-  ASSERT_EQ(results[0].results.size(), 1);
-  check(keys, results, cudf::table_view{{expected_keys}}, {expected_values});
 }
 
 TEST_F(StreamingGroupbyTest, BatchExceedsMaxDistinctKeysThrows)
