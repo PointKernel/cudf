@@ -27,6 +27,7 @@
 
 #include <rmm/device_uvector.hpp>
 
+#include <cuda/iterator>
 #include <cuda/stream>
 
 #include <algorithm>
@@ -161,8 +162,7 @@ void streaming_groupby::impl::initialize(table_view const& data, cuda::stream_re
   _has_compound_aggs   = has_compound;
 
   // Reject aggregation kinds that are unsupported in streaming after decomposition.
-  for (std::size_t i = 0; i < _agg_kinds.size(); ++i) {
-    auto const k = _agg_kinds[i];
+  for (auto k : _agg_kinds) {
     CUDF_EXPECTS(k != aggregation::ARGMIN && k != aggregation::ARGMAX,
                  "Streaming groupby does not support MIN/MAX on variable-width types "
                  "(internally decomposed to ARGMIN/ARGMAX).",
@@ -171,16 +171,21 @@ void streaming_groupby::impl::initialize(table_view const& data, cuda::stream_re
                  "Streaming groupby does not support SUM_OVERFLOW "
                  "(struct intermediate cannot be merged across batches).",
                  std::invalid_argument);
-    auto const& values     = values_view.column(i);
-    auto const values_type = cudf::is_dictionary(values.type())
-                               ? cudf::dictionary_column_view(values).keys().type()
-                               : values.type();
-    CUDF_EXPECTS(cudf::detail::dispatch_type_and_aggregation(
-                   values_type, k, is_atomic_aggregation_supported{}),
-                 "streaming_groupby does not support this combination of value type and "
-                 "aggregation kind.",
-                 std::invalid_argument);
   }
+
+  CUDF_EXPECTS(
+    std::all_of(cuda::counting_iterator<size_type>{0},
+                cuda::counting_iterator<size_type>{values_view.num_columns()},
+                [&](auto i) {
+                  auto const& values     = values_view.column(i);
+                  auto const values_type = cudf::is_dictionary(values.type())
+                                             ? cudf::dictionary_column_view(values).keys().type()
+                                             : values.type();
+                  return cudf::detail::dispatch_type_and_aggregation(
+                    values_type, _agg_kinds[i], is_atomic_aggregation_supported{});
+                }),
+    "streaming_groupby does not support this combination of value type and aggregation kind.",
+    std::invalid_argument);
 
   _agg_results = detail::hash::create_results_table(
     _max_distinct_keys, values_view, _agg_kinds, _is_agg_intermediate, stream, mr);
