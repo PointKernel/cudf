@@ -3,11 +3,47 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+#include "compute_single_pass_aggs.hpp"
 #include "single_pass_reductions.cuh"
+#include "single_pass_reductions.hpp"
 
+#include <cudf/aggregation.hpp>
+#include <cudf/column/column.hpp>
+#include <cudf/column/column_device_view.cuh>
+#include <cudf/column/column_factories.hpp>
+#include <cudf/column/column_view.hpp>
+#include <cudf/detail/iterator.cuh>
+#include <cudf/detail/utilities/integer_utils.hpp>
+#include <cudf/detail/valid_if.cuh>
+#include <cudf/dictionary/dictionary_column_view.hpp>
+#include <cudf/table/table_view.hpp>
+#include <cudf/types.hpp>
+#include <cudf/utilities/error.hpp>
+#include <cudf/utilities/memory_resource.hpp>
+#include <cudf/utilities/span.hpp>
+#include <cudf/utilities/traits.hpp>
+#include <cudf/utilities/type_dispatcher.hpp>
+
+#include <rmm/device_buffer.hpp>
+#include <rmm/device_uvector.hpp>
+#include <rmm/exec_policy.hpp>
+
+#include <cuda/iterator>
+#include <cuda/std/algorithm>
+#include <cuda/std/functional>
+#include <cuda/stream>
 #include <thrust/adjacent_difference.h>
 #include <thrust/scan.h>
 #include <thrust/tabulate.h>
+
+#include <algorithm>
+#include <cstddef>
+#include <cstdint>
+#include <iterator>
+#include <memory>
+#include <span>
+#include <utility>
+#include <vector>
 
 namespace cudf::groupby::detail::hash {
 
