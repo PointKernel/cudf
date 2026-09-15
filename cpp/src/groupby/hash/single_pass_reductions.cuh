@@ -13,7 +13,6 @@
 #include <cudf/detail/aggregation/aggregation.hpp>
 #include <cudf/detail/iterator.cuh>
 #include <cudf/detail/utilities/element_argminmax.cuh>
-#include <cudf/detail/utilities/integer_utils.hpp>
 #include <cudf/detail/valid_if.cuh>
 #include <cudf/dictionary/dictionary_column_view.hpp>
 #include <cudf/reduction/detail/sum_overflow.cuh>
@@ -26,13 +25,8 @@
 #include <rmm/device_uvector.hpp>
 #include <rmm/exec_policy.hpp>
 
-#include <cub/detail/env_dispatch.cuh>
 #include <cub/device/device_reduce.cuh>
 #include <cub/device/device_segmented_reduce.cuh>
-#include <cub/device/dispatch/dispatch_segmented_reduce.cuh>
-#include <cub/device/dispatch/tuning/tuning_segmented_reduce.cuh>
-#include <cub/util_device.cuh>
-#include <cuda/devices>
 #include <cuda/functional>
 #include <cuda/iterator>
 #include <cuda/memory_resource>
@@ -42,7 +36,6 @@
 #include <cuda/std/functional>
 #include <cuda/std/tuple>
 #include <cuda/stream>
-#include <cuda/version>
 
 #include <algorithm>
 #include <cstddef>
@@ -217,58 +210,14 @@ constexpr bool is_fusable_sum(aggregation::Kind kind)
          kind == aggregation::COUNT_VALID;
 }
 
-/// Groups this small on average are reduced as segments packed several per block: one block per
-/// segment would leave most of the device idle.
-constexpr size_type min_avg_rows_per_segment = 128;
+/// Average group size below which long groups use shorter chunks.
+constexpr size_type min_avg_rows_per_large_chunk = 128;
 
-/// Groups longer than this are reduced chunk by chunk so that every block has a bounded range.
+/// Maximum rows per chunk when groups are large on average.
 constexpr size_type rows_per_chunk = 1 << 14;
 
-/// Chunk length when the segments are packed several per block, so that a thread or a sub-warp
-/// never walks a long group alone.
-constexpr size_type packed_rows_per_chunk = 1 << 10;
-
-/// Threads that share one segment on the packed path.
-constexpr int packed_threads_per_group = 8;
-
-// The packed path calls `cub::detail::segmented_reduce::dispatch` directly, an internal entry point
-// whose namespace, signature and hint semantics were verified in CCCL 3.5 only.
-static_assert(CCCL_MAJOR_VERSION == 3 && CCCL_MINOR_VERSION == 5,
-              "re-verify cub::detail::segmented_reduce::dispatch and the max_segment_size hint "
-              "(dispatch_segmented_reduce.cuh, kernels/kernel_segmented_reduce.cuh) for this CCCL");
-
-/**
- * @brief Policy selector for cub::DeviceSegmentedReduce whose medium path hands each segment to
- * `packed_threads_per_group` threads instead of a full warp.
- *
- * The large (one block per segment) and small (one thread per segment) policies are those of
- * CUB's own selector, so the large path reduces in exactly the order it does today. Only the
- * medium tile changes: `packed_threads_per_group * items_per_thread` rows instead of
- * `32 * items_per_thread`, and `threads_per_block / packed_threads_per_group` segments per block.
- *
- * Verified against cub/device/dispatch/tuning/tuning_segmented_reduce.cuh:23-63 (the policy
- * structs), :101-140 (the default selector) and cub/util_device.cuh:865 (the selector concept:
- * stateless, `operator()(cuda::compute_capability) -> cub::SegmentedReducePolicy`). The kernel
- * evaluates it as a constant expression for `__launch_bounds__` (kernel_segmented_reduce.cuh:113),
- * hence `constexpr` and host/device.
- */
-template <typename AccumT, typename OffsetT, typename Op>
-struct subwarp_segmented_reduce_policy_selector {
-  [[nodiscard]] CUDF_HOST_DEVICE constexpr cub::SegmentedReducePolicy operator()(
-    cuda::compute_capability cc) const
-  {
-    auto const base =
-      cub::detail::segmented_reduce::policy_selector_from_types<AccumT, OffsetT, Op>{}(cc);
-    auto const& large = base.large_reduce;
-    return cub::SegmentedReducePolicy{large,
-                                      cub::SegmentedReduceWarpReducePolicy{large.threads_per_block,
-                                                                           packed_threads_per_group,
-                                                                           large.items_per_thread,
-                                                                           large.vec_size,
-                                                                           large.load_modifier},
-                                      base.small_reduce};
-  }
-};
+/// Maximum rows per chunk when groups are small on average.
+constexpr size_type small_group_chunk_size = 1 << 10;
 
 /// The stream and temporary-storage resource handed to the CUB algorithms. Spelled out without
 /// class template argument deduction, which the host compiler rejects for these types outside of
@@ -284,21 +233,9 @@ inline cub_env_t make_cub_env(cuda::stream_ref stream, rmm::device_async_resourc
                    cub_mr_prop_t{cuda::mr::get_memory_resource_t{}, mr}};
 }
 
-/**
- * @brief Reduces segments with CUB, packing several per block when `avg_rows` is positive.
- *
- * `cub::DeviceSegmentedReduce::Reduce` always launches one block per segment. Its dispatch also
- * accepts a segment size hint, which is what makes it hand every segment to one thread (hint
- * within the small tile) or to one sub-warp (hint within the medium tile) instead; the kernel's
- * agents loop over as many tiles as a segment has, so a segment longer than the hint is still
- * reduced correctly, only by that thread or sub-warp alone. Segments averaging at most the small
- * tile of the accumulator get a thread each, longer ones a sub-warp each.
- *
- * @param avg_rows Average number of rows per segment; zero selects one block per segment
- */
+/// Reduces each segment to one output element using CUB.
 template <typename ValueIterator, typename OutputIterator, typename Op, typename T>
 void reduce_segments(device_span<size_type const> offsets,
-                     size_type avg_rows,
                      ValueIterator values,
                      OutputIterator output,
                      Op op,
@@ -306,44 +243,20 @@ void reduce_segments(device_span<size_type const> offsets,
                      cuda::stream_ref stream,
                      rmm::device_async_resource_ref mr)
 {
-  using offset_type   = cub::detail::common_iterator_value_t<size_type const*, size_type const*>;
-  using accum_type    = cuda::std::__accumulator_t<Op, cub::detail::it_value_t<ValueIterator>, T>;
-  using selector_type = subwarp_segmented_reduce_policy_selector<accum_type, offset_type, Op>;
-
-  std::size_t hint = 0;
-  if (avg_rows > 0) {
-    cuda::compute_capability cc{};
-    CUDF_CUDA_TRY(cub::detail::ptx_compute_cap(cc));
-    auto const policy      = selector_type{}(cc);
-    auto const small_tile  = policy.small_reduce.items_per_tile();
-    auto const medium_tile = policy.medium_reduce.items_per_tile();
-    CUDF_EXPECTS(small_tile + 1 <= medium_tile, "Unexpected segmented reduce tuning");
-    hint = avg_rows <= small_tile ? std::size_t{1} : static_cast<std::size_t>(small_tile) + 1;
-  }
-  CUDF_CUDA_TRY(cub::detail::dispatch_with_env(
-    make_cub_env(stream, mr),
-    [&](auto, void* d_temp_storage, std::size_t& temp_storage_bytes, cudaStream_t launch_stream) {
-      return cub::detail::segmented_reduce::dispatch<accum_type, offset_type>(
-        d_temp_storage,
-        temp_storage_bytes,
-        values,
-        output,
-        static_cast<cuda::std::int64_t>(offsets.size() - 1),
-        offsets.begin(),
-        offsets.begin() + 1,
-        op,
-        init,
-        hint,
-        launch_stream,
-        selector_type{});
-    }));
+  CUDF_CUDA_TRY(
+    cub::DeviceSegmentedReduce::Reduce(values,
+                                       output,
+                                       static_cast<cuda::std::int64_t>(offsets.size() - 1),
+                                       offsets.begin(),
+                                       offsets.begin() + 1,
+                                       op,
+                                       init,
+                                       make_cub_env(stream, mr)));
 }
 
-/// Reduces the grouped values of every group into one output element per group. `packed_rows`
-/// estimates the rows requiring value loads per segment; zero selects one block per segment.
+/// Reduces each group, combining chunk partials when a group spans multiple chunks.
 template <typename ValueIterator, typename OutputIterator, typename Op, typename T>
 void reduce_groups(grouped_rows const& grouped,
-                   size_type packed_rows,
                    ValueIterator values,
                    OutputIterator output,
                    Op op,
@@ -352,20 +265,12 @@ void reduce_groups(grouped_rows const& grouped,
                    rmm::device_async_resource_ref mr)
 {
   if (grouped.group_chunks.is_empty()) {
-    reduce_segments(grouped.offsets, packed_rows, values, output, op, init, stream, mr);
+    reduce_segments(grouped.offsets, values, output, op, init, stream, mr);
     return;
   }
   rmm::device_uvector<T> partials(grouped.chunk_offsets.size() - 1, stream, mr);
-  reduce_segments(
-    grouped.chunk_offsets, packed_rows, values, partials.begin(), op, init, stream, mr);
-  reduce_segments(grouped.group_chunks,
-                  packed_rows > 0 ? packed_rows_per_chunk : 0,
-                  partials.begin(),
-                  output,
-                  op,
-                  init,
-                  stream,
-                  mr);
+  reduce_segments(grouped.chunk_offsets, values, partials.begin(), op, init, stream, mr);
+  reduce_segments(grouped.group_chunks, partials.begin(), output, op, init, stream, mr);
 }
 
 /// Representation used to share reduction instantiations across column types.
@@ -430,7 +335,6 @@ struct grouped_reduction_fn {
     auto const output = result->mutable_view().begin<Result>();
     if (!ctx.nullable) {
       reduce_groups(ctx.grouped,
-                    ctx.grouped.packed_rows,
                     cudf::detail::make_counting_transform_iterator(0, value),
                     output,
                     Op{},
@@ -446,18 +350,7 @@ struct grouped_reduction_fn {
       0, grouped_valid_value_fn < Source, Result, K == aggregation::SUM_OF_SQUARES > {value});
     auto const outputs = cuda::transform_output_iterator{
       cuda::make_zip_iterator(output, group_valid.begin()), split_valid_value_fn<Result>{}};
-    auto packed_rows = ctx.grouped.packed_rows;
-    if (packed_rows > 0 && ctx.grouped.group_chunks.is_empty()) {
-      // Null rows still read their validity, but skip the value load. Use the expected number
-      // of valid rows per group when choosing how many threads share a segment.
-      auto const valid_rows =
-        static_cast<cuda::std::int64_t>(ctx.values.size() - ctx.values.null_count());
-      auto const avg_valid_rows = cudf::util::div_rounding_up_safe(
-        packed_rows * valid_rows, static_cast<cuda::std::int64_t>(ctx.values.size()));
-      packed_rows = static_cast<size_type>(std::max<cuda::std::int64_t>(avg_valid_rows, 1));
-    }
     reduce_groups(ctx.grouped,
-                  packed_rows,
                   values,
                   outputs,
                   valid_value_op<Op, Result>{},
@@ -485,7 +378,6 @@ struct grouped_reduction_fn {
     // loses against every valid row and is left in place for all-null groups.
     constexpr auto is_argmin = K == aggregation::ARGMIN;
     reduce_groups(ctx.grouped,
-                  ctx.grouped.packed_rows,
                   ctx.grouped.rows.begin(),
                   result->mutable_view().begin<size_type>(),
                   cudf::detail::element_argminmax_fn<rep_type_t<T>>{
@@ -523,7 +415,6 @@ struct grouped_reduction_fn {
                                 overflow_child->mutable_view().begin<bool>()),
         split_sum_overflow_fn<Source>{}};
       reduce_groups(ctx.grouped,
-                    ctx.grouped.packed_rows,
                     values,
                     children,
                     cudf::reduction::detail::overflow_sum_op<Source>{},
@@ -598,7 +489,6 @@ struct fused_sums_fn {
                                 count->mutable_view().template begin<size_type>()),
         split_fused_sums_fn<Result>{}};
       reduce_groups(ctx.grouped,
-                    ctx.grouped.packed_rows,
                     values,
                     outputs,
                     fused_sums_plus<Result>{},

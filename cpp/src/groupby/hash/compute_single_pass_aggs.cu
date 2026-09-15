@@ -54,7 +54,6 @@ std::pair<rmm::device_buffer, size_type> reduce_group_validity(reduction_context
 {
   rmm::device_uvector<bool> group_valid(ctx.num_groups, stream, mr.get_temporary_mr());
   reduce_groups(ctx.grouped,
-                ctx.grouped.packed_rows,
                 cuda::make_permutation_iterator(cudf::detail::make_validity_iterator(ctx.d_values),
                                                 ctx.grouped.rows.begin()),
                 group_valid.begin(),
@@ -101,7 +100,6 @@ std::unique_ptr<column> count_groups(reduction_context const& ctx,
                                       ctx.grouped.rows.begin()),
       [] __device__(bool valid) -> size_type { return static_cast<size_type>(valid); }};
     reduce_groups(ctx.grouped,
-                  ctx.grouped.packed_rows,
                   valid_counts,
                   result->mutable_view().begin<size_type>(),
                   cuda::std::plus<size_type>{},
@@ -217,12 +215,10 @@ grouped_rows make_grouped_rows(device_span<size_type const> rows,
                        rmm::device_uvector<size_type>{0, stream, mr.get_output_mr()}};
   if (num_groups == 0) { return grouped; }
 
-  // Small groups are packed several per block; every segment is then bounded by a shorter chunk
-  // so that no thread or sub-warp is left walking a long group alone.
-  auto const avg_rows   = num_rows / num_groups;
-  auto const packed     = avg_rows < min_avg_rows_per_segment;
-  auto const chunk_rows = packed ? packed_rows_per_chunk : rows_per_chunk;
-  grouped.packed_rows   = packed ? std::max<size_type>(avg_rows, 1) : 0;
+  // Bound the work per chunk, using shorter chunks when most groups are small.
+  auto const avg_rows = num_rows / num_groups;
+  auto const chunk_rows =
+    avg_rows < min_avg_rows_per_large_chunk ? small_group_chunk_size : rows_per_chunk;
 
   auto const policy       = rmm::exec_policy_nosync(stream, temp_mr);
   auto const chunk_counts = cudf::detail::make_counting_transform_iterator(

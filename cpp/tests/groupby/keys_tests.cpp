@@ -556,15 +556,14 @@ TEST_F(groupby_sampling_test, NearlyDistinctSampleUnderestimatesPopulation)
   EXPECT_TRUE(result.second.empty());
 }
 
-TEST_F(groupby_sampling_test, NullableMaxConsumesFullPackedSegment)
+TEST_F(groupby_sampling_test, NullableMaxConsumesFullSkewedSegment)
 {
   constexpr cudf::size_type num_groups       = 1'000;
   constexpr cudf::size_type long_group_rows  = 1'024;
   constexpr cudf::size_type short_group_rows = 5;
   constexpr cudf::size_type num_rows = long_group_rows + (num_groups - 1) * short_group_rows;
 
-  // Groups average six rows, but fewer than one in four values is valid. The density hint
-  // chooses one thread per segment; it must still consume all 1,024 rows of the longest group.
+  // Most groups have five rows; one has 1,024. Sparse validity must not truncate its reduction.
   std::vector<int32_t> keys_data;
   std::vector<double> values_data;
   std::vector<bool> validity;

@@ -32,10 +32,8 @@ bool is_single_pass_agg_supported(data_type values_type, aggregation::Kind kind)
  * @brief Input rows reordered so that the rows of every group are contiguous, together with the
  * arrays of the reduction strategy chosen for the group size distribution.
  *
- * Every group is reduced as a segment: groups that are small on average are packed several per
- * block, one thread or one sub-warp each, otherwise a block reduces each group. Groups spanning
- * more than one chunk of rows are first reduced per chunk, so that a few long groups still occupy
- * the whole device and no thread walks a long group alone.
+ * Each group is reduced as a segment. Long groups are split into chunks, then their partial
+ * results are combined so that a few long groups can use multiple blocks.
  */
 struct grouped_rows {
   device_span<size_type const> rows;             ///< Input row index at each grouped position
@@ -44,8 +42,6 @@ struct grouped_rows {
                                                  ///< some group spans several chunks
   rmm::device_uvector<size_type> group_chunks;   ///< `num_groups + 1` offsets into the chunks, only
                                                  ///< when some group spans several chunks
-  size_type packed_rows = 0;  ///< Average rows per group when the segments are packed several per
-                              ///< block; 0 when every segment gets a block
 };
 
 /**
