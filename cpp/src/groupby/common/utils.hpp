@@ -28,7 +28,7 @@ template <typename RequestType>
 inline std::vector<aggregation_result> extract_results(std::span<RequestType const> requests,
                                                        cudf::detail::result_cache& cache,
                                                        cuda::stream_ref stream,
-                                                       rmm::device_async_resource_ref mr)
+                                                       cudf::memory_resources mr)
 {
   std::vector<aggregation_result> results(requests.size());
   std::unordered_map<std::pair<column_view, std::reference_wrapper<aggregation const>>,
@@ -44,7 +44,8 @@ inline std::vector<aggregation_result> extract_results(std::span<RequestType con
       } else {
         auto it = repeated_result.find({requests[i].values, *agg});
         if (it != repeated_result.end()) {
-          results[i].results.emplace_back(std::make_unique<column>(it->second, stream, mr));
+          results[i].results.emplace_back(
+            std::make_unique<column>(it->second, stream, mr.get_output_mr()));
         } else {
           CUDF_FAIL("Cannot extract result from the cache");
         }
@@ -59,11 +60,12 @@ inline std::vector<aggregation_result> extract_results(std::span<RequestType con
  *
  * @param keys Table of groupby keys
  * @param stream CUDA stream used for device memory operations
- * @param mr Device memory resource used to allocate the returned bitmask
+ * @param mr Memory resources; the output resource allocates the returned bitmask
  * @return Pair of {buffer, raw_pointer} where pointer is null if no nulls exist.
  */
-std::pair<rmm::device_buffer, bitmask_type const*> compute_row_bitmask(
-  table_view const& keys, cuda::stream_ref stream, rmm::device_async_resource_ref mr);
+std::pair<rmm::device_buffer, bitmask_type const*> compute_row_bitmask(table_view const& keys,
+                                                                       cuda::stream_ref stream,
+                                                                       cudf::memory_resources mr);
 
 /// Whether the given aggregation kind is supported by hash-based groupby.
 constexpr bool is_hash_aggregation(aggregation::Kind k)

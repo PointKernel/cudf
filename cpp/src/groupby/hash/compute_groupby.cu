@@ -141,10 +141,11 @@ cuda::std::uint32_t estimate_capacity(size_type num_rows,
                                       Equal const& d_row_equal,
                                       Hash const& d_row_hash,
                                       cuda::stream_ref stream,
-                                      rmm::device_async_resource_ref mr)
+                                      cudf::memory_resources mr)
 {
-  rmm::device_uvector<hash_table_entry_type> entries(hash_csr_sample_capacity, stream, mr);
-  rmm::device_uvector<size_type> counts(2, stream, mr);
+  auto const temp_mr = mr.get_temporary_mr();
+  rmm::device_uvector<hash_table_entry_type> entries(hash_csr_sample_capacity, stream, temp_mr);
+  rmm::device_uvector<size_type> counts(2, stream, temp_mr);
   // Counts the valid rows among every `stride`-th row and the distinct keys among them.
   auto const sample = [&](size_type stride) {
     CUDF_CUDA_TRY(cudaMemsetAsync(
@@ -215,9 +216,8 @@ grouped_keys group_keys(size_type num_rows,
   auto capacity =
     num_rows < hash_csr_min_rows_to_estimate || key_bytes > hash_csr_max_estimated_key_bytes
       ? full_capacity
-      : std::min(
-          full_capacity,
-          estimate_capacity(num_rows, row_bitmask, d_row_equal, d_row_hash, stream, temp_mr));
+      : std::min(full_capacity,
+                 estimate_capacity(num_rows, row_bitmask, d_row_equal, d_row_hash, stream, mr));
   rmm::device_uvector<hash_table_entry_type> entries(0, stream, temp_mr);
   rmm::device_uvector<size_type> slot_counts(0, stream, temp_mr);
   rmm::device_uvector<build_position_type> positions(
@@ -383,9 +383,10 @@ std::unique_ptr<table> compute_groupby(table_view const& keys,
   auto const temporary_resources = cudf::memory_resources{temp_mr, temp_mr};
 
   [[maybe_unused]] auto [row_bitmask_data, row_bitmask] =
-    skip_rows_with_nulls ? cudf::groupby::detail::compute_row_bitmask(keys, stream, temp_mr)
-                         : std::pair<rmm::device_buffer, bitmask_type const*>{
-                             rmm::device_buffer{0, stream, temp_mr}, nullptr};
+    skip_rows_with_nulls
+      ? cudf::groupby::detail::compute_row_bitmask(keys, stream, temporary_resources)
+      : std::pair<rmm::device_buffer, bitmask_type const*>{rmm::device_buffer{0, stream, temp_mr},
+                                                           nullptr};
 
   // Bytes of one key row, with variable-width and nested columns counted as wide.
   auto const key_bytes = std::accumulate(

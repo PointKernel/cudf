@@ -100,7 +100,6 @@ std::pair<std::unique_ptr<table>, std::vector<aggregation_result>> groupby(
   std::unique_ptr<table> unique_keys =
     dispatch_groupby(keys, requests, &cache, cudf::has_nulls(keys), include_null_keys, stream, mr);
 
-  return std::pair(std::move(unique_keys),
-                   extract_results(requests, cache, stream, mr.get_output_mr()));
+  return std::pair(std::move(unique_keys), extract_results(requests, cache, stream, mr));
 }
 }  // namespace cudf::groupby::detail::hash
