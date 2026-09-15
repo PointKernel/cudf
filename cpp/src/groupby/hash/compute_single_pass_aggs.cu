@@ -13,9 +13,10 @@ namespace cudf::groupby::detail::hash {
 
 /// A group is valid when any of its rows is valid.
 std::pair<rmm::device_buffer, size_type> reduce_group_validity(reduction_context const& ctx,
+                                                               cuda::stream_ref stream,
                                                                cudf::memory_resources mr)
 {
-  rmm::device_uvector<bool> group_valid(ctx.num_groups, ctx.stream, mr.get_temporary_mr());
+  rmm::device_uvector<bool> group_valid(ctx.num_groups, stream, mr.get_temporary_mr());
   reduce_groups(ctx.grouped,
                 ctx.grouped.packed_rows,
                 cuda::make_permutation_iterator(cudf::detail::make_validity_iterator(ctx.d_values),
@@ -23,34 +24,39 @@ std::pair<rmm::device_buffer, size_type> reduce_group_validity(reduction_context
                 group_valid.begin(),
                 cuda::std::logical_or<bool>{},
                 false,
-                ctx.stream,
+                stream,
                 mr.get_temporary_mr());
   return cudf::detail::valid_if(
-    group_valid.begin(), group_valid.end(), cuda::std::identity{}, ctx.stream, mr);
+    group_valid.begin(), group_valid.end(), cuda::std::identity{}, stream, mr);
 }
 
-void set_group_null_mask(column& result, reduction_context const& ctx, cudf::memory_resources mr)
+void set_group_null_mask(column& result,
+                         reduction_context const& ctx,
+                         cuda::stream_ref stream,
+                         cudf::memory_resources mr)
 {
   if (!ctx.nullable || ctx.num_groups == 0) { return; }
-  auto [null_mask, null_count] = reduce_group_validity(ctx, mr);
+  auto [null_mask, null_count] = reduce_group_validity(ctx, stream, mr);
   result.set_null_mask(std::move(null_mask), null_count);
 }
 
 std::unique_ptr<column> make_size_type_column(reduction_context const& ctx,
+                                              cuda::stream_ref stream,
                                               cudf::memory_resources mr)
 {
   return make_fixed_width_column(data_type{type_to_id<size_type>()},
                                  ctx.num_groups,
                                  mask_state::UNALLOCATED,
-                                 ctx.stream,
+                                 stream,
                                  mr.get_output_mr());
 }
 
 std::unique_ptr<column> count_groups(reduction_context const& ctx,
                                      bool valid_only,
+                                     cuda::stream_ref stream,
                                      cudf::memory_resources mr)
 {
-  auto result = make_size_type_column(ctx, mr);
+  auto result = make_size_type_column(ctx, stream, mr);
   if (ctx.num_groups == 0) { return result; }
 
   if (valid_only && ctx.values.has_nulls()) {
@@ -64,10 +70,10 @@ std::unique_ptr<column> count_groups(reduction_context const& ctx,
                   result->mutable_view().begin<size_type>(),
                   cuda::std::plus<size_type>{},
                   size_type{0},
-                  ctx.stream,
+                  stream,
                   mr.get_temporary_mr());
   } else {
-    thrust::adjacent_difference(rmm::exec_policy_nosync(ctx.stream, mr.get_temporary_mr()),
+    thrust::adjacent_difference(rmm::exec_policy_nosync(stream, mr.get_temporary_mr()),
                                 ctx.grouped.offsets.begin() + 1,
                                 ctx.grouped.offsets.end(),
                                 result->mutable_view().begin<size_type>());
@@ -75,31 +81,38 @@ std::unique_ptr<column> count_groups(reduction_context const& ctx,
   return result;
 }
 
-/// Calls `f.template operator()<K>()` for the reduction kind `kind`.
-template <typename F>
-auto dispatch_reduction_kind(aggregation::Kind kind, F&& f)
+/// Calls `f.template operator()<K>(args...)` for the reduction kind `kind`.
+template <typename F, typename... Args>
+auto dispatch_reduction_kind(aggregation::Kind kind, F&& f, Args&&... args)
 {
   switch (kind) {
-    case aggregation::SUM: return f.template operator()<aggregation::SUM>();
-    case aggregation::PRODUCT: return f.template operator()<aggregation::PRODUCT>();
-    case aggregation::SUM_OF_SQUARES: return f.template operator()<aggregation::SUM_OF_SQUARES>();
-    case aggregation::MIN: return f.template operator()<aggregation::MIN>();
-    case aggregation::MAX: return f.template operator()<aggregation::MAX>();
-    case aggregation::ARGMIN: return f.template operator()<aggregation::ARGMIN>();
-    case aggregation::ARGMAX: return f.template operator()<aggregation::ARGMAX>();
-    case aggregation::SUM_OVERFLOW: return f.template operator()<aggregation::SUM_OVERFLOW>();
+    case aggregation::SUM:
+      return f.template operator()<aggregation::SUM>(std::forward<Args>(args)...);
+    case aggregation::PRODUCT:
+      return f.template operator()<aggregation::PRODUCT>(std::forward<Args>(args)...);
+    case aggregation::SUM_OF_SQUARES:
+      return f.template operator()<aggregation::SUM_OF_SQUARES>(std::forward<Args>(args)...);
+    case aggregation::MIN:
+      return f.template operator()<aggregation::MIN>(std::forward<Args>(args)...);
+    case aggregation::MAX:
+      return f.template operator()<aggregation::MAX>(std::forward<Args>(args)...);
+    case aggregation::ARGMIN:
+      return f.template operator()<aggregation::ARGMIN>(std::forward<Args>(args)...);
+    case aggregation::ARGMAX:
+      return f.template operator()<aggregation::ARGMAX>(std::forward<Args>(args)...);
+    case aggregation::SUM_OVERFLOW:
+      return f.template operator()<aggregation::SUM_OVERFLOW>(std::forward<Args>(args)...);
     default: CUDF_FAIL("Unsupported hash groupby aggregation");
   }
 }
 
 struct compute_reduction_fn {
   reduction_context const& ctx;
-  cudf::memory_resources mr;
 
   template <aggregation::Kind K>
-  std::unique_ptr<column> operator()() const
+  std::unique_ptr<column> operator()(cuda::stream_ref stream, cudf::memory_resources mr) const
   {
-    return compute_reduction<K>(ctx, mr);
+    return compute_reduction<K>(ctx, stream, mr);
   }
 };
 
@@ -124,12 +137,13 @@ struct is_reduction_kind_supported_fn {
 
 std::unique_ptr<column> compute_aggregation(aggregation::Kind kind,
                                             reduction_context const& ctx,
+                                            cuda::stream_ref stream,
                                             cudf::memory_resources mr)
 {
   switch (kind) {
-    case aggregation::COUNT_VALID: return count_groups(ctx, true, mr);
-    case aggregation::COUNT_ALL: return count_groups(ctx, false, mr);
-    default: return dispatch_reduction_kind(kind, compute_reduction_fn{ctx, mr});
+    case aggregation::COUNT_VALID: return count_groups(ctx, true, stream, mr);
+    case aggregation::COUNT_ALL: return count_groups(ctx, false, stream, mr);
+    default: return dispatch_reduction_kind(kind, compute_reduction_fn{ctx}, stream, mr);
   }
 }
 
@@ -255,8 +269,7 @@ std::vector<std::unique_ptr<column>> compute_single_pass_aggs(
     // Counts are never null, and intermediate results skip the null mask to avoid the extra work.
     auto const nullable = !is_agg_intermediate[i] && kind != aggregation::COUNT_VALID &&
                           kind != aggregation::COUNT_ALL && col.has_nulls();
-    auto const ctx =
-      reduction_context{col, *d_col, values_type, grouped, num_groups, nullable, stream};
+    auto const ctx = reduction_context{col, *d_col, values_type, grouped, num_groups, nullable};
 
     auto const end = fused_end(i, values_type);
     if (end > i + 1) {
@@ -264,13 +277,14 @@ std::vector<std::unique_ptr<column>> compute_single_pass_aggs(
         compute_fused_sums(ctx,
                            host_span<aggregation::Kind const>{agg_kinds}.subspan(i, end - i),
                            is_agg_intermediate.subspan(i, end - i),
+                           stream,
                            mr);
       std::move(fused.begin(), fused.end(), std::back_inserter(results));
     } else {
       auto const resources = is_agg_intermediate[i] ? cudf::memory_resources{mr.get_temporary_mr(),
                                                                              mr.get_temporary_mr()}
                                                     : mr;
-      results.push_back(compute_aggregation(kind, ctx, resources));
+      results.push_back(compute_aggregation(kind, ctx, stream, resources));
     }
     i = end;
   }

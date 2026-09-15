@@ -25,7 +25,6 @@ struct reduction_context {
   grouped_rows const& grouped;
   size_type num_groups;
   bool nullable;  ///< Whether the result carries a null mask
-  cuda::stream_ref stream;
 
   template <typename T>
   value_accessor<T> accessor() const;
@@ -33,36 +32,44 @@ struct reduction_context {
 
 // Shared host helpers are defined only in the frontend, keeping their reduction kernels unique.
 std::pair<rmm::device_buffer, size_type> reduce_group_validity(reduction_context const& ctx,
+                                                               cuda::stream_ref stream,
                                                                cudf::memory_resources mr);
-void set_group_null_mask(column& result, reduction_context const& ctx, cudf::memory_resources mr);
+void set_group_null_mask(column& result,
+                         reduction_context const& ctx,
+                         cuda::stream_ref stream,
+                         cudf::memory_resources mr);
 std::unique_ptr<column> make_size_type_column(reduction_context const& ctx,
+                                              cuda::stream_ref stream,
                                               cudf::memory_resources mr);
 
 // Kind-specific TUs explicitly instantiate this bridge; the frontend needs no reducer definition.
 template <aggregation::Kind K>
-std::unique_ptr<column> compute_reduction(reduction_context const& ctx, cudf::memory_resources mr);
+std::unique_ptr<column> compute_reduction(reduction_context const& ctx,
+                                          cuda::stream_ref stream,
+                                          cudf::memory_resources mr);
 
 // Suppress implicit instantiation in the frontend and other reducer translation units.
 extern template std::unique_ptr<column> compute_reduction<aggregation::SUM>(
-  reduction_context const& ctx, cudf::memory_resources mr);
+  reduction_context const& ctx, cuda::stream_ref stream, cudf::memory_resources mr);
 extern template std::unique_ptr<column> compute_reduction<aggregation::PRODUCT>(
-  reduction_context const& ctx, cudf::memory_resources mr);
+  reduction_context const& ctx, cuda::stream_ref stream, cudf::memory_resources mr);
 extern template std::unique_ptr<column> compute_reduction<aggregation::SUM_OF_SQUARES>(
-  reduction_context const& ctx, cudf::memory_resources mr);
+  reduction_context const& ctx, cuda::stream_ref stream, cudf::memory_resources mr);
 extern template std::unique_ptr<column> compute_reduction<aggregation::MIN>(
-  reduction_context const& ctx, cudf::memory_resources mr);
+  reduction_context const& ctx, cuda::stream_ref stream, cudf::memory_resources mr);
 extern template std::unique_ptr<column> compute_reduction<aggregation::MAX>(
-  reduction_context const& ctx, cudf::memory_resources mr);
+  reduction_context const& ctx, cuda::stream_ref stream, cudf::memory_resources mr);
 extern template std::unique_ptr<column> compute_reduction<aggregation::ARGMIN>(
-  reduction_context const& ctx, cudf::memory_resources mr);
+  reduction_context const& ctx, cuda::stream_ref stream, cudf::memory_resources mr);
 extern template std::unique_ptr<column> compute_reduction<aggregation::ARGMAX>(
-  reduction_context const& ctx, cudf::memory_resources mr);
+  reduction_context const& ctx, cuda::stream_ref stream, cudf::memory_resources mr);
 extern template std::unique_ptr<column> compute_reduction<aggregation::SUM_OVERFLOW>(
-  reduction_context const& ctx, cudf::memory_resources mr);
+  reduction_context const& ctx, cuda::stream_ref stream, cudf::memory_resources mr);
 
 std::vector<std::unique_ptr<column>> compute_fused_sums(reduction_context const& ctx,
                                                         host_span<aggregation::Kind const> kinds,
                                                         std::span<int8_t const> is_intermediate,
+                                                        cuda::stream_ref stream,
                                                         cudf::memory_resources mr);
 
 }  // namespace cudf::groupby::detail::hash
