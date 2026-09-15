@@ -84,22 +84,6 @@ CUDF_KERNEL void hash_csr_probe_count_kernel(size_type num_rows,
  * Invalid or unmatched rows count once in outer mode and zero times in inner mode. The set and
  * CSR must describe the same completed build. Zero flags and counter before a fresh tally;
  * each matched build row is counted once. Does nothing when num_rows is zero.
- *
- * @tparam IsOuter Whether unmatched probe rows produce an output pair
- * @tparam Equal Device callable comparing a probe key with a stored build key
- * @tparam Hasher Device callable hashing a probe row index
- *
- * @param num_rows Number of probe rows
- * @param valid_rows Probe validity mask, or nullptr to include every row
- * @param probe_slots Optional num_rows slots; unmatched rows receive CUDF_SIZE_TYPE_SENTINEL
- * @param match_counts Optional num_rows output counts
- * @param matched_slots Optional capacity-sized match flags; ignored in inner mode
- * @param matched_build_rows Counter required with matched_slots in outer mode; otherwise optional
- * @param hash_set Completed set of build keys
- * @param csr Build row indices grouped by set slot
- * @param equal Probe-to-build key equality predicate
- * @param hasher Probe row hash function, consistent with the build hashes
- * @param stream CUDA stream used for the kernel launch
  */
 template <bool IsOuter, typename Equal, typename Hasher>
 void launch_hash_csr_probe_count_kernel(size_type num_rows,

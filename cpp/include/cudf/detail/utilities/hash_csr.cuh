@@ -6,12 +6,12 @@
 #pragma once
 
 #include <cudf/detail/cuco_helpers.hpp>
+#include <cudf/detail/iterator.cuh>
 #include <cudf/hashing.hpp>
 #include <cudf/types.hpp>
 
 #include <cuco/pair.cuh>
 #include <cuda/atomic>
-#include <cuda/iterator>
 #include <cuda/std/cstdint>
 #include <cuda/std/limits>
 #include <cuda/std/type_traits>
@@ -216,8 +216,7 @@ struct csr_ref {
    */
   auto begin() const
   {
-    return cuda::transform_iterator(cuda::counting_iterator{size_type{0}},
-                                    offset_fn{cumulative_ends});
+    return make_counting_transform_iterator(size_type{0}, offset_fn{cumulative_ends});
   }
 };
 
