@@ -368,8 +368,9 @@ void reduce_groups(grouped_rows const& grouped,
                   mr);
 }
 
-/// The device representation of a column element. Chrono and fixed-point columns reduce as their
-/// integer reps, so the reduction kernels are only instantiated once per representation.
+/// Representation used to share reduction instantiations across column types.
+/// `device_storage_type_t` unwraps decimals but leaves chrono wrappers intact, so chrono columns
+/// additionally use `T::rep` to reduce as their underlying integers.
 template <typename T>
 struct rep_type {
   using type = device_storage_type_t<T>;
