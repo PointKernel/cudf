@@ -5,7 +5,7 @@
 
 #include "single_pass_reductions.cuh"
 
-namespace cudf::groupby::detail::hash::single_pass {
+namespace cudf::groupby::detail::hash {
 
 template std::unique_ptr<column> compute_reduction<aggregation::SUM>(reduction_context const& ctx,
                                                                      cudf::memory_resources mr);
@@ -20,4 +20,4 @@ std::vector<std::unique_ptr<column>> compute_fused_sums(reduction_context const&
   return type_dispatcher(ctx.values_type, fused_sums_fn{}, ctx, kinds, is_intermediate, mr);
 }
 
-}  // namespace cudf::groupby::detail::hash::single_pass
+}  // namespace cudf::groupby::detail::hash

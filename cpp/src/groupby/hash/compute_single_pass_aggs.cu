@@ -10,7 +10,6 @@
 #include <thrust/tabulate.h>
 
 namespace cudf::groupby::detail::hash {
-namespace single_pass {
 
 /// A group is valid when any of its rows is valid.
 std::pair<rmm::device_buffer, size_type> reduce_group_validity(reduction_context const& ctx,
@@ -134,8 +133,6 @@ std::unique_ptr<column> compute_aggregation(aggregation::Kind kind,
   }
 }
 
-}  // namespace single_pass
-
 bool is_single_pass_agg_supported(data_type values_type, aggregation::Kind kind)
 {
   // Values of STRUCT and LIST types are not aggregated by the hash groupby.
@@ -151,8 +148,7 @@ bool is_single_pass_agg_supported(data_type values_type, aggregation::Kind kind)
     case aggregation::ARGMIN:
     case aggregation::ARGMAX:
     case aggregation::SUM_OVERFLOW:
-      return single_pass::dispatch_reduction_kind(
-        kind, single_pass::is_reduction_kind_supported_fn{values_type});
+      return dispatch_reduction_kind(kind, is_reduction_kind_supported_fn{values_type});
     default: return false;
   }
 }
@@ -174,8 +170,8 @@ grouped_rows make_grouped_rows(device_span<size_type const> rows,
   // Small groups are packed several per block; every segment is then bounded by a shorter chunk
   // so that no thread or sub-warp is left walking a long group alone.
   auto const avg_rows   = num_rows / num_groups;
-  auto const packed     = avg_rows < single_pass::min_avg_rows_per_segment;
-  auto const chunk_rows = packed ? single_pass::packed_rows_per_chunk : single_pass::rows_per_chunk;
+  auto const packed     = avg_rows < min_avg_rows_per_segment;
+  auto const chunk_rows = packed ? packed_rows_per_chunk : rows_per_chunk;
   grouped.packed_rows   = packed ? std::max<size_type>(avg_rows, 1) : 0;
 
   auto const policy       = rmm::exec_policy_nosync(stream, temp_mr);
@@ -234,12 +230,12 @@ std::vector<std::unique_ptr<column>> compute_single_pass_aggs(
   // that can be computed together with the aggregation at `begin`.
   auto const fused_end = [&](std::size_t begin, data_type values_type) {
     auto const& col = values.column(begin);
-    if (!single_pass::is_fusable_sum(agg_kinds[begin]) ||
+    if (!is_fusable_sum(agg_kinds[begin]) ||
         !is_single_pass_agg_supported(values_type, aggregation::SUM_OF_SQUARES)) {
       return begin + 1;
     }
     auto end = begin + 1;
-    while (end < num_aggs && single_pass::is_fusable_sum(agg_kinds[end]) &&
+    while (end < num_aggs && is_fusable_sum(agg_kinds[end]) &&
            cudf::detail::is_shallow_equivalent(col, values.column(end)) &&
            std::find(agg_kinds.begin() + begin, agg_kinds.begin() + end, agg_kinds[end]) ==
              agg_kinds.begin() + end) {
@@ -259,22 +255,22 @@ std::vector<std::unique_ptr<column>> compute_single_pass_aggs(
     // Counts are never null, and intermediate results skip the null mask to avoid the extra work.
     auto const nullable = !is_agg_intermediate[i] && kind != aggregation::COUNT_VALID &&
                           kind != aggregation::COUNT_ALL && col.has_nulls();
-    auto const ctx = single_pass::reduction_context{
-      col, *d_col, values_type, grouped, num_groups, nullable, stream};
+    auto const ctx =
+      reduction_context{col, *d_col, values_type, grouped, num_groups, nullable, stream};
 
     auto const end = fused_end(i, values_type);
     if (end > i + 1) {
-      auto fused = single_pass::compute_fused_sums(
-        ctx,
-        host_span<aggregation::Kind const>{agg_kinds}.subspan(i, end - i),
-        is_agg_intermediate.subspan(i, end - i),
-        mr);
+      auto fused =
+        compute_fused_sums(ctx,
+                           host_span<aggregation::Kind const>{agg_kinds}.subspan(i, end - i),
+                           is_agg_intermediate.subspan(i, end - i),
+                           mr);
       std::move(fused.begin(), fused.end(), std::back_inserter(results));
     } else {
       auto const resources = is_agg_intermediate[i] ? cudf::memory_resources{mr.get_temporary_mr(),
                                                                              mr.get_temporary_mr()}
                                                     : mr;
-      results.push_back(single_pass::compute_aggregation(kind, ctx, resources));
+      results.push_back(compute_aggregation(kind, ctx, resources));
     }
     i = end;
   }

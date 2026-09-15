@@ -13,7 +13,7 @@
 
 #include <utility>
 
-namespace cudf::groupby::detail::hash::single_pass {
+namespace cudf::groupby::detail::hash {
 
 template <typename T>
 struct value_accessor;
@@ -65,4 +65,4 @@ std::vector<std::unique_ptr<column>> compute_fused_sums(reduction_context const&
                                                         std::span<int8_t const> is_intermediate,
                                                         cudf::memory_resources mr);
 
-}  // namespace cudf::groupby::detail::hash::single_pass
+}  // namespace cudf::groupby::detail::hash

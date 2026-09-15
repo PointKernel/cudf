@@ -51,7 +51,7 @@
 #include <utility>
 #include <vector>
 
-namespace cudf::groupby::detail::hash::single_pass {
+namespace cudf::groupby::detail::hash {
 
 /// Reads a fixed-width element, going through the keys when the column is a dictionary.
 template <typename T>
@@ -402,7 +402,7 @@ constexpr bool is_reduction_supported()
 }
 
 template <aggregation::Kind K>
-struct reduce_fn {
+struct grouped_reduction_fn {
   template <typename T>
     requires(is_reduction_supported<K, T>() &&
              (K == aggregation::SUM || K == aggregation::PRODUCT ||
@@ -633,7 +633,7 @@ struct fused_sums_fn {
 template <aggregation::Kind K>
 std::unique_ptr<column> compute_reduction(reduction_context const& ctx, cudf::memory_resources mr)
 {
-  return type_dispatcher(ctx.values_type, reduce_fn<K>{}, ctx, mr);
+  return type_dispatcher(ctx.values_type, grouped_reduction_fn<K>{}, ctx, mr);
 }
 
-}  // namespace cudf::groupby::detail::hash::single_pass
+}  // namespace cudf::groupby::detail::hash
