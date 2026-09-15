@@ -27,7 +27,7 @@
 namespace cudf::groupby::detail::hash {
 
 /// One open-addressed slot: the first input row that claimed the slot.
-using hash_table_entry_type = size_type;
+using slot_type = size_type;
 
 /// Each input row records its group count index and its rank among the rows of that group.
 using build_position_type = cuco::pair<cuda::std::uint32_t, size_type>;
@@ -38,31 +38,31 @@ constexpr cuda::std::uint32_t hash_csr_no_slot =
 
 constexpr thread_index_type hash_csr_block_size = 256;
 
-/// Inputs with at least this many rows size the table from an estimate of the number of distinct
-/// keys instead of the row count; smaller inputs get a table for every row right away.
+/// Inputs with at least this many rows size the set from an estimate of the number of distinct
+/// keys instead of the row count; smaller inputs get a set for every row right away.
 constexpr size_type hash_csr_min_rows_to_estimate = 1 << 21;
-/// Keys wider than this (in bytes per row) always get a table for every row: every probe of an
-/// occupied slot compares keys, which costs more than the smaller table saves for them.
+/// Keys wider than this (in bytes per row) always get a set for every row: every probe of an
+/// occupied slot compares keys, which costs more than the smaller set saves for them.
 constexpr size_type hash_csr_max_estimated_key_bytes = 32;
-/// Slots of the table the distinct keys of a sample of the rows are counted in.
+/// Slots of the set the distinct keys of a sample of the rows are counted in.
 constexpr cuda::std::uint32_t hash_csr_sample_capacity = 1u << 20;
-/// Fewest slots of a table sized from an estimate, so that a handful of hot slots still spread
+/// Fewest slots of a set sized from an estimate, so that a handful of hot slots still spread
 /// over many cache lines.
 constexpr cuda::std::uint32_t hash_csr_min_estimated_capacity = 1u << 18;
-/// A probe this long is vanishingly unlikely at a load factor of one half, so it means the table
+/// A probe this long is vanishingly unlikely at a load factor of one half, so it means the set
 /// is (nearly) full and the build has to restart with a larger one.
 constexpr cuda::std::uint32_t hash_csr_max_probes = 256;
 
-/// Device view of the linearly probed open-addressed table that maps each distinct key to a slot.
-struct hash_csr_table_ref {
-  hash_table_entry_type* entries;
+/// Device view of the linearly probed open-addressed set that maps each distinct key to a slot.
+struct hash_set_ref {
+  slot_type* slots;
   cuda::std::uint32_t capacity;
-  cuda::std::uint32_t max_probes;  ///< Probes after which the table is declared full
+  cuda::std::uint32_t max_probes;  ///< Probes after which the set is declared full
 
   /**
    * @brief Returns the slot owned by the key of `row`, claiming an empty slot when the key is new.
    *
-   * Most groupby rows repeat a key that is already in the table, so each slot is read before any
+   * Most groupby rows repeat a key that is already in the set, so each slot is read before any
    * attempt to claim it and the compare-and-swap only runs on empty slots.
    *
    * @param representative Receives the row stored in the matching slot, or the empty sentinel
@@ -70,17 +70,18 @@ struct hash_csr_table_ref {
    * probed without success
    */
   template <typename Equal>
-  __device__ cuda::std::pair<cuda::std::uint32_t, bool> insert_or_find(
-    size_type row, hash_value_type hash, Equal const& equal, size_type& representative) const
+  __device__ cuda::std::pair<cuda::std::uint32_t, bool> insert(size_type row,
+                                                               hash_value_type hash_value,
+                                                               Equal const& equal,
+                                                               size_type& representative) const
   {
     representative = cudf::detail::CUDF_SIZE_TYPE_SENTINEL;
-    auto slot      = static_cast<cuda::std::uint32_t>(hash % capacity);
+    auto slot      = static_cast<cuda::std::uint32_t>(hash_value % capacity);
     for (cuda::std::uint32_t step = 0; step < max_probes; ++step) {
-      auto entry_ref =
-        cuda::atomic_ref<hash_table_entry_type, cuda::thread_scope_device>{entries[slot]};
-      auto current = entry_ref.load(cuda::memory_order_relaxed);
+      auto slot_ref = cuda::atomic_ref<slot_type, cuda::thread_scope_device>{slots[slot]};
+      auto current  = slot_ref.load(cuda::memory_order_relaxed);
       if (current == cudf::detail::CUDF_SIZE_TYPE_SENTINEL &&
-          entry_ref.compare_exchange_strong(current, row, cuda::memory_order_relaxed)) {
+          slot_ref.compare_exchange_strong(current, row, cuda::memory_order_relaxed)) {
         representative = row;
         return {slot, true};
       }
@@ -95,15 +96,15 @@ struct hash_csr_table_ref {
 };
 
 /**
- * @brief Inserts every valid row into the table and, when `positions` is given, records the slot
+ * @brief Inserts every valid row into the set and, when `positions` is given, records the slot
  * of each row and its rank within that slot.
  *
  * Ranks are handed out by one atomic per distinct slot per warp: lanes that landed in the same
  * slot combine their increments, which keeps low-cardinality inputs from serializing on a few
  * counters.
  *
- * When `overflow` is given, a row whose probe runs out of `table.max_probes` slots sets it and
- * the rows still to come are skipped: the caller then rebuilds with a larger table.
+ * When `overflow` is given, a row whose probe runs out of `set.max_probes` slots sets it and
+ * the rows still to come are skipped: the caller then rebuilds with a larger set.
  */
 template <typename Equal, typename Hasher>
 CUDF_KERNEL void hash_csr_build_kernel(size_type num_rows,
@@ -111,7 +112,7 @@ CUDF_KERNEL void hash_csr_build_kernel(size_type num_rows,
                                        build_position_type* positions,
                                        size_type* slot_counts,
                                        bool count_by_representative,
-                                       hash_csr_table_ref table,
+                                       hash_set_ref set,
                                        Equal equal,
                                        Hasher hasher,
                                        int* overflow)
@@ -138,8 +139,8 @@ CUDF_KERNEL void hash_csr_build_kernel(size_type num_rows,
     if (is_active) {
       auto const index = static_cast<size_type>(row);
       size_type representative{};
-      slot = table.insert_or_find(index, hasher(index), equal, representative).first;
-      if (slot == table.capacity) {
+      slot = set.insert(index, hasher(index), equal, representative).first;
+      if (slot == set.capacity) {
         cuda::atomic_ref<int, cuda::thread_scope_device>{*overflow}.store(
           1, cuda::memory_order_relaxed);
         slot = hash_csr_no_slot;
@@ -147,7 +148,7 @@ CUDF_KERNEL void hash_csr_build_kernel(size_type num_rows,
         slot = static_cast<cuda::std::uint32_t>(representative);
       }
     }
-    // Without aggregations only the distinct keys matter, and the table alone provides them.
+    // Without aggregations only the distinct keys matter, and the set alone provides them.
     if (positions == nullptr) { continue; }
 
     auto const has_slot    = slot != hash_csr_no_slot;
@@ -172,7 +173,7 @@ CUDF_KERNEL void hash_csr_build_kernel(size_type num_rows,
 }
 
 /**
- * @brief Inserts every `stride`-th valid row into the table and counts the sampled rows and the
+ * @brief Inserts every `stride`-th valid row into the set and counts the sampled rows and the
  * slots they claim.
  *
  * Rows are sampled one at a time rather than in runs, since neighboring rows often share a key.
@@ -183,7 +184,7 @@ template <typename Equal, typename Hasher>
 CUDF_KERNEL void hash_csr_sample_kernel(size_type num_rows,
                                         size_type stride,
                                         bitmask_type const* valid_rows,
-                                        hash_csr_table_ref table,
+                                        hash_set_ref set,
                                         Equal equal,
                                         Hasher hasher,
                                         size_type* counts)
@@ -196,7 +197,7 @@ CUDF_KERNEL void hash_csr_sample_kernel(size_type num_rows,
   if (is_valid) {
     auto const index = static_cast<size_type>(row);
     size_type representative{};
-    is_new = table.insert_or_find(index, hasher(index), equal, representative).second;
+    is_new = set.insert(index, hasher(index), equal, representative).second;
   }
   // Every thread of the block reaches both counts, which is what they require.
   auto const num_valid = __syncthreads_count(is_valid);
@@ -231,7 +232,7 @@ void launch_hash_csr_build_kernel(size_type num_rows,
                                   build_position_type* positions,
                                   size_type* slot_counts,
                                   bool count_by_representative,
-                                  hash_csr_table_ref table,
+                                  hash_set_ref set,
                                   Equal equal,
                                   Hasher hasher,
                                   int* overflow,
@@ -245,7 +246,7 @@ void launch_hash_csr_build_kernel(size_type num_rows,
     positions,
     slot_counts,
     count_by_representative,
-    table,
+    set,
     equal,
     hasher,
     overflow);
@@ -256,7 +257,7 @@ template <typename Equal, typename Hasher>
 void launch_hash_csr_sample_kernel(size_type num_rows,
                                    size_type stride,
                                    bitmask_type const* valid_rows,
-                                   hash_csr_table_ref table,
+                                   hash_set_ref set,
                                    Equal equal,
                                    Hasher hasher,
                                    size_type* counts,
@@ -266,7 +267,7 @@ void launch_hash_csr_sample_kernel(size_type num_rows,
   if (num_samples == 0) { return; }
   auto const config = cudf::detail::grid_1d{num_samples, hash_csr_block_size};
   hash_csr_sample_kernel<<<config.num_blocks, config.num_threads_per_block, 0, stream.get()>>>(
-    num_rows, stride, valid_rows, table, equal, hasher, counts);
+    num_rows, stride, valid_rows, set, equal, hasher, counts);
   CUDF_CUDA_TRY(cudaGetLastError());
 }
 
