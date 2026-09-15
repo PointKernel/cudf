@@ -6,15 +6,28 @@
 #pragma once
 
 #include <cudf/column/column_device_view.cuh>
+#include <cudf/column/column_device_view_base.cuh>
 #include <cudf/detail/row_operator/common_utils.cuh>
 #include <cudf/detail/row_operator/lexicographic_common.cuh>
 #include <cudf/detail/row_operator/primitive_row_operators.cuh>
 #include <cudf/detail/utilities/assert.cuh>
+#include <cudf/detail/utilities/cuda.hpp>
+#include <cudf/detail/utilities/vector_factories.hpp>
 #include <cudf/table/table_device_view.cuh>
+#include <cudf/table/table_view.hpp>
 #include <cudf/types.hpp>
+#include <cudf/utilities/default_stream.hpp>
+#include <cudf/utilities/memory_resource.hpp>
 #include <cudf/utilities/span.hpp>
 #include <cudf/utilities/traits.hpp>
 #include <cudf/utilities/type_dispatcher.hpp>
+
+#include <rmm/device_uvector.hpp>
+#include <rmm/resource_ref.hpp>
+
+#include <cuda/stream>
+
+#include <type_traits>
 
 namespace cudf::detail::row::primitive {
 
@@ -113,6 +126,62 @@ class row_lexicographic_comparator {
   table_device_view _table;
   device_span<order const> _column_order;
   device_span<null_order const> _null_precedence;
+};
+
+/**
+ * @brief Owns the device metadata for lexicographic comparisons within a numeric table.
+ *
+ * Host ordering policies may be released after construction. The input column data must remain
+ * valid during comparisons. Use the returned device functor on the construction stream and keep
+ * this object alive until all uses have been submitted to that stream.
+ */
+class self_comparator {
+ public:
+  /**
+   * @brief Copies ordering policies and creates a device view of the numeric table.
+   *
+   * @param table Table whose columns must all be numeric
+   * @param column_order Per-column sort order, or an empty span for all ascending
+   * @param null_precedence Per-column null order, or an empty span for all nulls before
+   * @param stream Stream used for initialization and comparisons
+   */
+  self_comparator(table_view const& table,
+                  host_span<order const> column_order         = {},
+                  host_span<null_order const> null_precedence = {},
+                  cuda::stream_ref stream                     = cudf::get_default_stream())
+    : _table{table_device_view::create(table, stream)},
+      _column_order{cudf::detail::make_device_uvector_async(
+        column_order, stream, cudf::get_current_device_resource_ref())},
+      _null_precedence{cudf::detail::make_device_uvector_async(
+        null_precedence, stream, cudf::get_current_device_resource_ref())}
+  {
+    if (not column_order.empty() or not null_precedence.empty()) {
+      // Finish copying the host policies before the caller can release them.
+      cudf::detail::sync_stream(stream);
+    }
+  }
+
+  /**
+   * @brief Returns a device functor that compares whether one row is less than another.
+   *
+   * @param has_nulls Indicates if the input contains nulls
+   * @return A binary callable accepting two row indices
+   */
+  auto less(nullate::DYNAMIC has_nulls) const
+  {
+    return lexicographic::less_comparator{
+      row_lexicographic_comparator{has_nulls, *_table, _column_order, _null_precedence}};
+  }
+
+ private:
+  using table_device_view_owner = std::invoke_result_t<decltype(table_device_view::create),
+                                                       table_view,
+                                                       cuda::stream_ref,
+                                                       rmm::device_async_resource_ref>;
+
+  table_device_view_owner const _table;
+  rmm::device_uvector<order> const _column_order;
+  rmm::device_uvector<null_order> const _null_precedence;
 };
 
 }  // namespace cudf::detail::row::primitive
