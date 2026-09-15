@@ -176,6 +176,9 @@ CUDF_KERNEL void hash_csr_build_kernel(size_type num_rows,
  * @brief Inserts every `stride`-th valid row into the set and counts the sampled rows and the
  * slots they claim.
  *
+ * Sampling estimates distinct-key cardinality so the full HashCSR set can use fewer slots on
+ * inputs with repeated keys.
+ *
  * Rows are sampled one at a time rather than in runs, since neighboring rows often share a key.
  * `counts[0]` receives the number of valid sampled rows and `counts[1]` the number of distinct
  * keys among them.
