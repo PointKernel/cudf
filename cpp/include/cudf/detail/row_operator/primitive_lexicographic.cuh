@@ -135,7 +135,7 @@ class row_lexicographic_comparator {
  * valid during comparisons. Use the returned device functor on the construction stream and keep
  * this object alive until all uses have been submitted to that stream.
  */
-class self_comparator {
+class lexicographic_comparator {
  public:
   /**
    * @brief Copies ordering policies and creates a device view of the numeric table.
@@ -145,10 +145,10 @@ class self_comparator {
    * @param null_precedence Per-column null order, or an empty span for all nulls before
    * @param stream Stream used for initialization and comparisons
    */
-  self_comparator(table_view const& table,
-                  host_span<order const> column_order         = {},
-                  host_span<null_order const> null_precedence = {},
-                  cuda::stream_ref stream                     = cudf::get_default_stream())
+  lexicographic_comparator(table_view const& table,
+                           host_span<order const> column_order         = {},
+                           host_span<null_order const> null_precedence = {},
+                           cuda::stream_ref stream                     = cudf::get_default_stream())
     : _table{table_device_view::create(table, stream)},
       _column_order{cudf::detail::make_device_uvector_async(
         column_order, stream, cudf::get_current_device_resource_ref())},

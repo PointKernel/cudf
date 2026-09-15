@@ -98,7 +98,8 @@ std::unique_ptr<column> sorted_order(table_view input,
   };
 
   if (is_primitive_row_op_compatible(input)) {
-    auto const comp = row::primitive::self_comparator(input, column_order, null_precedence, stream);
+    auto const comp =
+      row::primitive::lexicographic_comparator(input, column_order, null_precedence, stream);
     do_sort(comp.less(nullate::DYNAMIC{has_nulls(input)}));
   } else {
     auto const comp =
