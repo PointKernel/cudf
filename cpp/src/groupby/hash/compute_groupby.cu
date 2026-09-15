@@ -28,6 +28,7 @@
 #include <rmm/exec_policy.hpp>
 
 #include <cuda/iterator>
+#include <cuda/std/cstddef>
 #include <cuda/std/cstdint>
 #include <cuda/std/iterator>
 #include <cuda/stream>
@@ -320,9 +321,19 @@ grouped_keys group_keys(size_type num_rows,
     rmm::device_uvector<size_type> group_offsets(
       static_cast<std::size_t>(num_rows) + 1, stream, mr.get_output_mr());
     rmm::device_uvector<size_type> grouped_rows(num_rows, stream, mr.get_output_mr());
-    thrust::sequence(policy, key_rows.begin(), key_rows.end(), size_type{0});
-    thrust::sequence(policy, group_offsets.begin(), group_offsets.end(), size_type{0});
-    thrust::sequence(policy, grouped_rows.begin(), grouped_rows.end(), size_type{0});
+    auto const singleton_outputs = cuda::tabulate_output_iterator{
+      [key_rows      = key_rows.data(),
+       group_offsets = group_offsets.data(),
+       grouped_rows  = grouped_rows.data(),
+       num_rows] __device__(cuda::std::ptrdiff_t index, size_type value) -> void {
+        group_offsets[index] = value;
+        if (index < num_rows) {
+          key_rows[index]     = value;
+          grouped_rows[index] = value;
+        }
+      }};
+    thrust::sequence(
+      policy, singleton_outputs, singleton_outputs + group_offsets.size(), size_type{0});
     return {
       num_groups, num_rows, std::move(key_rows), std::move(group_offsets), std::move(grouped_rows)};
   }
