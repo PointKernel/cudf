@@ -168,7 +168,7 @@ std::unique_ptr<column> compute_variance(column_view const& m2,
                                          column_view const& count,
                                          size_type ddof,
                                          cuda::stream_ref stream,
-                                         cudf::memory_resources mr)
+                                         rmm::device_async_resource_ref mr)
 {
   check_input_types(m2, count);
 
@@ -187,7 +187,7 @@ std::unique_ptr<column> compute_std(column_view const& m2,
                                     column_view const& count,
                                     size_type ddof,
                                     cuda::stream_ref stream,
-                                    cudf::memory_resources mr)
+                                    rmm::device_async_resource_ref mr)
 {
   check_input_types(m2, count);
 

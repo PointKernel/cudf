@@ -93,7 +93,7 @@ std::pair<std::unique_ptr<table>, std::vector<aggregation_result>> groupby(
   std::span<aggregation_request const> requests,
   null_policy include_null_keys,
   cuda::stream_ref stream,
-  cudf::memory_resources mr)
+  rmm::device_async_resource_ref mr)
 {
   cudf::detail::result_cache cache(requests.size());
 
