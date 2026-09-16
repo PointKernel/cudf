@@ -29,29 +29,25 @@ namespace cudf::groupby::detail::hash {
 bool is_single_pass_agg_supported(data_type values_type, aggregation::Kind kind);
 
 /**
- * @brief Input rows reordered so that the rows of every group are contiguous, together with the
- * arrays of the reduction strategy chosen for the group size distribution.
+ * @brief Input rows reordered so that each group is a contiguous run with a shared group label.
  *
- * Each group is reduced as a segment. Long groups are split into chunks, then their partial
- * results are combined so that a few long groups can use multiple blocks.
+ * Each label run has one nonempty group, in the same order as the group offsets. Labels may be
+ * empty when every requested aggregation is computed directly from the offsets.
  */
 struct grouped_rows {
-  device_span<size_type const> rows;             ///< Input row index at each grouped position
-  device_span<size_type const> offsets;          ///< `num_groups + 1` offsets delimiting the groups
-  rmm::device_uvector<size_type> chunk_offsets;  ///< `num_chunks + 1` chunk boundaries, only when
-                                                 ///< some group spans several chunks
-  rmm::device_uvector<size_type> group_chunks;   ///< `num_groups + 1` offsets into the chunks, only
-                                                 ///< when some group spans several chunks
+  device_span<size_type const> rows;      ///< Input row index at each grouped position
+  device_span<size_type const> offsets;   ///< `num_groups + 1` offsets delimiting the groups
+  rmm::device_uvector<size_type> labels;  ///< Group label at each grouped position
 };
 
 /**
- * @brief Chooses the reduction strategy for the grouped rows and builds its arrays.
+ * @brief Builds the group labels shared by reductions over the grouped rows.
  *
  * @param rows Input row index at each grouped position
- * @param offsets `num_groups + 1` offsets delimiting the groups
+ * @param offsets `num_groups + 1` offsets delimiting nonempty groups
  * @param stream CUDA stream used for device memory operations and kernel launches
- * @param mr Device memory resources used to allocate the returned arrays and temporary storage
- * @return Grouped rows with the arrays required by the chosen reduction strategy
+ * @param mr Device memory resources used to allocate the returned labels and temporary storage
+ * @return Grouped rows with one label per grouped position
  */
 grouped_rows make_grouped_rows(device_span<size_type const> rows,
                                device_span<size_type const> offsets,

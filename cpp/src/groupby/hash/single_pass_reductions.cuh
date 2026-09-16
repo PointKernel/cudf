@@ -23,23 +23,20 @@
 
 #include <rmm/device_buffer.hpp>
 #include <rmm/device_uvector.hpp>
-#include <rmm/exec_policy.hpp>
 
 #include <cub/device/device_reduce.cuh>
-#include <cub/device/device_segmented_reduce.cuh>
 #include <cuda/functional>
 #include <cuda/iterator>
 #include <cuda/memory_resource>
-#include <cuda/std/algorithm>
-#include <cuda/std/cstdint>
 #include <cuda/std/execution>
 #include <cuda/std/functional>
 #include <cuda/std/tuple>
+#include <cuda/std/type_traits>
 #include <cuda/stream>
 
 #include <algorithm>
 #include <cstddef>
-#include <iterator>
+#include <cstdint>
 #include <memory>
 #include <utility>
 #include <vector>
@@ -210,15 +207,6 @@ constexpr bool is_fusable_sum(aggregation::Kind kind)
          kind == aggregation::COUNT_VALID;
 }
 
-/// Average group size below which long groups use shorter chunks.
-constexpr size_type min_avg_rows_per_large_chunk = 128;
-
-/// Maximum rows per chunk when groups are large on average.
-constexpr size_type rows_per_chunk = 1 << 14;
-
-/// Maximum rows per chunk when groups are small on average.
-constexpr size_type small_group_chunk_size = 1 << 10;
-
 /// The stream and temporary-storage resource handed to the CUB algorithms. Spelled out without
 /// class template argument deduction, which the host compiler rejects for these types outside of
 /// a template.
@@ -233,28 +221,7 @@ inline cub_env_t make_cub_env(cuda::stream_ref stream, rmm::device_async_resourc
                    cub_mr_prop_t{cuda::mr::get_memory_resource_t{}, mr}};
 }
 
-/// Reduces each segment to one output element using CUB.
-template <typename ValueIterator, typename OutputIterator, typename Op, typename T>
-void reduce_segments(device_span<size_type const> offsets,
-                     ValueIterator values,
-                     OutputIterator output,
-                     Op op,
-                     T init,
-                     cuda::stream_ref stream,
-                     rmm::device_async_resource_ref mr)
-{
-  CUDF_CUDA_TRY(
-    cub::DeviceSegmentedReduce::Reduce(values,
-                                       output,
-                                       static_cast<cuda::std::int64_t>(offsets.size() - 1),
-                                       offsets.begin(),
-                                       offsets.begin() + 1,
-                                       op,
-                                       init,
-                                       make_cub_env(stream, mr)));
-}
-
-/// Reduces each group, combining chunk partials when a group spans multiple chunks.
+/// Reduces each contiguous group-label run to one output, preserving the initial value.
 template <typename ValueIterator, typename OutputIterator, typename Op, typename T>
 void reduce_groups(grouped_rows const& grouped,
                    ValueIterator values,
@@ -264,13 +231,22 @@ void reduce_groups(grouped_rows const& grouped,
                    cuda::stream_ref stream,
                    rmm::device_async_resource_ref mr)
 {
-  if (grouped.group_chunks.is_empty()) {
-    reduce_segments(grouped.offsets, values, output, op, init, stream, mr);
-    return;
-  }
-  rmm::device_uvector<T> partials(grouped.chunk_offsets.size() - 1, stream, mr);
-  reduce_segments(grouped.chunk_offsets, values, partials.begin(), op, init, stream, mr);
-  reduce_segments(grouped.group_chunks, partials.begin(), output, op, init, stream, mr);
+  // ReduceByKey has no initial-value parameter. Apply it to the aggregate before the caller's
+  // output iterator splits compound accumulators or writes a result column.
+  auto const initialized_output =
+    cuda::transform_output_iterator{output, [op, init] __device__(T const& aggregate) {
+                                      auto combine = op;
+                                      return combine(init, aggregate);
+                                    }};
+  rmm::device_uvector<size_type> num_runs(1, stream, mr);
+  CUDF_CUDA_TRY(cub::DeviceReduce::ReduceByKey(grouped.labels.begin(),
+                                               cuda::make_discard_iterator(),
+                                               values,
+                                               initialized_output,
+                                               num_runs.begin(),
+                                               op,
+                                               static_cast<size_type>(grouped.labels.size()),
+                                               make_cub_env(stream, mr)));
 }
 
 /// Representation used to share reduction instantiations across column types.
@@ -448,7 +424,7 @@ struct grouped_reduction_fn {
 };
 
 /// Computes the SUM, SUM_OF_SQUARES and COUNT_VALID aggregations requested on one column, as
-/// extracted for MEAN, M2, VARIANCE and STD, with a single segmented reduction.
+/// extracted for MEAN, M2, VARIANCE and STD, with a single grouped reduction.
 struct fused_sums_fn {
   template <typename T>
     requires(cudf::detail::is_product_supported<T>())

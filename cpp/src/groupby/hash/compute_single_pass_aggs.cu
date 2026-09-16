@@ -13,7 +13,6 @@
 #include <cudf/column/column_factories.hpp>
 #include <cudf/column/column_view.hpp>
 #include <cudf/detail/iterator.cuh>
-#include <cudf/detail/utilities/integer_utils.hpp>
 #include <cudf/detail/valid_if.cuh>
 #include <cudf/dictionary/dictionary_column_view.hpp>
 #include <cudf/table/table_view.hpp>
@@ -29,12 +28,12 @@
 #include <rmm/exec_policy.hpp>
 
 #include <cuda/iterator>
-#include <cuda/std/algorithm>
 #include <cuda/std/functional>
 #include <cuda/stream>
 #include <thrust/adjacent_difference.h>
+#include <thrust/fill.h>
+#include <thrust/for_each.h>
 #include <thrust/scan.h>
-#include <thrust/tabulate.h>
 
 #include <algorithm>
 #include <cstddef>
@@ -206,53 +205,21 @@ grouped_rows make_grouped_rows(device_span<size_type const> rows,
                                cuda::stream_ref stream,
                                cudf::memory_resources mr)
 {
-  auto const temp_mr    = mr.get_temporary_mr();
-  auto const num_rows   = static_cast<size_type>(rows.size());
   auto const num_groups = static_cast<size_type>(offsets.size() - 1);
-  grouped_rows grouped{rows,
-                       offsets,
-                       rmm::device_uvector<size_type>{0, stream, mr.get_output_mr()},
-                       rmm::device_uvector<size_type>{0, stream, mr.get_output_mr()}};
+  grouped_rows grouped{
+    rows, offsets, rmm::device_uvector<size_type>{rows.size(), stream, mr.get_output_mr()}};
   if (num_groups == 0) { return grouped; }
 
-  // Bound the work per chunk, using shorter chunks when most groups are small.
-  auto const avg_rows = num_rows / num_groups;
-  auto const chunk_rows =
-    avg_rows < min_avg_rows_per_large_chunk ? small_group_chunk_size : rows_per_chunk;
-
-  auto const policy       = rmm::exec_policy_nosync(stream, temp_mr);
-  auto const chunk_counts = cudf::detail::make_counting_transform_iterator(
-    0, [offsets = offsets.begin(), chunk_rows] __device__(size_type group) -> size_type {
-      return cudf::util::div_rounding_up_safe(offsets[group + 1] - offsets[group], chunk_rows);
-    });
-  grouped.group_chunks.resize(offsets.size(), stream);
-  grouped.group_chunks.set_element_to_zero_async(0, stream);
-  thrust::inclusive_scan(
-    policy, chunk_counts, chunk_counts + num_groups, grouped.group_chunks.begin() + 1);
-  auto const num_chunks = grouped.group_chunks.back_element(stream);
-  if (num_chunks == num_groups) {
-    // No group spans several chunks, so the groups are the segments.
-    grouped.group_chunks.resize(0, stream);
-    grouped.group_chunks.shrink_to_fit(stream);
-    return grouped;
-  }
-
-  grouped.chunk_offsets.resize(static_cast<std::size_t>(num_chunks) + 1, stream);
-  thrust::tabulate(
+  // Every group is nonempty, so the interior offsets identify distinct run starts.
+  auto const policy = rmm::exec_policy_nosync(stream, mr.get_temporary_mr());
+  thrust::fill(policy, grouped.labels.begin(), grouped.labels.end(), size_type{0});
+  thrust::for_each(
     policy,
-    grouped.chunk_offsets.begin(),
-    grouped.chunk_offsets.end(),
-    [offsets          = offsets.begin(),
-     group_chunks     = grouped.group_chunks.begin(),
-     group_chunks_end = grouped.group_chunks.end(),
-     num_chunks,
-     num_rows,
-     chunk_rows] __device__(size_type chunk) -> size_type {
-      if (chunk == num_chunks) { return num_rows; }
-      auto const group = static_cast<size_type>(
-        cuda::std::upper_bound(group_chunks, group_chunks_end, chunk) - group_chunks - 1);
-      return offsets[group] + (chunk - group_chunks[group]) * chunk_rows;
-    });
+    offsets.begin() + 1,
+    offsets.end() - 1,
+    [labels = grouped.labels.data()] __device__(size_type offset) { labels[offset] = 1; });
+  thrust::inclusive_scan(
+    policy, grouped.labels.begin(), grouped.labels.end(), grouped.labels.begin());
   return grouped;
 }
 
