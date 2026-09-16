@@ -210,6 +210,57 @@ constexpr bool is_fusable_sum(aggregation::Kind kind)
          kind == aggregation::COUNT_VALID;
 }
 
+/// Extrema retain the input representation while SUM uses its promoted result type.
+template <typename Source, typename Result>
+struct fused_minmax_sum {
+  Source minimum;
+  Source maximum;
+  Result sum;
+  bool valid;
+};
+
+template <typename Source, typename Result>
+struct fused_minmax_sum_op {
+  __device__ fused_minmax_sum<Source, Result> operator()(
+    fused_minmax_sum<Source, Result> const& lhs, fused_minmax_sum<Source, Result> const& rhs) const
+  {
+    return {cudf::detail::corresponding_operator_t<aggregation::MIN>{}(lhs.minimum, rhs.minimum),
+            cudf::detail::corresponding_operator_t<aggregation::MAX>{}(lhs.maximum, rhs.maximum),
+            cudf::detail::corresponding_operator_t<aggregation::SUM>{}(lhs.sum, rhs.sum),
+            lhs.valid || rhs.valid};
+  }
+};
+
+template <typename Source, typename Result>
+struct grouped_fused_minmax_sum_fn {
+  size_type const* grouped_rows;
+  value_accessor<Source> value;
+  bool has_nulls;
+  fused_minmax_sum<Source, Result> identity;
+
+  __device__ fused_minmax_sum<Source, Result> operator()(size_type position) const
+  {
+    auto const row = grouped_rows[position];
+    if (has_nulls && value.col.is_null_nocheck(row)) { return identity; }
+    auto const result = value(row);
+    return {result, result, static_cast<Result>(result), true};
+  }
+};
+
+template <typename Source, typename Result>
+struct split_fused_minmax_sum_fn {
+  __device__ cuda::std::tuple<Source, Source, Result, bool> operator()(
+    fused_minmax_sum<Source, Result> const& value) const
+  {
+    return {value.minimum, value.maximum, value.sum, value.valid};
+  }
+};
+
+constexpr bool is_fusable_minmax_sum(aggregation::Kind kind)
+{
+  return kind == aggregation::MIN || kind == aggregation::MAX || kind == aggregation::SUM;
+}
+
 /// Maximum rows per chunk, independent of the distribution of group sizes.
 constexpr size_type rows_per_chunk               = 1 << 10;
 constexpr thread_index_type reduction_block_size = 256;
@@ -633,6 +684,88 @@ struct fused_sums_fn {
                                                   cudf::memory_resources) const
   {
     CUDF_FAIL("Unsupported type for fused hash groupby sums");
+  }
+};
+
+/// Reduces consecutive MIN/MAX/SUM requests on one input with one value load per row.
+struct fused_minmax_sum_fn {
+  template <typename T>
+    requires(is_reduction_supported<aggregation::SUM, T>() &&
+             is_reduction_supported<aggregation::MIN, T>() &&
+             is_reduction_supported<aggregation::MAX, T>())
+  std::vector<std::unique_ptr<column>> operator()(reduction_context const& ctx,
+                                                  host_span<aggregation::Kind const> kinds,
+                                                  std::span<int8_t const> is_intermediate,
+                                                  cuda::stream_ref stream,
+                                                  cudf::memory_resources mr) const
+  {
+    using Source           = rep_type_t<T>;
+    using Result           = rep_type_t<cudf::detail::target_type_t<T, aggregation::SUM>>;
+    using Min              = cudf::detail::corresponding_operator_t<aggregation::MIN>;
+    using Max              = cudf::detail::corresponding_operator_t<aggregation::MAX>;
+    using Sum              = cudf::detail::corresponding_operator_t<aggregation::SUM>;
+    auto const make_output = [&](aggregation::Kind kind) {
+      auto const it        = std::find(kinds.begin(), kinds.end(), kind);
+      auto const requested = it != kinds.end() && !is_intermediate[it - kinds.begin()];
+      return make_fixed_width_column(cudf::detail::target_type(ctx.values_type, kind),
+                                     ctx.num_groups,
+                                     mask_state::UNALLOCATED,
+                                     stream,
+                                     requested ? mr.get_output_mr() : mr.get_temporary_mr());
+    };
+    auto minimum = make_output(aggregation::MIN);
+    auto maximum = make_output(aggregation::MAX);
+    auto sum     = make_output(aggregation::SUM);
+    rmm::device_uvector<bool> group_valid(ctx.num_groups, stream, mr.get_temporary_mr());
+    if (ctx.num_groups > 0) {
+      auto const identity = fused_minmax_sum<Source, Result>{Min::template identity<Source>(),
+                                                             Max::template identity<Source>(),
+                                                             Sum::template identity<Result>(),
+                                                             false};
+      auto const values   = cudf::detail::make_counting_transform_iterator(
+        0,
+        grouped_fused_minmax_sum_fn<Source, Result>{
+          ctx.grouped.rows.data(), ctx.accessor<Source>(), ctx.values.has_nulls(), identity});
+      auto const outputs = cuda::transform_output_iterator{
+        cuda::make_zip_iterator(minimum->mutable_view().template begin<Source>(),
+                                maximum->mutable_view().template begin<Source>(),
+                                sum->mutable_view().template begin<Result>(),
+                                group_valid.begin()),
+        split_fused_minmax_sum_fn<Source, Result>{}};
+      reduce_groups(ctx.grouped,
+                    values,
+                    outputs,
+                    fused_minmax_sum_op<Source, Result>{},
+                    identity,
+                    stream,
+                    mr.get_temporary_mr());
+    }
+    std::vector<std::unique_ptr<column>> results;
+    for (std::size_t i = 0; i < kinds.size(); ++i) {
+      auto result = kinds[i] == aggregation::MIN   ? std::move(minimum)
+                    : kinds[i] == aggregation::MAX ? std::move(maximum)
+                                                   : std::move(sum);
+      if (!is_intermediate[i] && ctx.values.has_nulls() && ctx.num_groups > 0) {
+        auto [null_mask, null_count] = cudf::detail::valid_if(
+          group_valid.begin(), group_valid.end(), cuda::std::identity{}, stream, mr);
+        result->set_null_mask(std::move(null_mask), null_count);
+      }
+      results.push_back(std::move(result));
+    }
+    return results;
+  }
+
+  template <typename T>
+    requires(!(is_reduction_supported<aggregation::SUM, T>() &&
+               is_reduction_supported<aggregation::MIN, T>() &&
+               is_reduction_supported<aggregation::MAX, T>()))
+  std::vector<std::unique_ptr<column>> operator()(reduction_context const&,
+                                                  host_span<aggregation::Kind const>,
+                                                  std::span<int8_t const>,
+                                                  cuda::stream_ref,
+                                                  cudf::memory_resources) const
+  {
+    CUDF_FAIL("Unsupported type for fused hash groupby extrema and sum");
   }
 };
 

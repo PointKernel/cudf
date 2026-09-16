@@ -777,6 +777,37 @@ INSTANTIATE_TEST_SUITE_P(
 
 struct HashGroupbyCompoundMemoryResourcesTest : public cudf::test::BaseFixture {};
 
+TEST_F(HashGroupbyCompoundMemoryResourcesTest, SameInputMinMaxSum)
+{
+  cudf::test::fixed_width_column_wrapper<int32_t> keys{0, 0, 1, 1, 2, 2};
+  cudf::test::fixed_width_column_wrapper<int32_t> values(
+    {2'000'000'000, 1'000'000'000, -4, 6, 7, 9}, {1, 1, 1, 1, 0, 0});
+  std::vector<cudf::groupby::aggregation_request> requests(1);
+  requests[0].values = values;
+  requests[0].aggregations.push_back(cudf::make_min_aggregation<cudf::groupby_aggregation>());
+  requests[0].aggregations.push_back(cudf::make_max_aggregation<cudf::groupby_aggregation>());
+  requests[0].aggregations.push_back(cudf::make_sum_aggregation<cudf::groupby_aggregation>());
+
+  cudf::test::fixed_width_column_wrapper<int32_t> expect_keys{0, 1, 2};
+  cudf::test::fixed_width_column_wrapper<int32_t> expect_min({1'000'000'000, -4, 0}, {1, 1, 0});
+  cudf::test::fixed_width_column_wrapper<int32_t> expect_max({2'000'000'000, 6, 0}, {1, 1, 0});
+  cudf::test::fixed_width_column_wrapper<int64_t> expect_sum({3'000'000'000LL, 2LL, 0LL},
+                                                             {1, 1, 0});
+
+  test_groupby_memory_resources(
+    cudf::table_view{{keys}}, requests, this->mr(), [&](auto const& result) {
+      ASSERT_EQ(result.second.size(), 1);
+      ASSERT_EQ(result.second.front().results.size(), 3);
+      auto const actual = cudf::table_view{{result.first->view().column(0),
+                                            *result.second.front().results[0],
+                                            *result.second.front().results[1],
+                                            *result.second.front().results[2]}};
+      auto const sorted = cudf::sort(actual);
+      CUDF_TEST_EXPECT_TABLES_EQUAL(
+        cudf::table_view{{expect_keys, expect_min, expect_max, expect_sum}}, sorted->view());
+    });
+}
+
 TEST_F(HashGroupbyCompoundMemoryResourcesTest, NullableMeanVarianceAndStd)
 {
   cudf::test::fixed_width_column_wrapper<int32_t> keys{0, 0, 1, 1, 2, 2};

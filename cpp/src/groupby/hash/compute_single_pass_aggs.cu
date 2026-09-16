@@ -329,6 +329,30 @@ std::vector<std::unique_ptr<column>> compute_single_pass_aggs(
     return end;
   };
 
+  auto const minmax_sum_end = [&](std::size_t begin, data_type values_type) {
+    if (!is_fusable_minmax_sum(agg_kinds[begin]) ||
+        !is_single_pass_agg_supported(values_type, aggregation::SUM) ||
+        !is_single_pass_agg_supported(values_type, aggregation::MIN) ||
+        !is_single_pass_agg_supported(values_type, aggregation::MAX)) {
+      return begin + 1;
+    }
+    auto end = begin + 1;
+    while (end < num_aggs && is_fusable_minmax_sum(agg_kinds[end]) &&
+           cudf::detail::is_shallow_equivalent(values.column(begin), values.column(end)) &&
+           std::find(agg_kinds.begin() + begin, agg_kinds.begin() + end, agg_kinds[end]) ==
+             agg_kinds.begin() + end) {
+      ++end;
+    }
+    auto const sum =
+      std::find(agg_kinds.begin() + begin, agg_kinds.begin() + end, aggregation::SUM);
+    auto const sum_index = static_cast<std::size_t>(sum - agg_kinds.begin());
+    // Do not consume a SUM that already participates in the existing additive fusion.
+    if (sum == agg_kinds.begin() + end || fused_end(sum_index, values_type) > sum_index + 1) {
+      return begin + 1;
+    }
+    return end;
+  };
+
   std::vector<std::unique_ptr<column>> results;
   results.reserve(num_aggs);
   for (std::size_t i = 0; i < num_aggs;) {
@@ -342,14 +366,17 @@ std::vector<std::unique_ptr<column>> compute_single_pass_aggs(
                           kind != aggregation::COUNT_ALL && col.has_nulls();
     auto const ctx = reduction_context{col, *d_col, values_type, grouped, num_groups, nullable};
 
-    auto const end = fused_end(i, values_type);
+    auto const sums_end    = fused_end(i, values_type);
+    auto const extrema_end = minmax_sum_end(i, values_type);
+    auto const end         = std::max(sums_end, extrema_end);
     if (end > i + 1) {
-      auto fused =
-        compute_fused_sums(ctx,
-                           host_span<aggregation::Kind const>{agg_kinds}.subspan(i, end - i),
-                           is_agg_intermediate.subspan(i, end - i),
-                           stream,
-                           mr);
+      auto const compute_fused =
+        extrema_end > sums_end ? compute_fused_minmax_sum : compute_fused_sums;
+      auto fused = compute_fused(ctx,
+                                 host_span<aggregation::Kind const>{agg_kinds}.subspan(i, end - i),
+                                 is_agg_intermediate.subspan(i, end - i),
+                                 stream,
+                                 mr);
       std::move(fused.begin(), fused.end(), std::back_inserter(results));
     } else {
       auto const resources = is_agg_intermediate[i] ? cudf::memory_resources{mr.get_temporary_mr(),
