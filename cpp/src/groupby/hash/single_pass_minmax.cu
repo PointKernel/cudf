@@ -14,4 +14,16 @@ template std::unique_ptr<column> compute_reduction<aggregation::MAX>(reduction_c
                                                                      cuda::stream_ref stream,
                                                                      cudf::memory_resources mr);
 
+template std::vector<std::unique_ptr<column>> compute_reductions<aggregation::MIN>(
+  host_span<reduction_context const>,
+  std::span<int8_t const>,
+  cuda::stream_ref,
+  cudf::memory_resources);
+
+template std::vector<std::unique_ptr<column>> compute_reductions<aggregation::MAX>(
+  host_span<reduction_context const>,
+  std::span<int8_t const>,
+  cuda::stream_ref,
+  cudf::memory_resources);
+
 }  // namespace cudf::groupby::detail::hash

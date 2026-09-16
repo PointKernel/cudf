@@ -159,6 +159,23 @@ struct compute_reduction_fn {
   }
 };
 
+struct compute_reductions_fn {
+  host_span<reduction_context const> contexts;
+  std::span<int8_t const> is_intermediate;
+
+  template <aggregation::Kind K>
+  std::vector<std::unique_ptr<column>> operator()(cuda::stream_ref stream,
+                                                  cudf::memory_resources mr) const
+  {
+    if constexpr (K == aggregation::SUM || K == aggregation::SUM_OF_SQUARES ||
+                  K == aggregation::PRODUCT || K == aggregation::MIN || K == aggregation::MAX) {
+      return compute_reductions<K>(contexts, is_intermediate, stream, mr);
+    } else {
+      CUDF_FAIL("Unsupported batched hash groupby aggregation");
+    }
+  }
+};
+
 template <aggregation::Kind K>
 struct is_reduction_supported_fn {
   template <typename T>
@@ -353,11 +370,32 @@ std::vector<std::unique_ptr<column>> compute_single_pass_aggs(
     return end;
   };
 
+  // Keep each same-input fused run intact; otherwise batch adjacent compatible reductions.
+  auto const batch_end = [&](std::size_t begin, data_type values_type, bool nullable) {
+    auto const kind = agg_kinds[begin];
+    if (kind != aggregation::SUM && kind != aggregation::SUM_OF_SQUARES &&
+        kind != aggregation::PRODUCT && kind != aggregation::MIN && kind != aggregation::MAX) {
+      return begin + 1;
+    }
+    auto end = begin + 1;
+    while (end < num_aggs && agg_kinds[end] == kind) {
+      auto const& col = values.column(end);
+      auto const type =
+        is_dictionary(col.type()) ? dictionary_column_view(col).keys().type() : col.type();
+      if (type != values_type || (!is_agg_intermediate[end] && col.has_nulls()) != nullable ||
+          fused_end(end, type) > end + 1 || minmax_sum_end(end, type) > end + 1) {
+        break;
+      }
+      ++end;
+    }
+    return end;
+  };
+
   std::vector<std::unique_ptr<column>> results;
   results.reserve(num_aggs);
   for (std::size_t i = 0; i < num_aggs;) {
-    auto const& col  = values.column(i);
-    auto const d_col = column_device_view::create(col, stream, mr.get_temporary_mr());
+    auto const& col = values.column(i);
+    auto d_col      = column_device_view::create(col, stream, mr.get_temporary_mr());
     auto const values_type =
       is_dictionary(col.type()) ? dictionary_column_view(col).keys().type() : col.type();
     auto const kind = agg_kinds[i];
@@ -368,7 +406,7 @@ std::vector<std::unique_ptr<column>> compute_single_pass_aggs(
 
     auto const sums_end    = fused_end(i, values_type);
     auto const extrema_end = minmax_sum_end(i, values_type);
-    auto const end         = std::max(sums_end, extrema_end);
+    auto end               = std::max(sums_end, extrema_end);
     if (end > i + 1) {
       auto const compute_fused =
         extrema_end > sums_end ? compute_fused_minmax_sum : compute_fused_sums;
@@ -378,6 +416,22 @@ std::vector<std::unique_ptr<column>> compute_single_pass_aggs(
                                  stream,
                                  mr);
       std::move(fused.begin(), fused.end(), std::back_inserter(results));
+    } else if (end = batch_end(i, values_type, nullable); end > i + 1) {
+      std::vector<decltype(d_col)> device_views;
+      std::vector<reduction_context> contexts;
+      device_views.reserve(end - i);
+      contexts.reserve(end - i);
+      device_views.push_back(std::move(d_col));
+      contexts.push_back(ctx);
+      for (auto j = i + 1; j < end; ++j) {
+        auto const& next = values.column(j);
+        device_views.push_back(column_device_view::create(next, stream, mr.get_temporary_mr()));
+        contexts.push_back(
+          {next, *device_views.back(), values_type, grouped, num_groups, nullable});
+      }
+      auto batch = dispatch_reduction_kind(
+        kind, compute_reductions_fn{contexts, is_agg_intermediate.subspan(i, end - i)}, stream, mr);
+      std::move(batch.begin(), batch.end(), std::back_inserter(results));
     } else {
       auto const resources = is_agg_intermediate[i] ? cudf::memory_resources{mr.get_temporary_mr(),
                                                                              mr.get_temporary_mr()}

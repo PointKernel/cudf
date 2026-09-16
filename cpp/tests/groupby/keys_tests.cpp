@@ -21,6 +21,7 @@
 
 #include <cuda/iterator>
 
+#include <algorithm>
 #include <cmath>
 #include <initializer_list>
 #include <span>
@@ -807,6 +808,91 @@ TEST_F(HashGroupbyCompoundMemoryResourcesTest, SameInputMinMaxSum)
         cudf::table_view{{expect_keys, expect_min, expect_max, expect_sum}}, sorted->view());
     });
 }
+
+struct HashGroupbyBatchedMemoryResourcesTest
+  : cudf::test::BaseFixtureWithParam<cudf::aggregation::Kind> {};
+
+TEST_P(HashGroupbyBatchedMemoryResourcesTest, DistinctInputsAndNullGroups)
+{
+  auto const stream         = cudf::test::get_default_stream();
+  auto const kind           = GetParam();
+  constexpr int num_columns = 3;
+  constexpr int num_rows    = 2'074;
+  std::vector<int32_t> keys_data(num_rows);
+  std::vector<std::vector<int32_t>> data(num_columns, std::vector<int32_t>(num_rows));
+  std::vector<std::vector<bool>> valid(num_columns, std::vector<bool>(num_rows));
+  std::vector<std::vector<int32_t>> minima(num_columns, std::vector<int32_t>(3));
+  auto maxima = minima;
+  auto counts = minima;
+  std::vector<std::vector<int64_t>> sums(num_columns, std::vector<int64_t>(3));
+  // Groups of 2,000, 73 and 1 rows share three distinct columns. Each column has a
+  // different all-null group, so neither partial values nor masks can be shared across columns.
+  for (int row = 0; row < num_rows; ++row) {
+    auto const group = row < 2'000 ? 0 : row < 2'073 ? 1 : 2;
+    keys_data[row]   = group == 0 ? -7 : group == 1 ? 41 : 99;
+    for (int column = 0; column < num_columns; ++column) {
+      auto const value   = (column == 1 ? -1 : 1) * (column + 1) * 100'000'000 + row % 17 - 8;
+      data[column][row]  = value;
+      valid[column][row] = group != 2 - column && row % 5 != column;
+      if (valid[column][row]) {
+        minima[column][group] =
+          counts[column][group] == 0 ? value : std::min(minima[column][group], value);
+        maxima[column][group] =
+          counts[column][group] == 0 ? value : std::max(maxima[column][group], value);
+        sums[column][group] += static_cast<int64_t>(value);
+        ++counts[column][group];
+      }
+    }
+  }
+  auto const keys = cudf::test::fixed_width_column_wrapper<int32_t>(
+    keys_data.begin(), keys_data.end(), stream, this->mr());
+  cudf::test::fixed_width_column_wrapper<int32_t> expect_keys({-7, 41, 99}, stream, this->mr());
+  std::vector<cudf::test::fixed_width_column_wrapper<int32_t>> columns;
+  std::vector<std::unique_ptr<cudf::column>> expected;
+  std::vector<cudf::groupby::aggregation_request> requests(num_columns);
+  columns.reserve(num_columns);
+  for (int column = 0; column < num_columns; ++column) {
+    columns.emplace_back(
+      data[column].begin(), data[column].end(), valid[column].begin(), stream, this->mr());
+    requests[column].values = columns.back();
+    requests[column].aggregations.push_back(
+      kind == cudf::aggregation::MIN   ? cudf::make_min_aggregation<cudf::groupby_aggregation>()
+      : kind == cudf::aggregation::MAX ? cudf::make_max_aggregation<cudf::groupby_aggregation>()
+                                       : cudf::make_sum_aggregation<cudf::groupby_aggregation>());
+    std::vector<bool> expected_valid{
+      counts[column][0] > 0, counts[column][1] > 0, counts[column][2] > 0};
+    if (kind == cudf::aggregation::SUM) {
+      expected.push_back(
+        cudf::test::fixed_width_column_wrapper<int64_t>(
+          sums[column].begin(), sums[column].end(), expected_valid.begin(), stream, this->mr())
+          .release());
+    } else {
+      auto const& extrema = kind == cudf::aggregation::MIN ? minima[column] : maxima[column];
+      expected.push_back(
+        cudf::test::fixed_width_column_wrapper<int32_t>(
+          extrema.begin(), extrema.end(), expected_valid.begin(), stream, this->mr())
+          .release());
+    }
+  }
+  test_groupby_memory_resources(
+    cudf::table_view{{keys}}, requests, this->mr(), [&](auto const& result) {
+      ASSERT_EQ(result.second.size(), num_columns);
+      for (int column = 0; column < num_columns; ++column) {
+        ASSERT_EQ(result.second[column].results.size(), 1);
+        auto const actual =
+          cudf::table_view{{result.first->view().column(0), *result.second[column].results[0]}};
+        auto const sorted = cudf::sort(actual, {}, {}, stream, this->mr());
+        CUDF_TEST_EXPECT_TABLES_EQUAL(cudf::table_view{{expect_keys, *expected[column]}},
+                                      sorted->view());
+      }
+    });
+}
+
+INSTANTIATE_TEST_SUITE_P(HashCSR,
+                         HashGroupbyBatchedMemoryResourcesTest,
+                         ::testing::Values(cudf::aggregation::MIN,
+                                           cudf::aggregation::MAX,
+                                           cudf::aggregation::SUM));
 
 TEST_F(HashGroupbyCompoundMemoryResourcesTest, NullableMeanVarianceAndStd)
 {

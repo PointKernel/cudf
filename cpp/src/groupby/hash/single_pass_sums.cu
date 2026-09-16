@@ -33,4 +33,16 @@ std::vector<std::unique_ptr<column>> compute_fused_minmax_sum(
     ctx.values_type, fused_minmax_sum_fn{}, ctx, kinds, is_intermediate, stream, mr);
 }
 
+template std::vector<std::unique_ptr<column>> compute_reductions<aggregation::SUM>(
+  host_span<reduction_context const>,
+  std::span<int8_t const>,
+  cuda::stream_ref,
+  cudf::memory_resources);
+
+template std::vector<std::unique_ptr<column>> compute_reductions<aggregation::SUM_OF_SQUARES>(
+  host_span<reduction_context const>,
+  std::span<int8_t const>,
+  cuda::stream_ref,
+  cudf::memory_resources);
+
 }  // namespace cudf::groupby::detail::hash

@@ -10,4 +10,10 @@ namespace cudf::groupby::detail::hash {
 template std::unique_ptr<column> compute_reduction<aggregation::PRODUCT>(
   reduction_context const& ctx, cuda::stream_ref stream, cudf::memory_resources mr);
 
+template std::vector<std::unique_ptr<column>> compute_reductions<aggregation::PRODUCT>(
+  host_span<reduction_context const>,
+  std::span<int8_t const>,
+  cuda::stream_ref,
+  cudf::memory_resources);
+
 }  // namespace cudf::groupby::detail::hash

@@ -78,6 +78,38 @@ extern template std::unique_ptr<column> compute_reduction<aggregation::ARGMAX>(
 extern template std::unique_ptr<column> compute_reduction<aggregation::SUM_OVERFLOW>(
   reduction_context const& ctx, cuda::stream_ref stream, cudf::memory_resources mr);
 
+template <aggregation::Kind K>
+std::vector<std::unique_ptr<column>> compute_reductions(host_span<reduction_context const> contexts,
+                                                        std::span<int8_t const> is_intermediate,
+                                                        cuda::stream_ref stream,
+                                                        cudf::memory_resources mr);
+
+extern template std::vector<std::unique_ptr<column>> compute_reductions<aggregation::SUM>(
+  host_span<reduction_context const>,
+  std::span<int8_t const>,
+  cuda::stream_ref,
+  cudf::memory_resources);
+extern template std::vector<std::unique_ptr<column>>
+  compute_reductions<aggregation::SUM_OF_SQUARES>(host_span<reduction_context const>,
+                                                  std::span<int8_t const>,
+                                                  cuda::stream_ref,
+                                                  cudf::memory_resources);
+extern template std::vector<std::unique_ptr<column>> compute_reductions<aggregation::PRODUCT>(
+  host_span<reduction_context const>,
+  std::span<int8_t const>,
+  cuda::stream_ref,
+  cudf::memory_resources);
+extern template std::vector<std::unique_ptr<column>> compute_reductions<aggregation::MIN>(
+  host_span<reduction_context const>,
+  std::span<int8_t const>,
+  cuda::stream_ref,
+  cudf::memory_resources);
+extern template std::vector<std::unique_ptr<column>> compute_reductions<aggregation::MAX>(
+  host_span<reduction_context const>,
+  std::span<int8_t const>,
+  cuda::stream_ref,
+  cudf::memory_resources);
+
 std::vector<std::unique_ptr<column>> compute_fused_sums(reduction_context const& ctx,
                                                         host_span<aggregation::Kind const> kinds,
                                                         std::span<int8_t const> is_intermediate,
