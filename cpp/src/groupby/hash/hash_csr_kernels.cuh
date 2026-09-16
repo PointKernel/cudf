@@ -14,7 +14,6 @@
 #include <cudf/utilities/bit.hpp>
 #include <cudf/utilities/error.hpp>
 
-#include <cub/thread/thread_load.cuh>
 #include <cuco/pair.cuh>
 #include <cuda/atomic>
 #include <cuda/bit>
@@ -219,9 +218,7 @@ CUDF_KERNEL void hash_csr_fill_kernel(size_type num_rows,
 {
   auto const stride = cudf::detail::grid_1d::grid_stride();
   for (auto row = cudf::detail::grid_1d::global_thread_id(); row < num_rows; row += stride) {
-    // The positions are read once, so they stream past the caches and leave them to the slot
-    // offsets, which every row looks up, and to the grouped rows, which the aggregations read next.
-    auto const position = cub::ThreadLoad<cub::LOAD_CS>(positions + row);
+    auto const position = positions[row];
     if (position.first == hash_csr_no_slot) { continue; }
     grouped_rows[slot_offsets[position.first] + position.second] = static_cast<size_type>(row);
   }
