@@ -69,7 +69,7 @@ std::pair<rmm::device_buffer, size_type> reduce_group_validity(reduction_context
                 cuda::std::logical_or<bool>{},
                 false,
                 stream,
-                mr.get_temporary_mr());
+                mr);
   return cudf::detail::valid_if(
     group_valid.begin(), group_valid.end(), cuda::std::identity{}, stream, mr);
 }
@@ -114,7 +114,7 @@ std::unique_ptr<column> count_groups(reduction_context const& ctx,
                   cuda::std::plus<size_type>{},
                   size_type{0},
                   stream,
-                  mr.get_temporary_mr());
+                  mr);
   } else {
     thrust::adjacent_difference(rmm::exec_policy_nosync(stream, mr.get_temporary_mr()),
                                 ctx.grouped.offsets.begin() + 1,

@@ -391,9 +391,10 @@ std::unique_ptr<table> compute_groupby(table_view const& keys,
   auto const temporary_resources = cudf::memory_resources{temp_mr, temp_mr};
 
   [[maybe_unused]] auto [row_bitmask_data, row_bitmask] =
-    skip_rows_with_nulls ? cudf::groupby::detail::compute_row_bitmask(keys, stream, temp_mr)
-                         : std::pair<rmm::device_buffer, bitmask_type const*>{
-                             rmm::device_buffer{0, stream, temp_mr}, nullptr};
+    skip_rows_with_nulls
+      ? cudf::groupby::detail::compute_row_bitmask(keys, stream, temporary_resources)
+      : std::pair<rmm::device_buffer, bitmask_type const*>{rmm::device_buffer{0, stream, temp_mr},
+                                                           nullptr};
 
   auto const groups = group_keys(
     num_rows, row_bitmask, d_row_equal, d_row_hash, !requests.empty(), stream, temporary_resources);

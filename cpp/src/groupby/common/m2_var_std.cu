@@ -46,9 +46,9 @@ struct m2_functor {
                 CountType const* count,
                 size_type size,
                 cuda::stream_ref stream,
-                rmm::device_async_resource_ref mr) const noexcept
+                cudf::memory_resources mr) const noexcept
   {
-    thrust::tabulate(rmm::exec_policy_nosync(stream, mr),
+    thrust::tabulate(rmm::exec_policy_nosync(stream, mr.get_temporary_mr()),
                      target,
                      target + size,
                      [sum_sqr, sum, count] __device__(size_type const idx) {
@@ -67,7 +67,7 @@ struct m2_functor {
                   column_view const& sum,
                   column_view const& count,
                   cuda::stream_ref stream,
-                  rmm::device_async_resource_ref mr) const noexcept  //
+                  cudf::memory_resources mr) const noexcept  //
     requires(is_m2_supported<Source>())
   {
     using Target     = cudf::detail::target_type_t<Source, aggregation::M2>;
@@ -101,14 +101,8 @@ std::unique_ptr<column> compute_m2(data_type source_type,
                                     mask_state::UNALLOCATED,
                                     stream,
                                     mr.get_output_mr());
-  type_dispatcher(source_type,
-                  m2_functor{},
-                  output->mutable_view(),
-                  sum_sqr,
-                  sum,
-                  count,
-                  stream,
-                  mr.get_temporary_mr());
+  type_dispatcher(
+    source_type, m2_functor{}, output->mutable_view(), sum_sqr, sum, count, stream, mr);
   return output;
 }
 

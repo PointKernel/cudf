@@ -411,7 +411,7 @@ void reduce_group_columns(grouped_rows const& grouped,
                           Op op,
                           T init,
                           cuda::stream_ref stream,
-                          rmm::device_async_resource_ref mr)
+                          cudf::memory_resources mr)
 {
   auto const num_groups        = static_cast<size_type>(grouped.offsets.size() - 1);
   auto const num_warp_groups   = static_cast<size_type>(grouped.warp_groups.size());
@@ -468,7 +468,7 @@ void reduce_group_columns(grouped_rows const& grouped,
   }
   if (num_long_groups == 0) { return; }
   rmm::device_uvector<T> partials(
-    static_cast<std::size_t>(num_chunks) * columns.size(), stream, mr);
+    static_cast<std::size_t>(num_chunks) * columns.size(), stream, mr.get_temporary_mr());
   auto const begins = cuda::transform_iterator{
     grouped.chunk_ranges.begin(),
     [] __device__(cuda::std::array<size_type, 2> const& range) -> size_type { return range[0]; }};
@@ -525,7 +525,7 @@ void reduce_groups(grouped_rows const& grouped,
                    Op op,
                    T init,
                    cuda::stream_ref stream,
-                   rmm::device_async_resource_ref mr)
+                   cudf::memory_resources mr)
 {
   reduce_group_columns(grouped, column_reduction{values, output}, op, init, stream, mr);
 }
@@ -597,7 +597,7 @@ struct grouped_reduction_fn {
                     Op{},
                     identity,
                     stream,
-                    mr.get_temporary_mr());
+                    mr);
       return result;
     }
 
@@ -613,7 +613,7 @@ struct grouped_reduction_fn {
                   valid_value_op<Op, Result>{},
                   valid_value<Result>{identity, false},
                   stream,
-                  mr.get_temporary_mr());
+                  mr);
     auto [null_mask, null_count] = cudf::detail::valid_if(
       group_valid.begin(), group_valid.end(), cuda::std::identity{}, stream, mr);
     result->set_null_mask(std::move(null_mask), null_count);
@@ -641,7 +641,7 @@ struct grouped_reduction_fn {
                     ctx.d_values, ctx.values.has_nulls(), is_argmin},
                   is_argmin ? cudf::detail::ARGMIN_SENTINEL : cudf::detail::ARGMAX_SENTINEL,
                   stream,
-                  mr.get_temporary_mr());
+                  mr);
     set_group_null_mask(*result, ctx, stream, mr);
     return result;
   }
@@ -677,7 +677,7 @@ struct grouped_reduction_fn {
                     cudf::reduction::detail::overflow_sum_op<Source>{},
                     accumulator{},
                     stream,
-                    mr.get_temporary_mr());
+                    mr);
     }
 
     auto [null_mask, null_count] = ctx.nullable && ctx.num_groups > 0
@@ -792,7 +792,7 @@ struct grouped_reductions_fn {
                            operation,
                            init,
                            stream,
-                           temp_mr);
+                           mr);
       if constexpr (Nullable) {
         for (size_type i = 0; i < num_columns; ++i) {
           auto const begin = group_valid.begin() + static_cast<std::size_t>(i) * first.num_groups;
@@ -883,7 +883,7 @@ struct fused_sums_fn {
                     fused_sums_plus<Result>{},
                     fused_sums<Result>{Result{0}, Result{0}, 0},
                     stream,
-                    mr.get_temporary_mr());
+                    mr);
     }
 
     std::vector<std::unique_ptr<column>> results;
@@ -965,13 +965,8 @@ struct fused_minmax_sum_fn {
                                 sum->mutable_view().template begin<Result>(),
                                 group_valid.begin()),
         split_fused_minmax_sum_fn<Source, Result>{}};
-      reduce_groups(ctx.grouped,
-                    values,
-                    outputs,
-                    fused_minmax_sum_op<Source, Result>{},
-                    identity,
-                    stream,
-                    mr.get_temporary_mr());
+      reduce_groups(
+        ctx.grouped, values, outputs, fused_minmax_sum_op<Source, Result>{}, identity, stream, mr);
     }
     std::vector<std::unique_ptr<column>> results;
     for (std::size_t i = 0; i < kinds.size(); ++i) {
