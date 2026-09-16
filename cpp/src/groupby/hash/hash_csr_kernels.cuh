@@ -41,9 +41,6 @@ constexpr thread_index_type hash_csr_block_size = 256;
 /// Inputs with at least this many rows size the set from an estimate of the number of distinct
 /// keys instead of the row count; smaller inputs get a set for every row right away.
 constexpr size_type hash_csr_min_rows_to_estimate = 1 << 21;
-/// Keys wider than this (in bytes per row) always get a set for every row: every probe of an
-/// occupied slot compares keys, which costs more than the smaller set saves for them.
-constexpr size_type hash_csr_max_estimated_key_bytes = 32;
 /// Slots of the set the distinct keys of a sample of the rows are counted in.
 constexpr cuda::std::uint32_t hash_csr_sample_capacity = 1u << 20;
 /// Fewest slots of a set sized from an estimate, so that a handful of hot slots still spread

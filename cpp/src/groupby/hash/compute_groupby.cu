@@ -21,7 +21,6 @@
 #include <cudf/utilities/error.hpp>
 #include <cudf/utilities/memory_resource.hpp>
 #include <cudf/utilities/span.hpp>
-#include <cudf/utilities/traits.hpp>
 
 #include <rmm/device_buffer.hpp>
 #include <rmm/device_uvector.hpp>
@@ -44,7 +43,6 @@
 #include <cstddef>
 #include <functional>
 #include <limits>
-#include <numeric>
 #include <optional>
 #include <stdexcept>
 #include <unordered_set>
@@ -198,7 +196,6 @@ cuda::std::uint32_t estimate_capacity(size_type num_rows,
  */
 template <typename Equal, typename Hash>
 grouped_keys group_keys(size_type num_rows,
-                        size_type key_bytes,
                         bitmask_type const* row_bitmask,
                         Equal const& d_row_equal,
                         Hash const& d_row_hash,
@@ -215,7 +212,7 @@ grouped_keys group_keys(size_type num_rows,
   // Should the estimate fall short, the build restarts with the table sized for every row.
   auto const full_capacity = hash_csr_capacity(num_rows);
   auto capacity =
-    num_rows < hash_csr_min_rows_to_estimate || key_bytes > hash_csr_max_estimated_key_bytes
+    num_rows < hash_csr_min_rows_to_estimate
       ? full_capacity
       : std::min(full_capacity,
                  estimate_capacity(num_rows, row_bitmask, d_row_equal, d_row_hash, stream, mr));
@@ -399,19 +396,8 @@ std::unique_ptr<table> compute_groupby(table_view const& keys,
       : std::pair<rmm::device_buffer, bitmask_type const*>{rmm::device_buffer{0, stream, temp_mr},
                                                            nullptr};
 
-  // Bytes of one key row, with variable-width and nested columns counted as wide.
-  auto const key_bytes = std::accumulate(
-    keys.begin(), keys.end(), size_type{0}, [](size_type bytes, column_view const& col) {
-      return bytes + (cudf::is_fixed_width(col.type()) ? cudf::size_of(col.type()) : 64);
-    });
-  auto const groups = group_keys(num_rows,
-                                 key_bytes,
-                                 row_bitmask,
-                                 d_row_equal,
-                                 d_row_hash,
-                                 !requests.empty(),
-                                 stream,
-                                 temporary_resources);
+  auto const groups = group_keys(
+    num_rows, row_bitmask, d_row_equal, d_row_hash, !requests.empty(), stream, temporary_resources);
 
   auto const gather_keys = [&] {
     return cudf::detail::gather(keys,
