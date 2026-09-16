@@ -164,7 +164,9 @@ CUDF_KERNEL void hash_csr_build_kernel(size_type num_rows,
         static_cast<size_type>(cuda::std::popcount(peers & ((1u << lane) - 1u)));
       positions[row] = {slot, first_rank + rank_in_warp};
     } else if (row < num_rows) {
-      positions[row] = {hash_csr_no_slot, cudf::detail::CUDF_SIZE_TYPE_SENTINEL};
+      // Materialize values so cuco::pair does not bind references to host constants.
+      positions[row] = {cuda::std::uint32_t{hash_csr_no_slot},
+                        size_type{cudf::detail::CUDF_SIZE_TYPE_SENTINEL}};
     }
   }
 }
