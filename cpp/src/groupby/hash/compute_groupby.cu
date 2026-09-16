@@ -415,8 +415,23 @@ std::unique_ptr<table> compute_groupby(table_view const& keys,
   auto const [values, agg_kinds, aggs, is_agg_intermediate, has_compound_aggs] =
     extract_hash_groupby_aggs(requests, stream);
 
+  // Counts without null filtering come directly from the group offsets.
+  auto const needs_reduction = [&] {
+    for (size_type i = 0; i < values.num_columns(); ++i) {
+      if (agg_kinds[i] != aggregation::COUNT_ALL &&
+          (agg_kinds[i] != aggregation::COUNT_VALID || values.column(i).has_nulls())) {
+        return true;
+      }
+    }
+    return false;
+  }();
   auto const grouped =
-    make_grouped_rows(groups.grouped_rows, groups.group_offsets, stream, temporary_resources);
+    needs_reduction
+      ? make_grouped_rows(groups.grouped_rows, groups.group_offsets, stream, temporary_resources)
+      : grouped_rows{groups.grouped_rows,
+                     groups.group_offsets,
+                     rmm::device_uvector<size_type>{0, stream, temp_mr},
+                     rmm::device_uvector<size_type>{0, stream, temp_mr}};
   auto results =
     compute_single_pass_aggs(values, agg_kinds, is_agg_intermediate, grouped, stream, mr);
   for (std::size_t i = 0; i < results.size(); ++i) {
