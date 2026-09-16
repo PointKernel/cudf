@@ -12,7 +12,9 @@
 #include <cudf/detail/aggregation/aggregation.cuh>
 #include <cudf/detail/aggregation/aggregation.hpp>
 #include <cudf/detail/iterator.cuh>
+#include <cudf/detail/utilities/cuda.cuh>
 #include <cudf/detail/utilities/element_argminmax.cuh>
+#include <cudf/detail/utilities/grid_1d.cuh>
 #include <cudf/detail/valid_if.cuh>
 #include <cudf/dictionary/dictionary_column_view.hpp>
 #include <cudf/reduction/detail/sum_overflow.cuh>
@@ -24,11 +26,12 @@
 #include <rmm/device_buffer.hpp>
 #include <rmm/device_uvector.hpp>
 
-#include <cub/device/device_reduce.cuh>
-#include <cuda/functional>
+#include <cub/block/block_reduce.cuh>
+#include <cub/warp/warp_reduce.cuh>
 #include <cuda/iterator>
-#include <cuda/memory_resource>
-#include <cuda/std/execution>
+#include <cuda/std/algorithm>
+#include <cuda/std/array>
+#include <cuda/std/cstdint>
 #include <cuda/std/functional>
 #include <cuda/std/tuple>
 #include <cuda/std/type_traits>
@@ -207,21 +210,108 @@ constexpr bool is_fusable_sum(aggregation::Kind kind)
          kind == aggregation::COUNT_VALID;
 }
 
-/// The stream and temporary-storage resource handed to the CUB algorithms. Spelled out without
-/// class template argument deduction, which the host compiler rejects for these types outside of
-/// a template.
-using cub_stream_prop_t = cuda::std::execution::prop<cuda::get_stream_t, cuda::stream_ref>;
-using cub_mr_prop_t =
-  cuda::std::execution::prop<cuda::mr::get_memory_resource_t, rmm::device_async_resource_ref>;
-using cub_env_t = cuda::std::execution::env<cub_stream_prop_t, cub_mr_prop_t>;
+/// Maximum rows per chunk, independent of the distribution of group sizes.
+constexpr size_type rows_per_chunk               = 1 << 10;
+constexpr thread_index_type reduction_block_size = 256;
 
-inline cub_env_t make_cub_env(cuda::stream_ref stream, rmm::device_async_resource_ref mr)
+/// Fold groups no wider than a warp in one thread, using only their actual values.
+template <typename ValueIterator, typename OutputIterator, typename Op, typename T>
+CUDF_KERNEL void reduce_small_groups_kernel(
+  device_span<size_type const> offsets, ValueIterator values, OutputIterator output, Op op, T init)
 {
-  return cub_env_t{cub_stream_prop_t{cuda::get_stream_t{}, stream},
-                   cub_mr_prop_t{cuda::mr::get_memory_resource_t{}, mr}};
+  auto const num_groups = static_cast<thread_index_type>(offsets.size() - 1);
+  for (auto group = cudf::detail::grid_1d::global_thread_id(); group < num_groups;
+       group += cudf::detail::grid_1d::grid_stride()) {
+    auto const begin = static_cast<cuda::std::int64_t>(offsets[group]);
+    auto const end   = static_cast<cuda::std::int64_t>(offsets[group + 1]);
+    if (end - begin <= cudf::detail::warp_size) {
+      T partial = values[begin];
+      for (auto position = begin + 1; position < end; ++position) {
+        partial = op(partial, values[position]);
+      }
+      output[group] = op(init, partial);
+    }
+  }
 }
 
-/// Reduces each contiguous group-label run to one output, preserving the initial value.
+/// Reduces each range with one warp or block and writes its original output index.
+template <int threads_per_segment,
+          typename BeginIterator,
+          typename EndIterator,
+          typename ValueIterator,
+          typename OutputIterator,
+          typename OutputIndexIterator,
+          typename Op,
+          typename T>
+CUDF_KERNEL void reduce_segments_kernel(size_type num_segments,
+                                        BeginIterator begins,
+                                        EndIterator ends,
+                                        ValueIterator values,
+                                        OutputIterator output,
+                                        OutputIndexIterator output_indices,
+                                        Op op,
+                                        T init)
+{
+  static_assert(threads_per_segment == cudf::detail::warp_size ||
+                threads_per_segment == reduction_block_size);
+  using segment_reduce = cuda::std::conditional_t<threads_per_segment == cudf::detail::warp_size,
+                                                  cub::WarpReduce<T, cudf::detail::warp_size>,
+                                                  cub::BlockReduce<T, reduction_block_size>>;
+  __shared__
+    typename segment_reduce::TempStorage storage[reduction_block_size / threads_per_segment];
+  auto const segment    = cudf::detail::grid_1d::global_thread_id() / threads_per_segment;
+  auto const lane       = static_cast<size_type>(threadIdx.x % threads_per_segment);
+  auto const collective = threadIdx.x / threads_per_segment;
+  if (segment >= num_segments) { return; }
+  auto const begin = static_cast<cuda::std::int64_t>(begins[segment]);
+  auto const end   = static_cast<cuda::std::int64_t>(ends[segment]);
+  if (begin == end) {
+    if (lane == 0) { output[output_indices[segment]] = init; }
+    return;
+  }
+  T partial     = init;
+  auto position = begin + lane;
+  if (position < end) {
+    partial = values[position];
+    for (position += threads_per_segment; position < end; position += threads_per_segment) {
+      partial = op(partial, values[position]);
+    }
+  }
+  auto const valid_lanes =
+    static_cast<int>(cuda::std::min<cuda::std::int64_t>(end - begin, threads_per_segment));
+  auto const result = segment_reduce{storage[collective]}.Reduce(partial, op, valid_lanes);
+  if (lane == 0) { output[output_indices[segment]] = op(init, result); }
+}
+
+/// Launches ranges without allocating storage; iterators encode selection and scheduling.
+template <int threads_per_segment,
+          typename BeginIterator,
+          typename EndIterator,
+          typename ValueIterator,
+          typename OutputIterator,
+          typename OutputIndexIterator,
+          typename Op,
+          typename T>
+void reduce_segments(size_type num_segments,
+                     BeginIterator begins,
+                     EndIterator ends,
+                     ValueIterator values,
+                     OutputIterator output,
+                     OutputIndexIterator output_indices,
+                     Op op,
+                     T init,
+                     cuda::stream_ref stream)
+{
+  if (num_segments == 0) { return; }
+  auto const config = cudf::detail::grid_1d{
+    static_cast<thread_index_type>(num_segments) * threads_per_segment, reduction_block_size};
+  reduce_segments_kernel<threads_per_segment>
+    <<<config.num_blocks, config.num_threads_per_block, 0, stream.get()>>>(
+      num_segments, begins, ends, values, output, output_indices, op, init);
+  CUDF_CUDA_TRY(cudaGetLastError());
+}
+
+/// Small and bounded groups write final outputs; only long groups need chunk partials.
 template <typename ValueIterator, typename OutputIterator, typename Op, typename T>
 void reduce_groups(grouped_rows const& grouped,
                    ValueIterator values,
@@ -231,22 +321,61 @@ void reduce_groups(grouped_rows const& grouped,
                    cuda::stream_ref stream,
                    rmm::device_async_resource_ref mr)
 {
-  // ReduceByKey has no initial-value parameter. Apply it to the aggregate before the caller's
-  // output iterator splits compound accumulators or writes a result column.
-  auto const initialized_output =
-    cuda::transform_output_iterator{output, [op, init] __device__(T const& aggregate) {
-                                      auto combine = op;
-                                      return combine(init, aggregate);
-                                    }};
-  rmm::device_uvector<size_type> num_runs(1, stream, mr);
-  CUDF_CUDA_TRY(cub::DeviceReduce::ReduceByKey(grouped.labels.begin(),
-                                               cuda::make_discard_iterator(),
-                                               values,
-                                               initialized_output,
-                                               num_runs.begin(),
-                                               op,
-                                               static_cast<size_type>(grouped.labels.size()),
-                                               make_cub_env(stream, mr)));
+  auto const num_groups      = static_cast<size_type>(grouped.offsets.size() - 1);
+  auto const num_warp_groups = static_cast<size_type>(grouped.warp_groups.size());
+  if (num_warp_groups < num_groups) {
+    auto const config = cudf::detail::grid_1d{num_groups, reduction_block_size};
+    reduce_small_groups_kernel<<<config.num_blocks,
+                                 config.num_threads_per_block,
+                                 0,
+                                 stream.get()>>>(grouped.offsets, values, output, op, init);
+    CUDF_CUDA_TRY(cudaGetLastError());
+  }
+  auto const num_long_groups   = grouped.group_chunks.is_empty()
+                                   ? size_type{0}
+                                   : static_cast<size_type>(grouped.group_chunks.size() - 1);
+  auto const num_direct_groups = num_warp_groups - num_long_groups;
+  auto const group_ids         = grouped.warp_groups.begin();
+  if (num_direct_groups > 0) {
+    reduce_segments<cudf::detail::warp_size>(
+      num_direct_groups,
+      cuda::make_permutation_iterator(grouped.offsets.begin(), group_ids),
+      cuda::make_permutation_iterator(grouped.offsets.begin() + 1, group_ids),
+      values,
+      output,
+      group_ids,
+      op,
+      init,
+      stream);
+  }
+  if (num_long_groups == 0) { return; }
+  auto const num_chunks = static_cast<size_type>(grouped.chunk_ranges.size());
+  rmm::device_uvector<T> partials(num_chunks, stream, mr);
+  auto const begins = cuda::transform_iterator{
+    grouped.chunk_ranges.begin(),
+    [] __device__(cuda::std::array<size_type, 2> const& range) -> size_type { return range[0]; }};
+  auto const ends = cuda::transform_iterator{
+    grouped.chunk_ranges.begin(),
+    [] __device__(cuda::std::array<size_type, 2> const& range) -> size_type { return range[1]; }};
+  reduce_segments<reduction_block_size>(
+    num_chunks,
+    cuda::make_permutation_iterator(begins, grouped.chunk_order.begin()),
+    cuda::make_permutation_iterator(ends, grouped.chunk_order.begin()),
+    values,
+    partials.begin(),
+    grouped.chunk_order.begin(),
+    op,
+    init,
+    stream);
+  reduce_segments<reduction_block_size>(num_long_groups,
+                                        grouped.group_chunks.begin(),
+                                        grouped.group_chunks.begin() + 1,
+                                        partials.begin(),
+                                        output,
+                                        group_ids + num_direct_groups,
+                                        op,
+                                        init,
+                                        stream);
 }
 
 /// Representation used to share reduction instantiations across column types.

@@ -13,6 +13,7 @@
 
 #include <rmm/device_uvector.hpp>
 
+#include <cuda/std/array>
 #include <cuda/stream>
 
 #include <cstdint>
@@ -29,25 +30,32 @@ namespace cudf::groupby::detail::hash {
 bool is_single_pass_agg_supported(data_type values_type, aggregation::Kind kind);
 
 /**
- * @brief Input rows reordered so that each group is a contiguous run with a shared group label.
+ * @brief Input rows reordered so that the rows of every group are contiguous, together with the
+ * arrays used by the chunked reductions.
  *
- * Each label run has one nonempty group, in the same order as the group offsets. Labels may be
- * empty when every requested aggregation is computed directly from the offsets.
+ * Small groups use scalar folds, bounded groups use warp reductions, and long groups
+ * use block-reduced chunks. Group IDs preserve the original output order.
  */
 struct grouped_rows {
-  device_span<size_type const> rows;      ///< Input row index at each grouped position
-  device_span<size_type const> offsets;   ///< `num_groups + 1` offsets delimiting the groups
-  rmm::device_uvector<size_type> labels;  ///< Group label at each grouped position
+  device_span<size_type const> rows;     ///< Input row index at each grouped position
+  device_span<size_type const> offsets;  ///< Group boundaries in rows
+  rmm::device_uvector<size_type>
+    warp_groups;  ///< Group IDs wider than a warp: direct groups, then long groups
+  rmm::device_uvector<size_type>
+    group_chunks;  ///< Offsets of long groups in chunk_ranges, including the final offset
+  rmm::device_uvector<cuda::std::array<size_type, 2>>
+    chunk_ranges;                              ///< CSR begin/end positions of each long-group chunk
+  rmm::device_uvector<size_type> chunk_order;  ///< Long chunk IDs ordered by first stored input row
 };
 
 /**
- * @brief Builds the group labels shared by reductions over the grouped rows.
+ * @brief Chooses the reduction strategy for the grouped rows and builds its arrays.
  *
  * @param rows Input row index at each grouped position
- * @param offsets `num_groups + 1` offsets delimiting nonempty groups
+ * @param offsets `num_groups + 1` offsets delimiting the groups
  * @param stream CUDA stream used for device memory operations and kernel launches
- * @param mr Device memory resources used to allocate the returned labels and temporary storage
- * @return Grouped rows with one label per grouped position
+ * @param mr Device memory resources used to allocate the returned arrays and temporary storage
+ * @return Grouped rows with the arrays required by the chosen reduction strategy
  */
 grouped_rows make_grouped_rows(device_span<size_type const> rows,
                                device_span<size_type const> offsets,

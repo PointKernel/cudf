@@ -430,6 +430,9 @@ std::unique_ptr<table> compute_groupby(table_view const& keys,
       ? make_grouped_rows(groups.grouped_rows, groups.group_offsets, stream, temporary_resources)
       : grouped_rows{groups.grouped_rows,
                      groups.group_offsets,
+                     rmm::device_uvector<size_type>{0, stream, temp_mr},
+                     rmm::device_uvector<size_type>{0, stream, temp_mr},
+                     rmm::device_uvector<cuda::std::array<size_type, 2>>{0, stream, temp_mr},
                      rmm::device_uvector<size_type>{0, stream, temp_mr}};
   auto results =
     compute_single_pass_aggs(values, agg_kinds, is_agg_intermediate, grouped, stream, mr);
