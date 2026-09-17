@@ -216,24 +216,29 @@ grouped_keys group_keys(size_type num_rows,
       ? full_capacity
       : std::min(full_capacity,
                  estimate_capacity(num_rows, row_bitmask, d_row_equal, d_row_hash, stream, mr));
+
   rmm::device_uvector<slot_type> slots(0, stream, temp_mr);
   rmm::device_uvector<size_type> slot_counts(0, stream, temp_mr);
   rmm::device_uvector<build_position_type> positions(
     need_grouped_rows ? num_rows : 0, stream, temp_mr);
+
   // Set by the build when the estimated table turns out to be too small.
   std::optional<cudf::detail::device_scalar<cuda::std::int32_t>> overflow;
   if (capacity < full_capacity) { overflow.emplace(0, stream, temp_mr); }
+
   // The occupied slots, in slot order, are the groups: without aggregations the slots hold the
   // one row wanted for each group, otherwise the slot indices lead to the counts and rows.
   rmm::device_uvector<size_type> key_rows(0, stream, mr.get_output_mr());
   rmm::device_uvector<cuda::std::uint32_t> group_slots(0, stream, temp_mr);
   bool count_by_representative{};
+
   while (true) {
     auto const is_full_size = capacity == full_capacity;
     count_by_representative =
       need_grouped_rows && static_cast<cuda::std::uint32_t>(num_rows) < capacity;
     auto const count_capacity =
       count_by_representative ? static_cast<cuda::std::uint32_t>(num_rows) : capacity;
+
     slots.resize(capacity, stream);
     CUDF_CUDA_TRY(
       cudaMemsetAsync(slots.data(), 0xff, slots.size() * sizeof(slot_type), stream.get()));
@@ -244,6 +249,7 @@ grouped_keys group_keys(size_type num_rows,
           slot_counts.data(), 0, slot_counts.size() * sizeof(size_type), stream.get()));
       }
     }
+
     auto const set =
       hash_set_ref{slots.data(), capacity, is_full_size ? capacity : hash_csr_max_probes};
     launch_hash_csr_build_kernel(num_rows,
@@ -256,11 +262,13 @@ grouped_keys group_keys(size_type num_rows,
                                  d_row_hash,
                                  is_full_size ? nullptr : overflow->data(),
                                  stream);
+
     if (count_by_representative) {
       // Count indices identify representative rows, so selection no longer needs the table.
       slots.resize(0, stream);
       slots.shrink_to_fit(stream);
     }
+
     if (!need_grouped_rows) {
       key_rows.resize(std::min<std::size_t>(num_rows, capacity), stream);
       auto const key_rows_end =
@@ -277,8 +285,10 @@ grouped_keys group_keys(size_type num_rows,
                         [] __device__(size_type count) -> bool { return count > 0; });
       group_slots.resize(cuda::std::distance(group_slots.begin(), group_slots_end), stream);
     }
+
     // The compaction has just synchronized the stream, so reading the flag is cheap here.
     if (is_full_size || overflow->value(stream) == 0) { break; }
+
     // The retry overwrites the table, so release it instead of copying it while growing.
     slots.resize(0, stream);
     slots.shrink_to_fit(stream);
