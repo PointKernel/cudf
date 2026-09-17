@@ -27,6 +27,17 @@
 
 namespace cudf::groupby::detail::hash {
 
+constexpr bool is_fusable_sum(aggregation::Kind kind)
+{
+  return kind == aggregation::SUM || kind == aggregation::SUM_OF_SQUARES ||
+         kind == aggregation::COUNT_VALID;
+}
+
+constexpr bool is_fusable_minmax_sum(aggregation::Kind kind)
+{
+  return kind == aggregation::MIN || kind == aggregation::MAX || kind == aggregation::SUM;
+}
+
 template <typename T>
 struct value_accessor;
 
