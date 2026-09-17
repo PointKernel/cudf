@@ -65,6 +65,11 @@ std::unique_ptr<column> make_size_type_column(reduction_context const& ctx,
                                               cuda::stream_ref stream,
                                               cudf::memory_resources mr);
 
+std::unique_ptr<column> count_groups(reduction_context const& ctx,
+                                     bool valid_only,
+                                     cuda::stream_ref stream,
+                                     cudf::memory_resources mr);
+
 // Kind-specific TUs explicitly instantiate this bridge; the frontend needs no reducer definition.
 template <aggregation::Kind K>
 std::unique_ptr<column> compute_reduction(reduction_context const& ctx,

@@ -736,6 +736,7 @@ add_library(
   src/groupby/common/utils.cpp
   src/groupby/groupby.cu
   src/groupby/hash/compute_groupby.cu
+  src/groupby/hash/compute_single_pass_aggs.cpp
   src/groupby/hash/compute_single_pass_aggs.cu
   src/groupby/hash/extract_single_pass_aggs.cpp
   src/groupby/hash/groupby.cu
