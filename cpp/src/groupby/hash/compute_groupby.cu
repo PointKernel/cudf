@@ -106,15 +106,16 @@ struct grouped_keys {
   rmm::device_uvector<size_type> grouped_rows;   ///< Input rows reordered so groups are contiguous
 };
 
-cuda::std::uint32_t hash_csr_capacity(size_type num_rows)
+std::size_t hash_csr_capacity(size_type num_rows)
 {
   auto const requested =
-    std::max(static_cast<double>(num_rows) + 1,
-             std::ceil(static_cast<double>(num_rows) / cudf::detail::CUCO_DESIRED_LOAD_FACTOR));
+    std::max(static_cast<std::size_t>(num_rows) + 1,
+             static_cast<std::size_t>(
+               std::ceil(static_cast<double>(num_rows) / cudf::detail::CUCO_DESIRED_LOAD_FACTOR)));
   CUDF_EXPECTS(requested <= std::numeric_limits<cuda::std::uint32_t>::max(),
                "HashCSR table capacity is not representable",
                std::overflow_error);
-  return static_cast<cuda::std::uint32_t>(requested);
+  return requested;
 }
 
 struct is_occupied_fn {
@@ -135,12 +136,12 @@ struct is_occupied_fn {
  * exceeds the representable capacity
  */
 template <typename Equal, typename Hash>
-cuda::std::uint32_t estimate_capacity(size_type num_rows,
-                                      bitmask_type const* row_bitmask,
-                                      Equal const& d_row_equal,
-                                      Hash const& d_row_hash,
-                                      cuda::stream_ref stream,
-                                      cudf::memory_resources mr)
+std::size_t estimate_capacity(size_type num_rows,
+                              bitmask_type const* row_bitmask,
+                              Equal const& d_row_equal,
+                              Hash const& d_row_hash,
+                              cuda::stream_ref stream,
+                              cudf::memory_resources mr)
 {
   auto const temp_mr = mr.get_temporary_mr();
   rmm::device_uvector<slot_type> slots(hash_csr_sample_capacity, stream, temp_mr);
@@ -167,7 +168,8 @@ cuda::std::uint32_t estimate_capacity(size_type num_rows,
   // One row in 64 is sampled, fewer when that would fill more than half of the sample table.
   auto const stride = std::max<size_type>(
     64, cudf::util::div_rounding_up_safe<size_type>(num_rows, hash_csr_sample_capacity / 2));
-  auto const max_capacity  = std::numeric_limits<cuda::std::uint32_t>::max();
+  auto const max_capacity =
+    static_cast<std::size_t>(std::numeric_limits<cuda::std::uint32_t>::max());
   auto [sampled, distinct] = sample(stride);
   if (sampled == 0) { return hash_csr_min_estimated_capacity; }
 
@@ -184,7 +186,7 @@ cuda::std::uint32_t estimate_capacity(size_type num_rows,
   // Four slots per distinct key keep the probes short while the table stays small.
   auto const estimate = 4.0 * high;
   if (estimate >= static_cast<double>(max_capacity)) { return max_capacity; }
-  return std::max(hash_csr_min_estimated_capacity, static_cast<cuda::std::uint32_t>(estimate));
+  return std::max<std::size_t>(hash_csr_min_estimated_capacity, static_cast<std::size_t>(estimate));
 }
 
 /**
@@ -234,10 +236,9 @@ grouped_keys group_keys(size_type num_rows,
 
   while (true) {
     auto const is_full_size = capacity == full_capacity;
-    count_by_representative =
-      need_grouped_rows && static_cast<cuda::std::uint32_t>(num_rows) < capacity;
+    count_by_representative = need_grouped_rows && static_cast<std::size_t>(num_rows) < capacity;
     auto const count_capacity =
-      count_by_representative ? static_cast<cuda::std::uint32_t>(num_rows) : capacity;
+      count_by_representative ? static_cast<std::size_t>(num_rows) : capacity;
 
     slots.resize(capacity, stream);
     CUDF_CUDA_TRY(
@@ -250,8 +251,10 @@ grouped_keys group_keys(size_type num_rows,
       }
     }
 
-    auto const set =
-      hash_set_ref{slots.data(), capacity, is_full_size ? capacity : hash_csr_max_probes};
+    // Both capacities are bounded by the checked full capacity.
+    auto const device_capacity = static_cast<cuda::std::uint32_t>(capacity);
+    auto const set             = hash_set_ref{
+      slots.data(), device_capacity, is_full_size ? device_capacity : hash_csr_max_probes};
     launch_hash_csr_build_kernel(num_rows,
                                  row_bitmask,
                                  need_grouped_rows ? positions.data() : nullptr,
@@ -279,7 +282,8 @@ grouped_keys group_keys(size_type num_rows,
       auto const group_slots_end =
         thrust::copy_if(policy,
                         cuda::counting_iterator<cuda::std::uint32_t>{0},
-                        cuda::counting_iterator<cuda::std::uint32_t>{count_capacity},
+                        cuda::counting_iterator<cuda::std::uint32_t>{
+                          static_cast<cuda::std::uint32_t>(count_capacity)},
                         slot_counts.begin(),
                         group_slots.begin(),
                         [] __device__(size_type count) -> bool { return count > 0; });
