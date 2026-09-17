@@ -755,7 +755,7 @@ struct grouped_reductions_fn {
         columns.push_back(
           {values, make_output(results[i]->mutable_view().template begin<Result>(), validity)});
       }
-      auto device_columns  = cudf::detail::make_device_uvector_async(columns, stream, temp_mr);
+      auto device_columns  = cudf::detail::make_device_uvector(columns, stream, temp_mr);
       auto const operation = [] {
         if constexpr (Nullable) {
           return valid_value_op<Op, Result>{};
