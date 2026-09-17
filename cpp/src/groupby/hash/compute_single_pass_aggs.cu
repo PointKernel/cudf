@@ -176,25 +176,6 @@ struct compute_reductions_fn {
   }
 };
 
-template <aggregation::Kind K>
-struct is_reduction_supported_fn {
-  template <typename T>
-  bool operator()() const
-  {
-    return is_reduction_supported<K, T>();
-  }
-};
-
-struct is_reduction_kind_supported_fn {
-  data_type values_type;
-
-  template <aggregation::Kind K>
-  bool operator()() const
-  {
-    return type_dispatcher(values_type, is_reduction_supported_fn<K>{});
-  }
-};
-
 std::unique_ptr<column> compute_aggregation(aggregation::Kind kind,
                                             reduction_context const& ctx,
                                             cuda::stream_ref stream,
@@ -209,22 +190,11 @@ std::unique_ptr<column> compute_aggregation(aggregation::Kind kind,
 
 bool is_single_pass_agg_supported(data_type values_type, aggregation::Kind kind)
 {
-  // Values of STRUCT and LIST types are not aggregated by the hash groupby.
   if (cudf::is_nested(values_type)) { return false; }
-  switch (kind) {
-    case aggregation::COUNT_VALID:
-    case aggregation::COUNT_ALL: return true;
-    case aggregation::SUM:
-    case aggregation::PRODUCT:
-    case aggregation::SUM_OF_SQUARES:
-    case aggregation::MIN:
-    case aggregation::MAX:
-    case aggregation::ARGMIN:
-    case aggregation::ARGMAX:
-    case aggregation::SUM_OVERFLOW:
-      return dispatch_reduction_kind(kind, is_reduction_kind_supported_fn{values_type});
-    default: return false;
-  }
+  if (kind == aggregation::COUNT_VALID || kind == aggregation::COUNT_ALL) { return true; }
+  if (values_type.id() == type_id::EMPTY) { return false; }
+  return type_dispatcher(values_type,
+                         [kind]<typename T>() { return is_reduction_supported<T>(kind); });
 }
 
 grouped_rows make_grouped_rows(device_span<size_type const> rows,

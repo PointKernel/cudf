@@ -5,6 +5,7 @@
 
 #pragma once
 
+#include "compute_single_pass_aggs.hpp"
 #include "single_pass_reductions.hpp"
 
 #include <cudf/column/column_device_view.cuh>
@@ -547,27 +548,10 @@ struct rep_type<T> {
 template <typename T>
 using rep_type_t = typename rep_type<T>::type;
 
-template <aggregation::Kind K, typename T>
-constexpr bool is_reduction_supported()
-{
-  switch (K) {
-    case aggregation::SUM:
-    case aggregation::PRODUCT:
-    case aggregation::SUM_OF_SQUARES:
-    case aggregation::SUM_OVERFLOW: return cudf::detail::is_valid_aggregation<T, K>();
-    // Target-type validity alone does not constrain extrema's storage or comparisons.
-    case aggregation::MIN:
-    case aggregation::MAX: return cudf::is_fixed_width<T>() && is_relationally_comparable<T, T>();
-    case aggregation::ARGMIN:
-    case aggregation::ARGMAX: return is_relationally_comparable<T, T>();
-    default: return false;
-  }
-}
-
 template <aggregation::Kind K>
 struct grouped_reduction_fn {
   template <typename T>
-    requires(is_reduction_supported<K, T>() &&
+    requires(is_reduction_supported<T>(K) &&
              (K == aggregation::SUM || K == aggregation::PRODUCT ||
               K == aggregation::SUM_OF_SQUARES || K == aggregation::MIN || K == aggregation::MAX))
   std::unique_ptr<column> operator()(reduction_context const& ctx,
@@ -621,8 +605,7 @@ struct grouped_reduction_fn {
   }
 
   template <typename T>
-    requires(is_reduction_supported<K, T>() &&
-             (K == aggregation::ARGMIN || K == aggregation::ARGMAX))
+    requires(is_reduction_supported<T>(K) && (K == aggregation::ARGMIN || K == aggregation::ARGMAX))
   std::unique_ptr<column> operator()(reduction_context const& ctx,
                                      cuda::stream_ref stream,
                                      cudf::memory_resources mr) const
@@ -647,7 +630,7 @@ struct grouped_reduction_fn {
   }
 
   template <typename T>
-    requires(is_reduction_supported<K, T>() && K == aggregation::SUM_OVERFLOW)
+    requires(is_reduction_supported<T>(K) && K == aggregation::SUM_OVERFLOW)
   std::unique_ptr<column> operator()(reduction_context const& ctx,
                                      cuda::stream_ref stream,
                                      cudf::memory_resources mr) const
@@ -695,7 +678,7 @@ struct grouped_reduction_fn {
   }
 
   template <typename T>
-    requires(!is_reduction_supported<K, T>())
+    requires(!is_reduction_supported<T>(K))
   std::unique_ptr<column> operator()(reduction_context const&,
                                      cuda::stream_ref,
                                      cudf::memory_resources) const
@@ -708,7 +691,7 @@ struct grouped_reduction_fn {
 template <aggregation::Kind K>
 struct grouped_reductions_fn {
   template <typename T>
-    requires(is_reduction_supported<K, T>())
+    requires(is_reduction_supported<T>(K))
   std::vector<std::unique_ptr<column>> operator()(host_span<reduction_context const> contexts,
                                                   std::span<int8_t const> is_intermediate,
                                                   cuda::stream_ref stream,
@@ -812,7 +795,7 @@ struct grouped_reductions_fn {
   }
 
   template <typename T>
-    requires(!is_reduction_supported<K, T>())
+    requires(!is_reduction_supported<T>(K))
   std::vector<std::unique_ptr<column>> operator()(host_span<reduction_context const>,
                                                   std::span<int8_t const>,
                                                   cuda::stream_ref,
@@ -923,9 +906,9 @@ struct fused_sums_fn {
 /// Reduces consecutive MIN/MAX/SUM requests on one input with one value load per row.
 struct fused_minmax_sum_fn {
   template <typename T>
-    requires(is_reduction_supported<aggregation::SUM, T>() &&
-             is_reduction_supported<aggregation::MIN, T>() &&
-             is_reduction_supported<aggregation::MAX, T>())
+    requires(is_reduction_supported<T>(aggregation::SUM) &&
+             is_reduction_supported<T>(aggregation::MIN) &&
+             is_reduction_supported<T>(aggregation::MAX))
   std::vector<std::unique_ptr<column>> operator()(reduction_context const& ctx,
                                                   host_span<aggregation::Kind const> kinds,
                                                   std::span<int8_t const> is_intermediate,
@@ -984,9 +967,9 @@ struct fused_minmax_sum_fn {
   }
 
   template <typename T>
-    requires(!(is_reduction_supported<aggregation::SUM, T>() &&
-               is_reduction_supported<aggregation::MIN, T>() &&
-               is_reduction_supported<aggregation::MAX, T>()))
+    requires(!(is_reduction_supported<T>(aggregation::SUM) &&
+               is_reduction_supported<T>(aggregation::MIN) &&
+               is_reduction_supported<T>(aggregation::MAX)))
   std::vector<std::unique_ptr<column>> operator()(reduction_context const&,
                                                   host_span<aggregation::Kind const>,
                                                   std::span<int8_t const>,
