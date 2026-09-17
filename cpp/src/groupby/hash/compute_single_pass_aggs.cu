@@ -15,10 +15,11 @@
 #include <cudf/detail/iterator.cuh>
 #include <cudf/detail/utilities/cuda.cuh>
 #include <cudf/detail/utilities/integer_utils.hpp>
-#include <cudf/detail/valid_if.cuh>
 #include <cudf/dictionary/dictionary_column_view.hpp>
+#include <cudf/null_mask.hpp>
 #include <cudf/table/table_view.hpp>
 #include <cudf/types.hpp>
+#include <cudf/utilities/bit.hpp>
 #include <cudf/utilities/error.hpp>
 #include <cudf/utilities/memory_resource.hpp>
 #include <cudf/utilities/span.hpp>
@@ -32,6 +33,7 @@
 #include <cuda/iterator>
 #include <cuda/std/algorithm>
 #include <cuda/std/array>
+#include <cuda/std/cstddef>
 #include <cuda/std/cstdint>
 #include <cuda/std/functional>
 #include <cuda/stream>
@@ -44,6 +46,7 @@
 #include <thrust/sequence.h>
 #include <thrust/sort.h>
 #include <thrust/tabulate.h>
+#include <thrust/transform_reduce.h>
 
 #include <algorithm>
 #include <cstddef>
@@ -61,17 +64,34 @@ std::pair<rmm::device_buffer, size_type> reduce_group_validity(reduction_context
                                                                cuda::stream_ref stream,
                                                                cudf::memory_resources mr)
 {
-  rmm::device_uvector<bool> group_valid(ctx.num_groups, stream, mr.get_temporary_mr());
+  auto null_mask =
+    cudf::create_null_mask(ctx.num_groups, mask_state::ALL_VALID, stream, mr.get_output_mr());
+  if (ctx.num_groups == 0) { return {std::move(null_mask), 0}; }
+
+  auto const mask   = static_cast<bitmask_type*>(null_mask.data());
+  auto const output = cuda::tabulate_output_iterator{
+    [mask] __device__(cuda::std::ptrdiff_t group, bool valid) -> void {
+      // Different groups may share a mask word, so updates must be atomic.
+      if (!valid) { cudf::clear_bit(mask, static_cast<size_type>(group)); }
+    }};
   reduce_groups(ctx.grouped,
                 cuda::make_permutation_iterator(cudf::detail::make_validity_iterator(ctx.d_values),
                                                 ctx.grouped.rows.begin()),
-                group_valid.begin(),
+                output,
                 cuda::std::logical_or<bool>{},
                 false,
                 stream,
                 mr);
-  return cudf::detail::valid_if(
-    group_valid.begin(), group_valid.end(), cuda::std::identity{}, stream, mr);
+
+  // Padding stays valid, so only group bits contribute to this count.
+  auto const null_count = thrust::transform_reduce(
+    rmm::exec_policy_nosync(stream, mr.get_temporary_mr()),
+    mask,
+    mask + cudf::num_bitmask_words(ctx.num_groups),
+    [] __device__(bitmask_type word) -> size_type { return __popc(~word); },
+    size_type{0},
+    cuda::std::plus<size_type>{});
+  return {std::move(null_mask), null_count};
 }
 
 void set_group_null_mask(column& result,
