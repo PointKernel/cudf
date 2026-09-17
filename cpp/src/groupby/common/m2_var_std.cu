@@ -12,7 +12,7 @@
 #include <cudf/utilities/traits.hpp>
 #include <cudf/utilities/type_dispatcher.hpp>
 
-#include <rmm/device_buffer.hpp>
+#include <rmm/device_uvector.hpp>
 #include <rmm/exec_policy.hpp>
 
 #include <cuda/iterator>
@@ -20,6 +20,8 @@
 #include <cuda/std/functional>
 #include <cuda/stream>
 #include <thrust/tabulate.h>
+
+#include <utility>
 
 namespace cudf::groupby::detail {
 
@@ -143,15 +145,9 @@ std::unique_ptr<column> compute_variance_std(TransformFunc&& transform_fn,
   thrust::tabulate(
     rmm::exec_policy_nosync(stream, mr.get_temporary_mr()), out_it, out_it + size, transform_fn);
 
-  auto const temp_mr           = mr.get_temporary_mr();
-  auto [null_mask, null_count] = cudf::detail::valid_if(validity.begin(),
-                                                        validity.end(),
-                                                        cuda::std::identity{},
-                                                        stream,
-                                                        cudf::memory_resources{temp_mr, temp_mr});
-  if (null_count > 0) {
-    output->set_null_mask(rmm::device_buffer{null_mask, stream, mr.get_output_mr()}, null_count);
-  }
+  auto [null_mask, null_count] =
+    cudf::detail::valid_if(validity.begin(), validity.end(), cuda::std::identity{}, stream, mr);
+  if (null_count > 0) { output->set_null_mask(std::move(null_mask), null_count); }
 
   return output;
 }
