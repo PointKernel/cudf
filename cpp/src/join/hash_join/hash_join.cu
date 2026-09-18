@@ -21,10 +21,12 @@
 #include <cudf/utilities/type_checks.hpp>
 
 #include <rmm/device_buffer.hpp>
+#include <rmm/device_uvector.hpp>
 
 #include <cuda/std/bit>
 #include <cuda/std/cstdint>
 
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <limits>
@@ -50,6 +52,12 @@ bool is_trivial_join(table_view const& left, table_view const& right, join_kind 
 }
 
 namespace {
+bool has_list_or_string(column_view const& column)
+{
+  return column.type().id() == type_id::LIST || column.type().id() == type_id::STRING ||
+         std::any_of(column.child_begin(), column.child_end(), has_list_or_string);
+}
+
 cuda::std::uint32_t hash_csr_capacity(size_type rows, double load_factor)
 {
   auto const checked   = checked_load_factor(load_factor);
@@ -62,7 +70,11 @@ cuda::std::uint32_t hash_csr_capacity(size_type rows, double load_factor)
   CUDF_EXPECTS(capacity <= std::numeric_limits<cuda::std::uint32_t>::max(),
                "HashCSR table capacity is not representable",
                std::overflow_error);
-  return static_cast<cuda::std::uint32_t>(capacity);
+  // Avoid power-of-two rounding at the default and lower load factors. Retain the extra
+  // headroom of rounded capacities at higher load factors, where linear probing is sensitive
+  // to occupancy (in particular, load_factor == 1 must not produce an almost-full table).
+  return static_cast<cuda::std::uint32_t>(checked <= CUCO_DESIRED_LOAD_FACTOR ? requested
+                                                                              : capacity);
 }
 }  // namespace
 
@@ -100,22 +112,26 @@ hash_join<Hasher>::hash_join(cudf::table_view const& right,
                                 0xff,
                                 _impl->_entries.size() * sizeof(hash_table_entry_type),
                                 stream.get()));
-  CUDF_CUDA_TRY(cudaMemsetAsync(_impl->_cumulative_ends.data(),
-                                0,
-                                _impl->_cumulative_ends.size() * sizeof(size_type),
-                                stream.get()));
+  CUDF_CUDA_TRY(cudaMemsetAsync(
+    _impl->_offsets.data(), 0, _impl->_offsets.size() * sizeof(size_type), stream.get()));
 
   auto const temp_mr     = cudf::get_current_device_resource_ref();
-  auto const row_bitmask = cudf::detail::bitmask_and(right, stream, temp_mr).first;
+  auto const row_bitmask = _nulls_equal == null_equality::UNEQUAL
+                             ? cudf::detail::bitmask_and(right, stream, temp_mr).first
+                             : rmm::device_buffer{0, stream, temp_mr};
   auto const valid_rows  = _nulls_equal == null_equality::UNEQUAL
                              ? static_cast<bitmask_type const*>(row_bitmask.data())
                              : nullptr;
-  rmm::device_uvector<build_position_type> build_positions(right.num_rows(), stream, temp_mr);
+  // Hashing and comparing variable-width rows again can dominate construction. Cache one
+  // representative index per row for keys containing lists or strings, including within structs.
+  auto const cache_representatives = std::any_of(right.begin(), right.end(), has_list_or_string);
+  auto representatives             = rmm::device_uvector<size_type>{
+    cache_representatives ? static_cast<std::size_t>(right.num_rows()) : 0, stream, temp_mr};
   auto build = [&](auto equality, auto hasher) {
     launch_hash_csr_build_count_kernel(right.num_rows(),
                                        valid_rows,
-                                       build_positions.data(),
-                                       _impl->_cumulative_ends.data(),
+                                       _impl->_offsets.data(),
+                                       representatives.data(),
                                        _impl->hash_table(),
                                        equality,
                                        hasher,
@@ -123,25 +139,46 @@ hash_join<Hasher>::hash_join(cudf::table_view const& right,
   };
   dispatch_join_comparator(
     right, right, _preprocessed_right, _preprocessed_right, _has_nulls, _nulls_equal, build);
-  std::size_t temp_storage_bytes{};
-  CUDF_CUDA_TRY(cub::DeviceScan::InclusiveSum(nullptr,
-                                              temp_storage_bytes,
-                                              _impl->_cumulative_ends.data(),
-                                              _impl->_cumulative_ends.data(),
-                                              _impl->_capacity,
-                                              stream.get()));
-  rmm::device_buffer temp_storage(temp_storage_bytes, stream, temp_mr);
-  CUDF_CUDA_TRY(cub::DeviceScan::InclusiveSum(temp_storage.data(),
-                                              temp_storage_bytes,
-                                              _impl->_cumulative_ends.data(),
-                                              _impl->_cumulative_ends.data(),
-                                              _impl->_capacity,
-                                              stream.get()));
-  launch_hash_csr_build_fill_kernel(right.num_rows(),
-                                    build_positions.data(),
-                                    _impl->_cumulative_ends.data(),
-                                    _impl->_values.data(),
-                                    stream);
+  {
+    std::size_t temp_storage_bytes{};
+    CUDF_CUDA_TRY(cub::DeviceScan::InclusiveSum(nullptr,
+                                                temp_storage_bytes,
+                                                _impl->_offsets.data(),
+                                                _impl->_offsets.data(),
+                                                _impl->_offsets.size(),
+                                                stream.get()));
+    rmm::device_buffer temp_storage(temp_storage_bytes, stream, temp_mr);
+    CUDF_CUDA_TRY(cub::DeviceScan::InclusiveSum(temp_storage.data(),
+                                                temp_storage_bytes,
+                                                _impl->_offsets.data(),
+                                                _impl->_offsets.data(),
+                                                _impl->_offsets.size(),
+                                                stream.get()));
+  }
+  // The output array is not needed until the scan workspace has been released.
+  _impl->_values.resize(right.num_rows(), stream);
+  // Reuse each cumulative end as a scatter cursor. Once all rows in a group have been
+  // scattered, its cursor is the group's exclusive begin. No per-row positions are retained.
+  if (cache_representatives) {
+    launch_hash_csr_build_fill_cached_kernel(right.num_rows(),
+                                             representatives.data(),
+                                             _impl->_offsets.data(),
+                                             _impl->_values.data(),
+                                             stream);
+    return;
+  }
+  auto fill = [&](auto equality, auto hasher) {
+    launch_hash_csr_build_fill_kernel(right.num_rows(),
+                                      valid_rows,
+                                      _impl->_offsets.data(),
+                                      _impl->_values.data(),
+                                      _impl->hash_table(),
+                                      equality,
+                                      hasher,
+                                      stream);
+  };
+  dispatch_join_comparator(
+    right, right, _preprocessed_right, _preprocessed_right, _has_nulls, _nulls_equal, fill);
 }
 
 template hash_join<hash_join_hasher>::hash_join(
