@@ -14,7 +14,6 @@
 #include <cudf/utilities/bit.hpp>
 #include <cudf/utilities/error.hpp>
 
-#include <cuco/pair.cuh>
 #include <cuda/atomic>
 #include <cuda/bit>
 #include <cuda/std/bit>
@@ -29,7 +28,7 @@ namespace cudf::groupby::detail::hash {
 using slot_type = size_type;
 
 /// Each input row records its group count index and its rank among the rows of that group.
-using build_position_type = cuco::pair<cuda::std::uint32_t, size_type>;
+using build_position_type = cuda::std::pair<cuda::std::uint32_t, size_type>;
 
 /// Slot recorded for rows that are excluded from the groupby because their keys contain nulls.
 constexpr cuda::std::uint32_t hash_csr_no_slot =
@@ -164,7 +163,7 @@ CUDF_KERNEL void hash_csr_build_kernel(size_type num_rows,
         static_cast<size_type>(cuda::std::popcount(peers & ((1u << lane) - 1u)));
       positions[row] = {slot, first_rank + rank_in_warp};
     } else if (row < num_rows) {
-      // Materialize values so cuco::pair does not bind references to host constants.
+      // Materialize values to avoid binding references to host constants.
       positions[row] = {cuda::std::uint32_t{hash_csr_no_slot},
                         size_type{cudf::detail::CUDF_SIZE_TYPE_SENTINEL}};
     }
