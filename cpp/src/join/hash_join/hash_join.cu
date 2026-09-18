@@ -6,7 +6,6 @@
 #include "common.cuh"
 #include "dispatch.cuh"
 #include "hash_csr_kernels.cuh"
-#include "join/join_common_utils.cuh"
 
 #include <cudf/detail/cuco_helpers.hpp>
 #include <cudf/detail/null_mask.hpp>

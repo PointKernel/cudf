@@ -17,6 +17,7 @@
 #include <cooperative_groups.h>
 #include <cuda/std/algorithm>
 #include <cuda/std/cstdint>
+#include <cuda/std/utility>
 #include <cuda/stream>
 
 namespace cudf::detail {
@@ -40,7 +41,7 @@ CUDF_KERNEL void hash_csr_build_count_kernel(size_type num_rows,
     auto const index    = static_cast<size_type>(row);
     auto representative = size_type{CUDF_SIZE_TYPE_SENTINEL};
     if (valid_rows == nullptr || cudf::bit_is_set(valid_rows, index)) {
-      representative = map.insert(cuco::pair{hasher(index), index}, equal);
+      representative = map.insert(cuda::std::pair{hasher(index), index}, equal);
     }
     // Initialize excluded rows too: the cached fill pass only reads representatives.
     if (representatives != nullptr) { representatives[index] = representative; }
@@ -99,7 +100,7 @@ CUDF_KERNEL void hash_csr_build_fill_kernel(size_type num_rows,
   for (auto row = grid_1d::global_thread_id(); row < num_rows; row += stride) {
     auto const index = static_cast<size_type>(row);
     if (valid_rows != nullptr && !cudf::bit_is_set(valid_rows, index)) { continue; }
-    auto const representative = map.find<true>(cuco::pair{hasher(index), index}, equal);
+    auto const representative = map.find<true>(cuda::std::pair{hasher(index), index}, equal);
     if (representative == CUDF_SIZE_TYPE_SENTINEL) { continue; }
     hash_csr_scatter_build_row(index, representative, offsets, values);
   }
@@ -122,7 +123,7 @@ CUDF_KERNEL void hash_csr_probe_count_kernel(size_type num_rows,
     auto const index = static_cast<size_type>(row);
     auto group       = size_type{CUDF_SIZE_TYPE_SENTINEL};
     if (valid_rows == nullptr || cudf::bit_is_set(valid_rows, index)) {
-      group = map.find(cuco::pair{hasher(index), index}, equal);
+      group = map.find(cuda::std::pair{hasher(index), index}, equal);
     }
 
     auto const found = group != CUDF_SIZE_TYPE_SENTINEL;

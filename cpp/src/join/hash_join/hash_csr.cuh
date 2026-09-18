@@ -9,10 +9,10 @@
 #include <cudf/hashing.hpp>
 #include <cudf/types.hpp>
 
-#include <cuco/pair.cuh>
 #include <cuda/atomic>
 #include <cuda/cmath>
 #include <cuda/std/cstdint>
+#include <cuda/std/utility>
 
 namespace cudf::detail {
 
@@ -29,7 +29,7 @@ struct hash_table_ref {
   cuda::fast_mod_div<cuda::std::uint32_t> modulo;
 
   template <typename Equal>
-  __device__ bool equal(cuco::pair<hash_value_type, size_type> key,
+  __device__ bool equal(cuda::std::pair<hash_value_type, size_type> key,
                         hash_table_entry_type entry,
                         Equal check_row_equality) const
   {
@@ -38,7 +38,8 @@ struct hash_table_ref {
   }
 
   template <typename Equal>
-  __device__ size_type insert(cuco::pair<hash_value_type, size_type> key, Equal equal_rows) const
+  __device__ size_type insert(cuda::std::pair<hash_value_type, size_type> key,
+                              Equal equal_rows) const
   {
     auto const desired = (key.first & ~row_mask) | static_cast<cuda::std::uint32_t>(key.second);
     auto slot          = key.first % modulo;
@@ -57,7 +58,7 @@ struct hash_table_ref {
   }
 
   template <bool IsBuild = false, typename Equal>
-  __device__ size_type find(cuco::pair<hash_value_type, size_type> key, Equal equal_rows) const
+  __device__ size_type find(cuda::std::pair<hash_value_type, size_type> key, Equal equal_rows) const
   {
     auto slot = key.first % modulo;
     for (cuda::std::uint32_t step = 0; step < capacity; ++step) {
