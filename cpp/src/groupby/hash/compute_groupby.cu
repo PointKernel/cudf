@@ -37,6 +37,7 @@
 #include <thrust/scan.h>
 #include <thrust/scatter.h>
 #include <thrust/sequence.h>
+#include <thrust/uninitialized_fill.h>
 
 #include <algorithm>
 #include <cmath>
@@ -144,12 +145,13 @@ std::size_t estimate_capacity(size_type num_rows,
                               cudf::memory_resources mr)
 {
   auto const temp_mr = mr.get_temporary_mr();
+  auto const policy  = rmm::exec_policy_nosync(stream, temp_mr);
   rmm::device_uvector<slot_type> slots(hash_csr_sample_capacity, stream, temp_mr);
   rmm::device_uvector<size_type> counts(2, stream, temp_mr);
   // Counts the valid rows among every `stride`-th row and the distinct keys among them.
   auto const sample = [&](size_type stride) {
-    CUDF_CUDA_TRY(
-      cudaMemsetAsync(slots.data(), 0xff, slots.size() * sizeof(slot_type), stream.get()));
+    thrust::uninitialized_fill(
+      policy, slots.begin(), slots.end(), cudf::detail::CUDF_SIZE_TYPE_SENTINEL);
     CUDF_CUDA_TRY(
       cudaMemsetAsync(counts.data(), 0, counts.size() * sizeof(size_type), stream.get()));
     launch_hash_csr_sample_kernel(
@@ -241,8 +243,8 @@ grouped_keys group_keys(size_type num_rows,
       count_by_representative ? static_cast<std::size_t>(num_rows) : capacity;
 
     slots.resize(capacity, stream);
-    CUDF_CUDA_TRY(
-      cudaMemsetAsync(slots.data(), 0xff, slots.size() * sizeof(slot_type), stream.get()));
+    thrust::uninitialized_fill(
+      policy, slots.begin(), slots.end(), cudf::detail::CUDF_SIZE_TYPE_SENTINEL);
     if (need_grouped_rows) {
       slot_counts.resize(count_capacity, stream);
       if (count_capacity != 0) {
