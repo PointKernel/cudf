@@ -14,9 +14,8 @@
 #include <cudf/utilities/bit.hpp>
 #include <cudf/utilities/error.hpp>
 
+#include <cooperative_groups.h>
 #include <cuda/atomic>
-#include <cuda/bit>
-#include <cuda/std/bit>
 #include <cuda/std/cstdint>
 #include <cuda/std/limits>
 #include <cuda/std/utility>
@@ -112,19 +111,21 @@ CUDF_KERNEL void hash_csr_build_kernel(size_type num_rows,
                                        Hasher hasher,
                                        cuda::std::int32_t* overflow)
 {
-  auto const lane   = static_cast<cuda::std::uint32_t>(threadIdx.x % cudf::detail::warp_size);
+  auto const block  = cooperative_groups::this_thread_block();
+  auto const warp   = cooperative_groups::tiled_partition<cudf::detail::warp_size>(block);
+  auto const lane   = warp.thread_rank();
   auto const stride = cudf::detail::grid_1d::grid_stride();
   // One thread checks the cross-block abort flag. A block that starts before an overflow
   // finishes its bounded probes; the host still discards the partial build and retries.
   if (overflow != nullptr) {
     auto const stop =
-      threadIdx.x == 0 &&
+      block.thread_rank() == 0 &&
       cuda::atomic_ref<cuda::std::int32_t, cuda::thread_scope_device>{*overflow}.load(
         cuda::memory_order_relaxed) != 0;
     if (__syncthreads_or(stop)) { return; }
   }
-  // Every lane of a warp runs the same number of iterations so the warp-wide match and shuffle
-  // below always see a converged warp; lanes past the last row simply do not participate.
+  // Every lane of a warp runs the same number of iterations and participates in the partition.
+  // Lanes past the last row use the sentinel slot.
   for (auto first_row = cudf::detail::grid_1d::global_thread_id() - lane; first_row < num_rows;
        first_row += stride) {
     auto const row = first_row + lane;
@@ -147,21 +148,16 @@ CUDF_KERNEL void hash_csr_build_kernel(size_type num_rows,
     // Without aggregations only the distinct keys matter, and the set alone provides them.
     if (positions == nullptr) { continue; }
 
-    auto const has_slot    = slot != hash_csr_no_slot;
-    auto const active_mask = __ballot_sync(0xffff'ffffu, has_slot);
-    if (has_slot) {
-      auto const peers  = __match_any_sync(active_mask, slot);
-      auto const leader = cuda::std::countr_zero(peers);
+    auto const peers = cooperative_groups::labeled_partition(warp, slot);
+    if (slot != hash_csr_no_slot) {
       size_type first_rank{};
-      if (lane == static_cast<cuda::std::uint32_t>(leader)) {
+      if (peers.thread_rank() == 0) {
         first_rank =
           cuda::atomic_ref<size_type, cuda::thread_scope_device>{slot_counts[slot]}.fetch_add(
-            static_cast<size_type>(cuda::std::popcount(peers)), cuda::memory_order_relaxed);
+            static_cast<size_type>(peers.size()), cuda::memory_order_relaxed);
       }
-      first_rank = __shfl_sync(peers, first_rank, leader);
-      auto const rank_in_warp =
-        static_cast<size_type>(cuda::std::popcount(peers & ((1u << lane) - 1u)));
-      positions[row] = {slot, first_rank + rank_in_warp};
+      first_rank     = peers.shfl(first_rank, 0);
+      positions[row] = {slot, first_rank + static_cast<size_type>(peers.thread_rank())};
     } else if (row < num_rows) {
       // Materialize values to avoid binding references to host constants.
       positions[row] = {cuda::std::uint32_t{hash_csr_no_slot},
