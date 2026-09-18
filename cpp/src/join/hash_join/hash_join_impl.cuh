@@ -28,7 +28,7 @@ struct hash_join<Hasher>::impl {
        cuda::stream_ref stream,
        cuda::mr::any_resource<cuda::mr::device_accessible> mr)
     : _mr(std::move(mr)),
-      _entries(capacity, stream, _mr),
+      _slots(capacity, stream, _mr),
       _offsets(static_cast<std::size_t>(rows) + 1, stream, _mr),
       _values(0, stream, _mr),
       _capacity(capacity),
@@ -41,13 +41,13 @@ struct hash_join<Hasher>::impl {
 
   hash_table_ref hash_table() const
   {
-    return {const_cast<hash_table_entry_type*>(_entries.data()), _capacity, _row_mask, _modulo};
+    return {const_cast<hash_table_slot_type*>(_slots.data()), _capacity, _row_mask, _modulo};
   }
 
   csr_ref csr() const { return {_offsets.data(), _values.data()}; }
 
   cuda::mr::any_resource<cuda::mr::device_accessible> _mr;
-  rmm::device_uvector<hash_table_entry_type> _entries;
+  rmm::device_uvector<hash_table_slot_type> _slots;
   rmm::device_uvector<size_type> _offsets;
   rmm::device_uvector<size_type> _values;
   cuda::std::uint32_t _capacity;

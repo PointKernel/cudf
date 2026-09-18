@@ -107,10 +107,8 @@ hash_join<Hasher>::hash_join(cudf::table_view const& right,
   CUDF_EXPECTS(0 != right.num_columns(), "Hash join right table is empty", std::invalid_argument);
   if (_is_empty) { return; }
 
-  CUDF_CUDA_TRY(cudaMemsetAsync(_impl->_entries.data(),
-                                0xff,
-                                _impl->_entries.size() * sizeof(hash_table_entry_type),
-                                stream.get()));
+  CUDF_CUDA_TRY(cudaMemsetAsync(
+    _impl->_slots.data(), 0xff, _impl->_slots.size() * sizeof(hash_table_slot_type), stream.get()));
   CUDF_CUDA_TRY(cudaMemsetAsync(
     _impl->_offsets.data(), 0, _impl->_offsets.size() * sizeof(size_type), stream.get()));
 
