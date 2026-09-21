@@ -392,7 +392,7 @@ CUDF_KERNEL void __launch_bounds__(block_size)
 
   frag_init_state_s* const s          = &state_g;
   auto const t                        = threadIdx.x;
-  auto const num_fragments_per_column = frag.extent(1);
+  auto const num_fragments_per_column = frag.size().second;
 
   if (t == 0) { s->col = col_desc[blockIdx.x]; }
   __syncthreads();
@@ -405,14 +405,14 @@ CUDF_KERNEL void __launch_bounds__(block_size)
       int const p            = it - part_frag_offset.begin() - 1;
       int const part_end_row = partitions[p].start_row + partitions[p].num_rows;
       s->frag.start_row = (frag_y - part_frag_offset[p]) * fragment_size + partitions[p].start_row;
-      s->frag.chunk     = frag(blockIdx.x, frag_y).chunk;
+      s->frag.chunk     = frag[blockIdx.x][frag_y].chunk;
       init_frag_state(s, fragment_size, part_end_row);
     }
     __syncthreads();
 
     calculate_frag_size<block_size>(s, t);
     __syncthreads();
-    if (t == 0) { frag(blockIdx.x, frag_y) = s->frag; }
+    if (t == 0) { frag[blockIdx.x][frag_y] = s->frag; }
   }
 }
 
@@ -583,7 +583,7 @@ CUDF_KERNEL void __launch_bounds__(128)
 
   if (t == 0) {
     col_g  = col_desc[blockIdx.x];
-    ck_g   = chunks(blockIdx.y, blockIdx.x);
+    ck_g   = chunks[blockIdx.y][blockIdx.x];
     page_g = {};
   }
   __syncthreads();
@@ -630,7 +630,7 @@ CUDF_KERNEL void __launch_bounds__(128)
         page_g.compressed_data = ck_g.compressed_bfr + comp_page_offset;
         page_g.num_fragments   = 0;
         page_g.page_type       = PageType::DICTIONARY_PAGE;
-        page_g.chunk           = &chunks(blockIdx.y, blockIdx.x);
+        page_g.chunk           = &chunks[blockIdx.y][blockIdx.x];
         page_g.chunk_id        = blockIdx.y * num_columns + blockIdx.x;
         page_g.hdr_size        = 0;
         page_g.def_lvl_bytes   = 0;
@@ -732,7 +732,7 @@ CUDF_KERNEL void __launch_bounds__(128)
         }
         if (!t) {
           page_g.num_fragments  = fragments_in_chunk - page_start;
-          page_g.chunk          = &chunks(blockIdx.y, blockIdx.x);
+          page_g.chunk          = &chunks[blockIdx.y][blockIdx.x];
           page_g.chunk_id       = blockIdx.y * num_columns + blockIdx.x;
           page_g.page_type      = data_page_type;
           page_g.hdr_size       = 0;
@@ -895,7 +895,7 @@ CUDF_KERNEL void __launch_bounds__(128)
   __syncthreads();
   if (t == 0) {
     if (not pages.empty()) ck_g.pages = &pages[ck_g.first_page];
-    chunks(blockIdx.y, blockIdx.x) = ck_g;
+    chunks[blockIdx.y][blockIdx.x] = ck_g;
     if (chunk_grstats) chunk_grstats[blockIdx.y * num_columns + blockIdx.x] = pagestats_g;
   }
 }
@@ -3402,8 +3402,8 @@ void InitRowGroupFragments(device_2dspan<PageFragment> frag,
                            uint32_t fragment_size,
                            cuda::stream_ref stream)
 {
-  auto const num_columns              = frag.extent(0);
-  auto const num_fragments_per_column = frag.extent(1);
+  auto const num_columns              = frag.size().first;
+  auto const num_fragments_per_column = frag.size().second;
   auto const grid_y = std::min(static_cast<uint32_t>(num_fragments_per_column), MAX_GRID_Y_SIZE);
   dim3 const dim_grid(num_columns, grid_y);  // 1 threadblock per fragment
   gpuInitRowGroupFragments<512><<<dim_grid, 512, 0, stream.get()>>>(
@@ -3446,7 +3446,7 @@ void InitEncoderPages(device_2dspan<EncColumnChunk> chunks,
                       kernel_error::pointer error_code,
                       cuda::stream_ref stream)
 {
-  auto num_rowgroups = chunks.extent(0);
+  auto num_rowgroups = chunks.size().first;
   dim3 dim_grid(num_columns, num_rowgroups);  // 1 threadblock per rowgroup
   gpuInitPages<<<dim_grid, encode_block_size, 0, stream.get()>>>(chunks,
                                                                  pages,

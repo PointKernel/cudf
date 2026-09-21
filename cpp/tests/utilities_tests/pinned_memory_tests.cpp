@@ -1,5 +1,5 @@
 /*
- * SPDX-FileCopyrightText: Copyright (c) 2024-2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2024-2026, NVIDIA CORPORATION.
  * SPDX-License-Identifier: Apache-2.0
  */
 
@@ -19,6 +19,7 @@
 #include <cuda/iterator>
 
 using cudf::host_span;
+using cudf::detail::host_2dspan;
 using cudf::detail::hostdevice_2dvector;
 using cudf::detail::hostdevice_span;
 using cudf::detail::hostdevice_vector;
@@ -151,10 +152,11 @@ TEST_F(PinnedMemoryTest, HostSpan)
   // test host_view and operator[]
   {
     hostdevice_2dvector<int16_t> hd_2dvec(10, 10, stream);
-    auto const span2d = hd_2dvec.flat_host_view();
+    auto const span2d = hd_2dvec.host_view().flat_view();
     EXPECT_TRUE(span2d.is_device_accessible());
 
-    EXPECT_EQ(hd_2dvec.host_view().data_handle(), span2d.data());
+    auto const span2d_from_cast = host_2dspan<int16_t>{hd_2dvec};
+    EXPECT_TRUE(span2d_from_cast.flat_view().is_device_accessible());
 
     auto const row_span = hd_2dvec[0];
     EXPECT_TRUE(row_span.is_device_accessible());
@@ -163,10 +165,11 @@ TEST_F(PinnedMemoryTest, HostSpan)
   // test const versions of host_view and operator[]
   {
     hostdevice_2dvector<int16_t> const const_hd_2dvec(10, 10, stream);
-    auto const const_span2d = const_hd_2dvec.flat_host_view();
+    auto const const_span2d = const_hd_2dvec.host_view().flat_view();
     EXPECT_TRUE(const_span2d.is_device_accessible());
 
-    EXPECT_EQ(const_hd_2dvec.host_view().data_handle(), const_span2d.data());
+    auto const const_span2d_from_cast = host_2dspan<int16_t const>{const_hd_2dvec};
+    EXPECT_TRUE(const_span2d_from_cast.flat_view().is_device_accessible());
 
     auto const const_row_span = const_hd_2dvec[0];
     EXPECT_TRUE(const_row_span.is_device_accessible());

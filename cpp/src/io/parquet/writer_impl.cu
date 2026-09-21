@@ -1156,8 +1156,7 @@ void init_row_group_fragments(cudf::detail::hostdevice_2dvector<PageFragment>& f
 {
   auto d_partitions = cudf::detail::make_device_uvector_async(
     partitions, stream, cudf::get_current_device_resource_ref());
-  InitRowGroupFragments(
-    frag.device_view(), col_desc, d_partitions, part_frag_offset, fragment_size, stream);
+  InitRowGroupFragments(frag, col_desc, d_partitions, part_frag_offset, fragment_size, stream);
   frag.device_to_host(stream);
 }
 
@@ -1217,7 +1216,7 @@ auto init_page_sizes(hostdevice_2dvector<EncColumnChunk>& chunks,
 
   chunks.host_to_device_async(stream);
   // Calculate number of pages and store in respective chunks
-  InitEncoderPages(chunks.device_view(),
+  InitEncoderPages(chunks,
                    {},
                    {},
                    {},
@@ -1240,7 +1239,7 @@ auto init_page_sizes(hostdevice_2dvector<EncColumnChunk>& chunks,
   chunks.device_to_host(stream);
 
   auto num_pages = size_type{0};
-  for (auto& chunk : chunks.flat_host_view()) {
+  for (auto& chunk : chunks.host_view().flat_view()) {
     chunk.first_page = num_pages;
     num_pages += chunk.num_pages;
   }
@@ -1249,7 +1248,7 @@ auto init_page_sizes(hostdevice_2dvector<EncColumnChunk>& chunks,
   // Now that we know the number of pages, allocate an array to hold per page size and get it
   // populated
   cudf::detail::hostdevice_vector<size_type> page_sizes(num_pages, stream);
-  InitEncoderPages(chunks.device_view(),
+  InitEncoderPages(chunks,
                    {},
                    page_sizes,
                    {},
@@ -1280,7 +1279,7 @@ auto init_page_sizes(hostdevice_2dvector<EncColumnChunk>& chunks,
   comp_page_sizes.host_to_device_async(stream);
 
   // Use per-page max compressed size to calculate chunk.compressed_size
-  InitEncoderPages(chunks.device_view(),
+  InitEncoderPages(chunks,
                    {},
                    {},
                    comp_page_sizes,
@@ -1328,7 +1327,7 @@ build_chunk_dictionaries(hostdevice_2dvector<EncColumnChunk>& chunks,
   // At this point, we know all chunks and their sizes. We want to allocate dictionaries for each
   // chunk that can have dictionary
 
-  auto h_chunks = chunks.flat_host_view();
+  auto h_chunks = chunks.host_view().flat_view();
 
   std::vector<rmm::device_uvector<size_type>> dict_data;
   std::vector<rmm::device_uvector<size_type>> dict_index;
@@ -1472,7 +1471,7 @@ build_chunk_dictionaries(hostdevice_2dvector<EncColumnChunk>& chunks,
     chunk.dict_index          = inserted_dict_index.data();
   }
   chunks.host_to_device_async(stream);
-  collect_map_entries(map_storage_data, chunks.flat_device_view(), frags, stream);
+  collect_map_entries(map_storage_data, chunks.device_view().flat_view(), frags, stream);
   get_dictionary_indices(map_storage_data, frags, stream);
 
   return std::pair(std::move(dict_data), std::move(dict_index));
@@ -1516,7 +1515,7 @@ void init_encoder_pages(hostdevice_2dvector<EncColumnChunk>& chunks,
   rmm::device_uvector<statistics_merge_group> page_stats_mrg(num_stats_bfr, stream);
   kernel_error error_code(stream);
   chunks.host_to_device_async(stream);
-  InitEncoderPages(chunks.device_view(),
+  InitEncoderPages(chunks,
                    pages,
                    {},
                    comp_page_sizes,
@@ -1603,17 +1602,17 @@ void encode_pages(hostdevice_2dvector<EncColumnChunk>& chunks,
   // TBD: Not clear if the official spec actually allows dynamically turning off compression at the
   // chunk-level
 
-  auto d_chunks = chunks.flat_device_view();
-  decide_compression(d_chunks, page_level_compression, stream);
+  auto d_chunks = chunks.device_view();
+  decide_compression(d_chunks.flat_view(), page_level_compression, stream);
   EncodePageHeaders(pages, comp_res, pages_stats, chunk_stats, stream);
-  GatherPages(d_chunks, stream);
+  GatherPages(d_chunks.flat_view(), stream);
 
   // By now, the var_bytes has been calculated in InitPages, and the histograms in EncodePages.
   // EncodeColumnIndexes can encode the histograms in the ColumnIndex, and also sum up var_bytes
   // and the histograms for inclusion in the chunk's SizeStats.
   if (column_stats != nullptr) {
     EncodeColumnIndexes(
-      d_chunks, {column_stats, pages.size()}, column_index_truncate_length, stream);
+      d_chunks.flat_view(), {column_stats, pages.size()}, column_index_truncate_length, stream);
   }
 
   chunks.device_to_host_async(stream);
@@ -2025,11 +2024,10 @@ auto convert_table_to_parquet_data(table_input_metadata& table_meta,
       for (int c = 0; c < num_columns; c++) {
         EncColumnChunk& ck = chunks[r + first_rg_in_part[p]][c];
 
-        ck             = {};
-        ck.col_desc    = col_desc.device_ptr() + c;
-        ck.col_desc_id = c;
-        ck.fragments =
-          row_group_fragments.base_device_ptr(c * row_group_fragments.size().second + f);
+        ck                   = {};
+        ck.col_desc          = col_desc.device_ptr() + c;
+        ck.col_desc_id       = c;
+        ck.fragments         = row_group_fragments.device_view()[c].data() + f;
         ck.stats             = nullptr;
         ck.start_row         = start_row;
         ck.num_rows          = (uint32_t)row_group.num_rows;
@@ -2040,7 +2038,7 @@ auto convert_table_to_parquet_data(table_input_metadata& table_meta,
         // In fragment struct, add a pointer to the chunk it belongs to
         // In each fragment in chunk_fragments, update the chunk pointer here.
         for (auto& frag : chunk_fragments) {
-          frag.chunk = chunks.base_device_ptr((r + first_rg_in_part[p]) * chunks.size().second + c);
+          frag.chunk = chunks.device_view()[r + first_rg_in_part[p]].data() + c;
         }
         ck.num_values = std::accumulate(
           chunk_fragments.begin(), chunk_fragments.end(), 0, [](uint32_t l, auto r) {
@@ -2071,14 +2069,8 @@ auto convert_table_to_parquet_data(table_input_metadata& table_meta,
   }
 
   row_group_fragments.host_to_device_async(stream);
-  [[maybe_unused]] auto dict_info_owner =
-    build_chunk_dictionaries(chunks,
-                             col_desc,
-                             row_group_fragments.device_view(),
-                             compression,
-                             dict_policy,
-                             max_dictionary_size,
-                             stream);
+  [[maybe_unused]] auto dict_info_owner = build_chunk_dictionaries(
+    chunks, col_desc, row_group_fragments, compression, dict_policy, max_dictionary_size, stream);
 
   // The code preceding this used a uniform fragment size for all columns. Now recompute
   // fragments with a (potentially) varying number of fragments per column.
@@ -2116,7 +2108,7 @@ auto convert_table_to_parquet_data(table_input_metadata& table_meta,
           // update the chunk pointer here for each fragment in chunk.fragments
           for (uint32_t i = 0; i < fragments_in_chunk; i++) {
             page_fragments[frag_offset + i].chunk =
-              chunks.base_device_ptr((r + first_rg_in_part[p]) * chunks.size().second + c);
+              chunks.device_view()[r + first_rg_in_part[p]].data() + c;
           }
 
           if (not frag_stats.is_empty()) { ck.stats = frag_stats.data() + frag_offset; }
@@ -2595,7 +2587,7 @@ void writer::impl::write(table_view const& input, std::vector<partition_info> co
   // Compression/encoding were all successful. Now write the intermediate results.
   write_parquet_data_to_sink(updated_agg_meta,
                              pages,
-                             chunks.host_view(),
+                             chunks,
                              global_rowgroup_base,
                              first_rg_in_part,
                              rg_to_part,
@@ -2616,8 +2608,8 @@ void writer::impl::write_parquet_data_to_sink(
   host_span<uint8_t> bounce_buffer)
 {
   _agg_meta                = std::move(updated_agg_meta);
-  auto const num_rowgroups = chunks.extent(0);
-  auto const num_columns   = chunks.extent(1);
+  auto const num_rowgroups = chunks.size().first;
+  auto const num_columns   = chunks.size().second;
 
   if (num_rowgroups != 0) {
     std::vector<std::future<void>> write_tasks;
@@ -2632,7 +2624,7 @@ void writer::impl::write_parquet_data_to_sink(
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wdangling-reference"
 #endif
-        auto const& ck = chunks(r, i);
+        auto const& ck = chunks[r][i];
 #if defined(__GNUC__) && (__GNUC__ >= 14)
 #pragma GCC diagnostic pop
 #endif
@@ -2676,7 +2668,7 @@ void writer::impl::write_parquet_data_to_sink(
 
     // add column and offset indexes to metadata
     if (num_rowgroups != 0) {
-      auto curr_page_idx = chunks(0, 0).first_page;
+      auto curr_page_idx = chunks[0][0].first_page;
       for (auto r = 0; r < static_cast<int>(num_rowgroups); r++) {
         int const p           = rg_to_part[r];
         int const global_r    = global_rowgroup_base[p] + r - first_rg_in_part[p];
@@ -2686,7 +2678,7 @@ void writer::impl::write_parquet_data_to_sink(
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wdangling-reference"
 #endif
-          EncColumnChunk const& ck = chunks(r, i);
+          EncColumnChunk const& ck = chunks[r][i];
 #if defined(__GNUC__) && (__GNUC__ >= 14)
 #pragma GCC diagnostic pop
 #endif

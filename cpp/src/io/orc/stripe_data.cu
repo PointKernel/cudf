@@ -1293,7 +1293,7 @@ CUDF_KERNEL void __launch_bounds__(block_size)
 
   orcdec_state_s* const s  = &state_g;
   int t                    = threadIdx.x;
-  auto const num_rowgroups = static_cast<size_type>(row_groups.extent(0));
+  auto const num_rowgroups = static_cast<size_type>(row_groups.size().first);
   bool const is_nulldec    = (blockIdx.y == 0);
   // The null decode is spread over row groups when the host sized the grid for it
   bool const by_rowgroup = is_nulldec && decode_nulls_by_rowgroup;
@@ -1303,7 +1303,7 @@ CUDF_KERNEL void __launch_bounds__(block_size)
   if (by_rowgroup) {
     column       = blockIdx.x / num_rowgroups;
     rowgroup_idx = blockIdx.x % num_rowgroups;
-    chunk_id     = row_groups(rowgroup_idx, column).chunk_id;
+    chunk_id     = row_groups[rowgroup_idx][column].chunk_id;
     stripe       = chunk_id / num_columns;
   } else {
     if (blockIdx.x >= static_cast<uint32_t>(num_columns) * num_stripes) { return; }
@@ -1335,7 +1335,7 @@ CUDF_KERNEL void __launch_bounds__(block_size)
     // Bits of the seeked-to RLE run that belong to earlier row groups and must be discarded
     uint32_t bit_skip = 0;
     if (by_rowgroup) {
-      auto const& rg = row_groups(rowgroup_idx, column);
+      auto const& rg = row_groups[rowgroup_idx][column];
       // At level 0 a row group's `start_row` is its offset within the chunk, which is also what
       // the PRESENT stream position below is relative to.
       begin_row = rg.start_row;
@@ -1350,7 +1350,7 @@ CUDF_KERNEL void __launch_bounds__(block_size)
       s->chunk.skip_count   = 0;
       s->top.nulls_desc_row = begin_row;
       auto const strm_ofs   = by_rowgroup
-                                ? min(row_groups(rowgroup_idx, column).strm_offset[CI_PRESENT],
+                                ? min(row_groups[rowgroup_idx][column].strm_offset[CI_PRESENT],
                                     s->chunk.strm_len[CI_PRESENT])
                                 : 0;
       bytestream_init(&s->bs,
@@ -1634,13 +1634,13 @@ CUDF_KERNEL void __launch_bounds__(block_size)
   orcdec_state_s* const s = &state_g;
   uint32_t chunk_id;
   int t              = threadIdx.x;
-  auto num_rowgroups = row_groups.extent(0);
+  auto num_rowgroups = row_groups.size().first;
 
   if (num_rowgroups > 0) {
     if (t == 0) {
       auto const rg_idx  = blockIdx.x % num_rowgroups;
       auto const col_idx = blockIdx.x / num_rowgroups;
-      s->top.data.index  = row_groups(rg_idx, col_idx);
+      s->top.data.index  = row_groups[rg_idx][col_idx];
     }
     __syncthreads();
     chunk_id = s->top.data.index.chunk_id;
@@ -2108,7 +2108,7 @@ CUDF_KERNEL void __launch_bounds__(block_size)
     if (num_rowgroups > 0) {
       auto const rg_idx                          = blockIdx.x % num_rowgroups;
       auto const col_idx                         = blockIdx.x / num_rowgroups;
-      row_groups(rg_idx, col_idx).num_child_rows = s->num_child_rows;
+      row_groups[rg_idx][col_idx].num_child_rows = s->num_child_rows;
     }
     cuda::atomic_ref<int64_t, cuda::thread_scope_device> ref{chunks[chunk_id].num_child_rows};
     ref.fetch_add(s->num_child_rows, cuda::std::memory_order_relaxed);
@@ -2138,7 +2138,7 @@ void __host__ decode_nulls_and_string_dictionaries(column_desc* chunks,
 {
   // A row index lets the null decode use one block per row group rather than one per stripe. Its
   // PRESENT positions only line up with the output rows when nothing is skipped.
-  auto const num_rowgroups   = static_cast<int64_t>(row_groups.extent(0));
+  auto const num_rowgroups   = static_cast<int64_t>(row_groups.size().first);
   auto const rowgroup_blocks = static_cast<int64_t>(num_columns) * num_rowgroups;
   auto const stripe_blocks   = static_cast<int64_t>(num_columns) * num_stripes;
   constexpr auto max_blocks  = std::numeric_limits<int32_t>::max();

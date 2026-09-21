@@ -420,7 +420,7 @@ void decode_stream_data(int64_t num_dicts,
                      num_stripes,
                      skip_rows,
                      d_tz_table,
-                     row_groups.extent(0),
+                     row_groups.size().first,
                      row_index_stride,
                      level,
                      error_count.data(),
@@ -480,7 +480,7 @@ void scan_null_counts(cudf::detail::hostdevice_2dvector<column_desc> const& chun
                        cuda::counting_iterator<std::size_t>{0ul},
                        cuda::counting_iterator<std::size_t>{num_stripes},
                        psums,
-                       [&](auto stripe_idx) { return chunks(stripe_idx, col_idx).null_count; });
+                       [&](auto stripe_idx) { return chunks[stripe_idx][col_idx].null_count; });
                      thrust::inclusive_scan(thrust::seq, psums, psums + num_stripes, psums);
                    });
   // `prefix_sums_to_update` goes out of scope, copy has to be done before we return
@@ -498,8 +498,8 @@ void aggregate_child_meta(std::size_t level,
                           host_span<column_buffer> out_buffers,
                           reader_column_meta& col_meta)
 {
-  auto const num_of_stripes         = chunks.extent(0);
-  auto const num_of_rowgroups       = row_groups.extent(0);
+  auto const num_of_stripes         = chunks.size().first;
+  auto const num_of_rowgroups       = row_groups.size().first;
   auto const num_child_cols         = selected_columns.levels[level + 1].size();
   auto const number_of_child_chunks = num_child_cols * num_of_stripes;
   auto& num_child_rows              = col_meta.num_child_rows;
@@ -514,14 +514,12 @@ void aggregate_child_meta(std::size_t level,
   col_meta.num_child_rows_per_stripe.resize(number_of_child_chunks);
   col_meta.rwgrp_meta.resize(num_of_rowgroups * num_child_cols);
 
-  auto child_start_row = cudf::detail::host_2dspan<int64_t>(
-    col_meta.child_start_row.data(), num_child_cols == 0 ? 0 : num_of_stripes, num_child_cols);
+  auto child_start_row =
+    cudf::detail::host_2dspan<int64_t>(col_meta.child_start_row, num_child_cols);
   auto num_child_rows_per_stripe =
-    cudf::detail::host_2dspan<int64_t>(col_meta.num_child_rows_per_stripe.data(),
-                                       num_child_cols == 0 ? 0 : num_of_stripes,
-                                       num_child_cols);
+    cudf::detail::host_2dspan<int64_t>(col_meta.num_child_rows_per_stripe, num_child_cols);
   auto rwgrp_meta = cudf::detail::host_2dspan<reader_column_meta::row_group_meta>(
-    col_meta.rwgrp_meta.data(), num_child_cols == 0 ? 0 : num_of_rowgroups, num_child_cols);
+    col_meta.rwgrp_meta, num_child_cols);
 
   int index = 0;  // number of child column processed
 
@@ -535,23 +533,23 @@ void aggregate_child_meta(std::size_t level,
     for (std::size_t stripe_id = 0; stripe_id < num_of_stripes; stripe_id++) {
       // Aggregate num_rows and start_row from processed parent columns per row groups
       if (num_of_rowgroups) {
-        auto stripe_num_row_groups = chunks(stripe_id, parent_col_idx).num_rowgroups;
+        auto stripe_num_row_groups = chunks[stripe_id][parent_col_idx].num_rowgroups;
         auto processed_child_rows  = 0;
 
         for (std::size_t rowgroup_id = 0; rowgroup_id < stripe_num_row_groups;
              rowgroup_id++, processed_row_groups++) {
-          auto const child_rows = row_groups(processed_row_groups, parent_col_idx).num_child_rows;
+          auto const child_rows = row_groups[processed_row_groups][parent_col_idx].num_child_rows;
           for (size_type id = 0; id < p_col.num_children; id++) {
             auto const child_col_idx                                  = index + id;
-            rwgrp_meta(processed_row_groups, child_col_idx).start_row = processed_child_rows;
-            rwgrp_meta(processed_row_groups, child_col_idx).num_rows  = child_rows;
+            rwgrp_meta[processed_row_groups][child_col_idx].start_row = processed_child_rows;
+            rwgrp_meta[processed_row_groups][child_col_idx].num_rows  = child_rows;
           }
           processed_child_rows += child_rows;
         }
       }
 
       // Aggregate start row, number of rows per chunk and total number of rows in a column
-      auto const child_rows = chunks(stripe_id, parent_col_idx).num_child_rows;
+      auto const child_rows = chunks[stripe_id][parent_col_idx].num_child_rows;
 
       for (size_type id = 0; id < p_col.num_children; id++) {
         auto const child_col_idx = index + id;
@@ -565,9 +563,9 @@ void aggregate_child_meta(std::size_t level,
                        static_cast<int64_t>(std::numeric_limits<size_type>::max()),
                      "Number of rows in the child column exceeds column size limit.");
 
-        num_child_rows_per_stripe(stripe_id, child_col_idx) = child_rows;
+        num_child_rows_per_stripe[stripe_id][child_col_idx] = child_rows;
         // start row could be different for each column when there is nesting at each stripe level
-        child_start_row(stripe_id, child_col_idx) = (stripe_id == 0) ? 0 : start_row;
+        child_start_row[stripe_id][child_col_idx] = (stripe_id == 0) ? 0 : start_row;
       }
       start_row += child_rows;
     }
@@ -726,7 +724,8 @@ void reader_impl::decompress_and_decode_stripes(read_mode mode)
 
   // Column descriptors ('chunks').
   // Each 'chunk' of data here corresponds to an orc column, in a stripe, at a nested level.
-  // Each level has its own host/device allocation and transfer lifetime.
+  // Unfortunately we cannot create one hostdevice_vector to use for all levels because
+  // currently we do not have a hostdevice_2dspan class.
   std::vector<cudf::detail::hostdevice_2dvector<column_desc>> lvl_chunks(num_levels);
 
   // For computing null count.
@@ -975,7 +974,7 @@ void reader_impl::decompress_and_decode_stripes(read_mode mode)
                        level,
                        *tz_table_dptr,
                        chunks,
-                       row_groups.device_view(),
+                       row_groups,
                        _out_buffers[level],
                        _stream,
                        _mr);
@@ -986,13 +985,8 @@ void reader_impl::decompress_and_decode_stripes(read_mode mode)
         chunks, null_count_prefix_sums.data() + num_processed_lvl_columns * stripe_count, _stream);
 
       row_groups.device_to_host(_stream);
-      aggregate_child_meta(level,
-                           _selected_columns,
-                           chunks.host_view(),
-                           row_groups.host_view(),
-                           nested_cols,
-                           _out_buffers[level],
-                           col_meta);
+      aggregate_child_meta(
+        level, _selected_columns, chunks, row_groups, nested_cols, _out_buffers[level], col_meta);
 
       // ORC stores number of elements at each row, so we need to generate offsets from that
       std::vector<list_buffer_data> buff_data;

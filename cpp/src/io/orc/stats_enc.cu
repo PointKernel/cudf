@@ -30,16 +30,16 @@ CUDF_KERNEL void __launch_bounds__(init_threads_per_block)
                              device_2dspan<rowgroup_rows const> rowgroup_bounds)
 {
   __shared__ __align__(4) statistics_group group_g[init_groups_per_block];
-  auto const col_id = blockIdx.x % rowgroup_bounds.extent(1);
+  auto const col_id = blockIdx.x % rowgroup_bounds.size().second;
   auto const chunk_id =
-    (blockIdx.x / rowgroup_bounds.extent(1) * init_groups_per_block) + threadIdx.y;
+    (blockIdx.x / rowgroup_bounds.size().second * init_groups_per_block) + threadIdx.y;
   auto const t             = threadIdx.x;
-  auto const num_rowgroups = rowgroup_bounds.extent(0);
+  auto const num_rowgroups = rowgroup_bounds.size().first;
   statistics_group* group  = &group_g[threadIdx.y];
   if (chunk_id < num_rowgroups and t == 0) {
     group->col                                = &cols[col_id];
-    group->start_row                          = rowgroup_bounds(chunk_id, col_id).begin;
-    group->num_rows                           = rowgroup_bounds(chunk_id, col_id).size();
+    group->start_row                          = rowgroup_bounds[chunk_id][col_id].begin;
+    group->num_rows                           = rowgroup_bounds[chunk_id][col_id].size();
     groups[col_id * num_rowgroups + chunk_id] = *group;
   }
 }
@@ -444,8 +444,8 @@ void orc_init_statistics_groups(statistics_group* groups,
                                 cuda::stream_ref stream)
 {
   auto const num_blocks =
-    cudf::util::div_rounding_up_safe<size_t>(rowgroup_bounds.extent(0), init_groups_per_block) *
-    rowgroup_bounds.extent(1);
+    cudf::util::div_rounding_up_safe<size_t>(rowgroup_bounds.size().first, init_groups_per_block) *
+    rowgroup_bounds.size().second;
 
   dim3 dim_block(init_threads_per_group, init_groups_per_block);
   gpu_init_statistics_groups<<<num_blocks, dim_block, 0, stream.get()>>>(

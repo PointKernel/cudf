@@ -271,7 +271,7 @@ CUDF_KERNEL void __launch_bounds__(block_size)
 {
   auto const col_idx  = blockIdx.y;
   auto const frag_idx = blockIdx.x;
-  auto& frag          = frags(col_idx, frag_idx);
+  auto& frag          = frags[col_idx][frag_idx];
   auto const chunk    = frag.chunk;
   auto col            = chunk->col_desc;
 
@@ -317,9 +317,8 @@ CUDF_KERNEL void __launch_bounds__(block_size)
   // If a chunk has less fragments than the maximum fragments per chunk, resolve its
   // column-relative fragment range.
   if (num_frags <= MAX_FRAGMENTS_PER_CHUNK) {
-    auto const col_idx   = chunk.col_desc_id;
-    auto const col_frags = device_span<PageFragment const>{
-      frags.data_handle() + col_idx * frags.extent(1), frags.extent(1)};
+    auto const col_idx    = chunk.col_desc_id;
+    auto const& col_frags = frags[col_idx];
     auto const frag_start = static_cast<size_type>(chunk.fragments - col_frags.data());
 
     // Initialize fragment_offsets with prefix sum (exclusive) of number of dictionary values
@@ -393,7 +392,7 @@ CUDF_KERNEL void __launch_bounds__(block_size)
 {
   auto const col_idx  = blockIdx.y;
   auto const frag_idx = blockIdx.x;
-  auto const& frag    = frags(col_idx, frag_idx);
+  auto const& frag    = frags[col_idx][frag_idx];
   auto const chunk    = frag.chunk;
 
   if (not chunk->use_dictionary) { return; }
@@ -485,7 +484,7 @@ void populate_chunk_hash_maps(device_span<slot_type> const map_storage,
                               cudf::detail::device_2dspan<PageFragment> frags,
                               cuda::stream_ref stream)
 {
-  dim3 const dim_grid(frags.extent(1), frags.extent(0));
+  dim3 const dim_grid(frags.size().second, frags.size().first);
   populate_chunk_hash_maps_kernel<dict_encode_block_size>
     <<<dim_grid, dict_encode_block_size, 0, stream.get()>>>(map_storage, frags);
   CUDF_CUDA_TRY(cudaGetLastError());
@@ -509,7 +508,7 @@ void get_dictionary_indices(device_span<slot_type> const map_storage,
                             cudf::detail::device_2dspan<PageFragment const> frags,
                             cuda::stream_ref stream)
 {
-  dim3 const dim_grid(frags.extent(1), frags.extent(0));
+  dim3 const dim_grid(frags.size().second, frags.size().first);
   get_dictionary_indices_kernel<DEFAULT_BLOCK_SIZE>
     <<<dim_grid, DEFAULT_BLOCK_SIZE, 0, stream.get()>>>(map_storage, frags);
   CUDF_CUDA_TRY(cudaGetLastError());

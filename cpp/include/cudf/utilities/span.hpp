@@ -86,6 +86,8 @@ struct host_span {
   /**
    * @brief Constructs a span from a pointer and a size.
    *
+   * @note This needs to be host-device, as it's used by a host-device function in base_2dspan
+   *
    * @param data Pointer to the first element in the span
    * @param size The number of elements in the span
    */
@@ -93,6 +95,8 @@ struct host_span {
 
   /**
    * @brief Constructor from pointer, size and device-accessibility flag
+   *
+   * @note This needs to be host-device, as it's used by a host-device function in base_2dspan
    *
    * @param data Pointer to the first element in the span
    * @param size The number of elements in the span
@@ -284,6 +288,8 @@ struct host_span {
   }
 
  private:
+  // TODO: could be std::span once base_2dspan moves to cuda::std::mdspan and host_span no longer
+  // needs to be device-usable.
   span_type _span;
   bool _is_device_accessible{false};
 };
@@ -301,16 +307,124 @@ using device_span = cuda::std::span<T, Extent>;
 namespace detail {
 
 /**
- * @brief Alias for a row-major 2D view of host data.
+ * @brief Generic class for row-major 2D spans. Not compliant with STL container semantics/syntax.
+ *
+ * The index operator returns the corresponding row.
  */
-template <class T>
-using host_2dspan = cuda::std::mdspan<T, cuda::std::dextents<std::size_t, 2>>;
+template <typename T, template <typename, std::size_t> typename RowType>
+class base_2dspan {
+ public:
+  using size_type =
+    std::pair<size_t, size_t>;  ///< Type used to represent the dimension of the span
+
+  constexpr base_2dspan() noexcept = default;
+  /**
+   * @brief Constructor from a span and number of elements in each row.
+   *
+   * @param flat_view The flattened 2D span
+   * @param columns Number of columns
+   */
+  constexpr base_2dspan(RowType<T, dynamic_extent> flat_view, size_t columns)
+    : _flat{flat_view}, _size{columns == 0 ? 0 : flat_view.size() / columns, columns}
+  {
+#ifndef __CUDA_ARCH__
+    CUDF_EXPECTS(_size.first * _size.second == flat_view.size(), "Invalid 2D span size");
+#endif
+  }
+
+  /**
+   * @brief Returns a pointer to the beginning of the sequence.
+   *
+   * @return A pointer to the first element of the span
+   */
+  [[nodiscard]] CUDF_HOST_DEVICE constexpr auto data() const noexcept { return _flat.data(); }
+
+  /**
+   * @brief Returns the size in the span as pair.
+   *
+   * @return pair representing rows and columns size of the span
+   */
+  [[nodiscard]] CUDF_HOST_DEVICE constexpr auto size() const noexcept { return _size; }
+
+  /**
+   * @brief Returns the number of elements in the span.
+   *
+   * @return Number of elements in the span
+   */
+  [[nodiscard]] CUDF_HOST_DEVICE constexpr auto count() const noexcept { return _flat.size(); }
+
+  /**
+   * @brief Checks if the span is empty.
+   *
+   * @return True if the span is empty, false otherwise
+   */
+  [[nodiscard]] CUDF_HOST_DEVICE constexpr bool is_empty() const noexcept { return count() == 0; }
+
+  /**
+   * @brief Returns a reference to the row-th element of the sequence.
+   *
+   * The behavior is undefined if row is out of range (i.e., if it is greater than or equal to
+   * size()).
+   *
+   * @param row the index of the element to access
+   * @return A reference to the row-th element of the sequence, i.e., `data()[row]`
+   */
+  CUDF_HOST_DEVICE constexpr RowType<T, dynamic_extent> operator[](std::size_t row) const
+  {
+    auto const view = cuda::std::mdspan<T, cuda::std::dextents<std::size_t, 2>>{
+      _flat.data(), _size.first, _size.second};
+    auto const columns = view.extent(1);
+    auto const offset  = columns == 0 ? 0 : view.mapping()(row, 0);
+    return _flat.subspan(offset, columns);
+  }
+
+  /**
+   * @brief Returns a flattened span of the 2D span.
+   *
+   * @return A flattened span of the 2D span
+   */
+  [[nodiscard]] CUDF_HOST_DEVICE constexpr RowType<T, dynamic_extent> flat_view() const
+  {
+    return _flat;
+  }
+
+  /**
+   * @brief Construct a 2D span from another 2D span of convertible type
+   *
+   * @tparam OtherT Type of the other 2D span
+   * @tparam OtherRowType Type of the row of the other 2D span
+   * @param other The other 2D span
+   */
+  template <typename OtherT,
+            template <typename, size_t> typename OtherRowType,
+            std::enable_if_t<std::is_convertible_v<OtherRowType<OtherT, dynamic_extent>,
+                                                   RowType<T, dynamic_extent>>,
+                             void>* = nullptr>
+  constexpr base_2dspan(base_2dspan<OtherT, OtherRowType> const& other) noexcept
+    : _flat{other.flat_view()}, _size{other.size()}
+  {
+  }
+
+ protected:
+  RowType<T, dynamic_extent> _flat;  ///< flattened 2D span
+  size_type _size{0, 0};             ///< num rows, num columns
+};
 
 /**
- * @brief Alias for a row-major 2D view of device data.
+ * @brief Alias for the 2D span for host data.
+ *
+ * Index operator returns rows as `host_span`.
  */
 template <class T>
-using device_2dspan = cuda::std::mdspan<T, cuda::std::dextents<std::size_t, 2>>;
+using host_2dspan = base_2dspan<T, host_span>;
+
+/**
+ * @brief Alias for the 2D span for device data.
+ *
+ * Index operator returns rows as `device_span`.
+ */
+template <class T>
+using device_2dspan = base_2dspan<T, device_span>;
 
 }  // namespace detail
 }  // namespace CUDF_EXPORT cudf
