@@ -28,7 +28,6 @@
 #include <cuda/functional>
 #include <cuda/iterator>
 #include <cuda/std/functional>
-#include <cuda/std/span>
 #include <cuda/std/utility>
 #include <cuda/stream>
 #include <thrust/binary_search.h>
@@ -1093,8 +1092,8 @@ struct packed_split_indices_and_src_buf_info {
                                    indices_size + src_buf_info_size);
 
     detail::cuda_memcpy_async<uint8_t>(
-      cuda::std::span<uint8_t>{static_cast<uint8_t*>(d_indices_and_source_info.data()),
-                               h_indices_and_source_info.size()},
+      device_span<uint8_t>{static_cast<uint8_t*>(d_indices_and_source_info.data()),
+                           h_indices_and_source_info.size()},
       h_indices_and_source_info,
       stream);
   }
@@ -1159,7 +1158,7 @@ struct packed_partition_buf_size_and_dst_buf_info {
 
   rmm::device_uvector<uint8_t> d_buf_sizes_and_dst_info;
   std::size_t* const d_buf_sizes;
-  cuda::std::span<dst_buf_info> const d_dst_buf_info;
+  device_span<dst_buf_info> const d_dst_buf_info;
 };
 
 // Packed block of memory 3:
@@ -1192,8 +1191,8 @@ struct packed_src_and_dst_pointers {
   void copy_to_device()
   {
     detail::cuda_memcpy_async<uint8_t>(
-      cuda::std::span<uint8_t>{static_cast<uint8_t*>(d_src_and_dst_buffers.data()),
-                               d_src_and_dst_buffers.size()},
+      device_span<uint8_t>{static_cast<uint8_t*>(d_src_and_dst_buffers.data()),
+                           d_src_and_dst_buffers.size()},
       h_src_and_dst_buffers,
       stream);
   }
@@ -1796,7 +1795,7 @@ void copy_data(int num_batches_to_copy,
                int starting_batch,
                uint8_t const** d_src_bufs,
                uint8_t** d_dst_bufs,
-               cuda::std::span<dst_buf_info> d_dst_buf_info,
+               device_span<dst_buf_info> d_dst_buf_info,
                uint8_t* user_buffer,
                cuda::stream_ref stream)
 {
@@ -1862,9 +1861,9 @@ namespace detail {
  * contiguous_split_state::contiguous_split() performs a single-pass contiguous_split
  * and is valid iff contiguous_split_state is instantiated with 0 for the user_buffer_size.
  *
- * contiguous_split_state::contiguous_split_chunk(cuda::std::span) is only valid when
+ * contiguous_split_state::contiguous_split_chunk(device_span) is only valid when
  * user_buffer_size > 0. It should be called as long as has_next() returns true. The
- * cuda::std::span passed to contiguous_split_chunk must be allocated in stream `stream` by
+ * device_span passed to contiguous_split_chunk must be allocated in stream `stream` by
  * the user.
  *
  * None of the methods are thread safe.
@@ -1944,7 +1943,7 @@ struct contiguous_split_state {
     return make_packed_tables();
   }
 
-  std::size_t contiguous_split_chunk(cuda::std::span<uint8_t> const& user_buffer)
+  std::size_t contiguous_split_chunk(cudf::device_span<uint8_t> const& user_buffer)
   {
     CUDF_FUNC_RANGE();
     CUDF_EXPECTS(
@@ -2236,7 +2235,7 @@ std::size_t chunked_pack::get_total_contiguous_size() const
 
 bool chunked_pack::has_next() const { return state->has_next(); }
 
-std::size_t chunked_pack::next(cuda::std::span<uint8_t> const& user_buffer)
+std::size_t chunked_pack::next(cudf::device_span<uint8_t> const& user_buffer)
 {
   return state->contiguous_split_chunk(user_buffer);
 }

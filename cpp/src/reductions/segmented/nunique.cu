@@ -16,7 +16,6 @@
 #include <cudf/utilities/memory_resource.hpp>
 
 #include <cuda/iterator>
-#include <cuda/std/span>
 #include <cuda/stream>
 #include <thrust/transform.h>
 
@@ -41,7 +40,7 @@ struct is_unique_fn {
 }  // namespace
 
 std::unique_ptr<cudf::column> segmented_nunique(column_view const& col,
-                                                cuda::std::span<size_type const> offsets,
+                                                device_span<size_type const> offsets,
                                                 null_policy null_handling,
                                                 cuda::stream_ref stream,
                                                 rmm::device_async_resource_ref mr)

@@ -10,7 +10,6 @@
 #include <cudf/utilities/memory_resource.hpp>
 #include <cudf/utilities/span.hpp>
 
-#include <cuda/std/span>
 #include <cuda/stream>
 
 #include <memory>
@@ -36,7 +35,7 @@ std::unique_ptr<column> interleave_columns(table_view const& input,
  * @copydoc cudf::table_to_array
  */
 void table_to_array(table_view const& input,
-                    cuda::std::span<cuda::std::byte> output,
+                    device_span<cuda::std::byte> output,
                     cuda::stream_ref stream = cudf::get_default_stream());
 
 }  // namespace detail

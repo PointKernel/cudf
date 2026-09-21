@@ -28,7 +28,6 @@
 
 #include <cuda/atomic>
 #include <cuda/std/algorithm>
-#include <cuda/std/span>
 #include <cuda/stream>
 #include <thrust/count.h>
 #include <thrust/detail/copy.h>
@@ -39,6 +38,7 @@
 
 using namespace ::cudf::io;
 
+using cudf::device_span;
 using cudf::detail::grid_1d;
 
 namespace cudf {
@@ -163,10 +163,10 @@ __device__ __inline__ bool is_floatingpoint(long len,
  */
 CUDF_KERNEL void __launch_bounds__(csvparse_block_dim)
   data_type_detection(parse_options_view const opts,
-                      cuda::std::span<char const> csv_text,
-                      cuda::std::span<column_parse::flags const> const column_flags,
-                      cuda::std::span<uint64_t const> const row_offsets,
-                      cuda::std::span<column_type_histogram> d_column_data)
+                      device_span<char const> csv_text,
+                      device_span<column_parse::flags const> const column_flags,
+                      device_span<uint64_t const> const row_offsets,
+                      device_span<column_type_histogram> d_column_data)
 {
   auto const raw_csv = csv_text.data();
 
@@ -311,14 +311,14 @@ CUDF_KERNEL void __launch_bounds__(csvparse_block_dim)
  */
 CUDF_KERNEL void __launch_bounds__(csvparse_block_dim)
   convert_csv_to_cudf(cudf::io::parse_options_view options,
-                      cuda::std::span<char const> data,
-                      cuda::std::span<column_parse::flags const> column_flags,
-                      cuda::std::span<uint64_t const> row_offsets,
-                      cuda::std::span<cudf::data_type const> dtypes,
-                      cuda::std::span<void* const> columns,
-                      cuda::std::span<cudf::bitmask_type* const> valids,
-                      cuda::std::span<size_type> valid_counts,
-                      cuda::std::span<bool* const> is_quoted_flags)
+                      device_span<char const> data,
+                      device_span<column_parse::flags const> column_flags,
+                      device_span<uint64_t const> row_offsets,
+                      device_span<cudf::data_type const> dtypes,
+                      device_span<void* const> columns,
+                      device_span<cudf::bitmask_type* const> valids,
+                      device_span<size_type> valid_counts,
+                      device_span<bool* const> is_quoted_flags)
 {
   auto const raw_csv = data.data();
   // thread IDs range per block, so also need the block id.
@@ -513,9 +513,7 @@ inline __device__ uint32_t select_rowmap(uint4 ctx_map, uint32_t ctxid)
  * @param t thread id (leaf node id)
  */
 template <uint32_t lanemask, uint32_t tmask, uint32_t base, uint32_t level_scale>
-inline __device__ void ctx_merge(cuda::std::span<uint64_t> ctxtree,
-                                 packed_rowctx_t* ctxb,
-                                 uint32_t t)
+inline __device__ void ctx_merge(device_span<uint64_t> ctxtree, packed_rowctx_t* ctxb, uint32_t t)
 {
   uint64_t tmp = shuffle_xor(*ctxb, lanemask);
   if (!(t & tmask)) {
@@ -537,11 +535,8 @@ inline __device__ void ctx_merge(cuda::std::span<uint64_t> ctxtree,
  * @param[in] t thread id (leaf node id)
  */
 template <uint32_t rmask>
-inline __device__ void ctx_unmerge(uint32_t base,
-                                   cuda::std::span<uint64_t const> ctxtree,
-                                   uint32_t* ctx,
-                                   uint32_t* brow4,
-                                   uint32_t t)
+inline __device__ void ctx_unmerge(
+  uint32_t base, device_span<uint64_t const> ctxtree, uint32_t* ctx, uint32_t* brow4, uint32_t t)
 {
   rowctx32_t ctxb_left, ctxb_right, ctxb_sum;
   ctxb_sum   = get_row_context(ctxtree[base], *ctx);
@@ -573,7 +568,7 @@ inline __device__ void ctx_unmerge(uint32_t base,
  * @param[in] ctxb packed row context for the current character block
  * @param t thread id (leaf node id)
  */
-static inline __device__ void rowctx_merge_transform(cuda::std::span<uint64_t> ctxtree,
+static inline __device__ void rowctx_merge_transform(device_span<uint64_t> ctxtree,
                                                      packed_rowctx_t ctxb,
                                                      uint32_t t)
 {
@@ -608,7 +603,7 @@ static inline __device__ void rowctx_merge_transform(cuda::std::span<uint64_t> c
  * @return Final row context and count (row_position*4 + context_id format)
  */
 static inline __device__ rowctx32_t
-rowctx_inverse_merge_transform(cuda::std::span<uint64_t const> ctxtree, uint32_t t)
+rowctx_inverse_merge_transform(device_span<uint64_t const> ctxtree, uint32_t t)
 {
   uint32_t ctx     = ctxtree[0] & 3;  // Starting input context
   rowctx32_t brow4 = 0;               // output row in block *4
@@ -659,9 +654,9 @@ constexpr auto bk_ctxtree_size = rowofs_block_dim * 2;
  */
 CUDF_KERNEL void __launch_bounds__(rowofs_block_dim)
   gather_row_offsets_gpu(uint64_t* row_ctx,
-                         cuda::std::span<uint64_t> ctxtree,
-                         cuda::std::span<uint64_t> offsets_out,
-                         cuda::std::span<char const> const data,
+                         device_span<uint64_t> ctxtree,
+                         device_span<uint64_t> offsets_out,
+                         device_span<char const> const data,
                          size_t chunk_size,
                          size_t parse_pos,
                          size_t start_offset,
@@ -805,8 +800,8 @@ CUDF_KERNEL void __launch_bounds__(rowofs_block_dim)
 }
 
 size_t __host__ count_blank_rows(cudf::io::parse_options_view const& opts,
-                                 cuda::std::span<char const> data,
-                                 cuda::std::span<uint64_t const> row_offsets,
+                                 device_span<char const> data,
+                                 device_span<uint64_t const> row_offsets,
                                  cuda::stream_ref stream)
 {
   auto const newline  = opts.skipblanklines ? opts.terminator : opts.comment;
@@ -822,10 +817,10 @@ size_t __host__ count_blank_rows(cudf::io::parse_options_view const& opts,
     });
 }
 
-cuda::std::span<uint64_t> __host__ remove_blank_rows(cudf::io::parse_options_view const& options,
-                                                     cuda::std::span<char const> data,
-                                                     cuda::std::span<uint64_t> row_offsets,
-                                                     cuda::stream_ref stream)
+device_span<uint64_t> __host__ remove_blank_rows(cudf::io::parse_options_view const& options,
+                                                 device_span<char const> data,
+                                                 device_span<uint64_t> row_offsets,
+                                                 cuda::stream_ref stream)
 {
   size_t d_size       = data.size();
   auto const newline  = options.skipblanklines ? options.terminator : options.comment;
@@ -844,9 +839,9 @@ cuda::std::span<uint64_t> __host__ remove_blank_rows(cudf::io::parse_options_vie
 
 cudf::detail::host_vector<column_type_histogram> detect_column_types(
   cudf::io::parse_options_view const& options,
-  cuda::std::span<char const> const data,
-  cuda::std::span<column_parse::flags const> const column_flags,
-  cuda::std::span<uint64_t const> const row_starts,
+  device_span<char const> const data,
+  device_span<column_parse::flags const> const column_flags,
+  device_span<uint64_t const> const row_starts,
   size_t const num_active_columns,
   cuda::stream_ref stream)
 {
@@ -865,14 +860,14 @@ cudf::detail::host_vector<column_type_histogram> detect_column_types(
 }
 
 void decode_row_column_data(cudf::io::parse_options_view const& options,
-                            cuda::std::span<char const> data,
-                            cuda::std::span<column_parse::flags const> column_flags,
-                            cuda::std::span<uint64_t const> row_offsets,
-                            cuda::std::span<cudf::data_type const> dtypes,
-                            cuda::std::span<void* const> columns,
-                            cuda::std::span<cudf::bitmask_type* const> valids,
-                            cuda::std::span<size_type> valid_counts,
-                            cuda::std::span<bool* const> is_quoted_flags,
+                            device_span<char const> data,
+                            device_span<column_parse::flags const> column_flags,
+                            device_span<uint64_t const> row_offsets,
+                            device_span<cudf::data_type const> dtypes,
+                            device_span<void* const> columns,
+                            device_span<cudf::bitmask_type* const> valids,
+                            device_span<size_type> valid_counts,
+                            device_span<bool* const> is_quoted_flags,
                             cuda::stream_ref stream)
 {
   // Calculate actual block count to use based on records count
@@ -894,8 +889,8 @@ void decode_row_column_data(cudf::io::parse_options_view const& options,
 
 uint32_t __host__ gather_row_offsets(parse_options_view const& options,
                                      uint64_t* row_ctx,
-                                     cuda::std::span<uint64_t> const offsets_out,
-                                     cuda::std::span<char const> const data,
+                                     device_span<uint64_t> const offsets_out,
+                                     device_span<char const> const data,
                                      size_t chunk_size,
                                      size_t parse_pos,
                                      size_t start_offset,

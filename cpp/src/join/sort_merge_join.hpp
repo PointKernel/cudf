@@ -16,7 +16,6 @@
 #include <rmm/device_buffer.hpp>
 #include <rmm/device_uvector.hpp>
 
-#include <cuda/std/span>
 #include <cuda/stream>
 
 #include <memory>
@@ -229,8 +228,8 @@ class sort_merge_join {
    * @param stream CUDA stream used for device memory operations and kernel launches
    */
   void postprocess_indices(preprocessed_table const& preprocessed_left,
-                           cuda::std::span<size_type> smaller_indices,
-                           cuda::std::span<size_type> larger_indices,
+                           device_span<size_type> smaller_indices,
+                           device_span<size_type> larger_indices,
                            cuda::stream_ref stream) const;
 
   /**

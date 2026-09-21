@@ -22,7 +22,6 @@
 #include <cudf/utilities/type_dispatcher.hpp>
 
 #include <cuda/iterator>
-#include <cuda/std/span>
 #include <cuda/stream>
 
 #include <cudf_fragments.hpp>
@@ -30,6 +29,7 @@
 #include <jit/helpers.hpp>
 #include <jit/parser.hpp>
 #include <jit/row_ir.hpp>
+#include <jit/span.cuh>
 #include <jit/util.hpp>
 
 #include <algorithm>
@@ -788,7 +788,7 @@ size_type inplace_null_mask_and(bitmask_type* null_mask,
   }
 
   auto num_valid = detail::inplace_bitmask_and(
-    cuda::std::span<bitmask_type>{null_mask, static_cast<size_t>(num_words)},
+    device_span<bitmask_type>{null_mask, static_cast<size_t>(num_words)},
     nullable_masks,
     nullable_offsets,
     row_size,
@@ -997,7 +997,7 @@ rmm::device_uvector<char> make_chars_buffer(column_view const& offsets_view,
   return chars;
 }
 
-std::unique_ptr<column> make_strings_column(cuda::std::span<string_view const> strings,
+std::unique_ptr<column> make_strings_column(device_span<string_view const> strings,
                                             rmm::device_buffer null_mask,
                                             size_type null_count,
                                             cuda::stream_ref stream,
@@ -1115,8 +1115,8 @@ auto finalize_output(string_views_column&& c,
                      rmm::device_async_resource_ref mr)
 {
   return make_strings_column(
-    cuda::std::span<string_view const>{static_cast<string_view const*>(c._data.data()),
-                                       static_cast<size_t>(c._size)},
+    device_span<string_view const>{static_cast<string_view const*>(c._data.data()),
+                                   static_cast<size_t>(c._size)},
     std::move(c._null_mask),
     c._null_count,
     stream,

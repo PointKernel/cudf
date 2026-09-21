@@ -19,7 +19,6 @@
 
 #include <cuda/iterator>
 #include <cuda/std/limits>
-#include <cuda/std/span>
 #include <cuda/std/tuple>
 #include <thrust/transform.h>
 
@@ -171,7 +170,7 @@ struct host_udf_segmented_reduction_example : cudf::segmented_reduce_host_udf {
 
   [[nodiscard]] std::unique_ptr<cudf::column> operator()(
     cudf::column_view const& input,
-    cuda::std::span<cudf::size_type const> offsets,
+    cudf::device_span<cudf::size_type const> offsets,
     cudf::data_type output_dtype,
     cudf::null_policy null_handling,
     std::optional<std::reference_wrapper<cudf::scalar const>> init,
@@ -220,7 +219,7 @@ struct host_udf_segmented_reduction_example : cudf::segmented_reduce_host_udf {
               CUDF_ENABLE_IF(std::is_same_v<InputType, T>&& std::is_same_v<OutputType, U>)>
     std::unique_ptr<cudf::column> operator()(
       cudf::column_view const& input,
-      cuda::std::span<cudf::size_type const> offsets,
+      cudf::device_span<cudf::size_type const> offsets,
       cudf::data_type output_dtype,
       cudf::null_policy null_handling,
       std::optional<std::reference_wrapper<cudf::scalar const>> init,
@@ -275,7 +274,7 @@ struct host_udf_segmented_reduction_example : cudf::segmented_reduce_host_udf {
 
     struct transform_fn {
       cudf::column_device_view values;
-      cuda::std::span<cudf::size_type const> offsets;
+      cudf::device_span<cudf::size_type const> offsets;
       OutputType init_value;
       cudf::null_policy null_handling;
 
@@ -320,7 +319,7 @@ TEST_F(HostUDFSegmentedReductionExampleTest, SimpleInput)
   {
     auto const result = cudf::segmented_reduce(
       vals,
-      cuda::std::span<int const>(offsets->view().begin<int>(), offsets->size()),
+      cudf::device_span<int const>(offsets->view().begin<int>(), offsets->size()),
       *agg,
       cudf::data_type{cudf::type_id::INT64},
       cudf::null_policy::INCLUDE,
@@ -340,7 +339,7 @@ TEST_F(HostUDFSegmentedReductionExampleTest, SimpleInput)
     auto const init_scalar = cudf::make_fixed_width_scalar<double>(3.0);
     auto const result      = cudf::segmented_reduce(
       vals,
-      cuda::std::span<int const>(offsets->view().begin<int>(), offsets->size()),
+      cudf::device_span<int const>(offsets->view().begin<int>(), offsets->size()),
       *agg,
       cudf::data_type{cudf::type_id::INT64},
       cudf::null_policy::INCLUDE,
@@ -359,7 +358,7 @@ TEST_F(HostUDFSegmentedReductionExampleTest, SimpleInput)
     auto const init_scalar = cudf::make_fixed_width_scalar<double>(3.0);
     auto const result      = cudf::segmented_reduce(
       vals,
-      cuda::std::span<int const>(offsets->view().begin<int>(), offsets->size()),
+      cudf::device_span<int const>(offsets->view().begin<int>(), offsets->size()),
       *agg,
       cudf::data_type{cudf::type_id::INT64},
       cudf::null_policy::EXCLUDE,
@@ -381,7 +380,7 @@ TEST_F(HostUDFSegmentedReductionExampleTest, EmptySegments)
     std::make_unique<host_udf_segmented_reduction_example>());
   auto const result = cudf::segmented_reduce(
     vals,
-    cuda::std::span<int const>(offsets->view().begin<int>(), offsets->size()),
+    cudf::device_span<int const>(offsets->view().begin<int>(), offsets->size()),
     *agg,
     cudf::data_type{cudf::type_id::INT64},
     cudf::null_policy::INCLUDE,
@@ -400,7 +399,7 @@ TEST_F(HostUDFSegmentedReductionExampleTest, EmptyInput)
     std::make_unique<host_udf_segmented_reduction_example>());
   auto const result = cudf::segmented_reduce(
     vals,
-    cuda::std::span<int const>(offsets->view().begin<int>(), offsets->size()),
+    cudf::device_span<int const>(offsets->view().begin<int>(), offsets->size()),
     *agg,
     cudf::data_type{cudf::type_id::INT64},
     cudf::null_policy::INCLUDE,

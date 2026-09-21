@@ -20,7 +20,6 @@
 #include <cudf/utilities/memory_resource.hpp>
 
 #include <cuda/std/iterator>
-#include <cuda/std/span>
 #include <cuda/stream>
 #include <thrust/binary_search.h>
 #include <thrust/execution_policy.h>
@@ -43,9 +42,9 @@ namespace {
  * @param d_indices Mark these indices to be removed
  * @param d_segment_sizes Store actual sizes of each segment
  */
-CUDF_KERNEL void resolve_segment_indices(cuda::std::span<size_type const> d_offsets,
+CUDF_KERNEL void resolve_segment_indices(device_span<size_type const> d_offsets,
                                          size_type k,
-                                         cuda::std::span<size_type> d_indices,
+                                         device_span<size_type> d_indices,
                                          size_type* d_segment_sizes)
 {
   auto const tid = cudf::detail::grid_1d::global_thread_id();
@@ -104,9 +103,8 @@ std::unique_ptr<column> segmented_top_k_order(column_view const& col,
   // first element; an empty segment has none, so its slot must remain 0, not uninitialized.
   auto segment_sizes = cudf::detail::make_zeroed_device_uvector_async<size_type>(
     segment_offsets.size() - 1, stream, temp_mr);
-  auto span_indices =
-    cuda::std::span<size_type>{d_indices, static_cast<std::size_t>(indices->size())};
-  auto const grid = cudf::detail::grid_1d(indices->size(), 256);
+  auto span_indices = device_span<size_type>{d_indices, static_cast<std::size_t>(indices->size())};
+  auto const grid   = cudf::detail::grid_1d(indices->size(), 256);
   resolve_segment_indices<<<grid.num_blocks, grid.num_threads_per_block, 0, stream.get()>>>(
     segment_offsets, k, span_indices, segment_sizes.data());
   CUDF_CUDA_TRY(cudaGetLastError());

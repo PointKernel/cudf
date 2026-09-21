@@ -13,7 +13,6 @@
 
 #include <rmm/exec_policy.hpp>
 
-#include <cuda/std/span>
 #include <thrust/transform_scan.h>
 
 namespace cudf::io::parquet::detail {
@@ -355,10 +354,10 @@ struct delta_byte_array_decoder {
 template <typename level_t>
 CUDF_KERNEL void __launch_bounds__(decode_delta_binary_block_size)
   decode_delta_binary_kernel(PageInfo* pages,
-                             cuda::std::span<ColumnChunkDesc const> chunks,
+                             device_span<ColumnChunkDesc const> chunks,
                              size_t min_row,
                              size_t num_rows,
-                             cuda::std::span<bool const> page_mask,
+                             cudf::device_span<bool const> page_mask,
                              kernel_error::pointer error_code)
 {
   __shared__ __align__(16) delta_binary_decoder db_state;
@@ -528,11 +527,11 @@ CUDF_KERNEL void __launch_bounds__(decode_delta_binary_block_size)
 template <typename level_t>
 CUDF_KERNEL void __launch_bounds__(decode_block_size)
   decode_delta_byte_array_kernel(PageInfo* pages,
-                                 cuda::std::span<ColumnChunkDesc const> chunks,
+                                 device_span<ColumnChunkDesc const> chunks,
                                  size_t min_row,
                                  size_t num_rows,
-                                 cuda::std::span<bool const> page_mask,
-                                 cuda::std::span<size_t> initial_str_offsets,
+                                 cudf::device_span<bool const> page_mask,
+                                 cudf::device_span<size_t> initial_str_offsets,
                                  kernel_error::pointer error_code)
 {
   __shared__ __align__(16) delta_byte_array_decoder db_state;
@@ -750,11 +749,11 @@ CUDF_KERNEL void __launch_bounds__(decode_block_size)
 template <typename level_t>
 CUDF_KERNEL void __launch_bounds__(decode_block_size)
   decode_delta_length_byte_array_kernel(PageInfo* pages,
-                                        cuda::std::span<ColumnChunkDesc const> chunks,
+                                        device_span<ColumnChunkDesc const> chunks,
                                         size_t min_row,
                                         size_t num_rows,
-                                        cuda::std::span<bool const> page_mask,
-                                        cuda::std::span<size_t> initial_str_offsets,
+                                        cudf::device_span<bool const> page_mask,
+                                        cudf::device_span<size_t> initial_str_offsets,
                                         kernel_error::pointer error_code)
 {
   __shared__ __align__(16) delta_binary_decoder db_state;
@@ -980,7 +979,7 @@ void decode_delta_binary(cudf::detail::hostdevice_span<PageInfo> pages,
                          size_t num_rows,
                          size_t min_row,
                          int level_type_size,
-                         cuda::std::span<bool const> page_mask,
+                         cudf::device_span<bool const> page_mask,
                          kernel_error::pointer error_code,
                          cuda::stream_ref stream)
 {
@@ -1008,8 +1007,8 @@ void decode_delta_byte_array(cudf::detail::hostdevice_span<PageInfo> pages,
                              size_t num_rows,
                              size_t min_row,
                              int level_type_size,
-                             cuda::std::span<bool const> page_mask,
-                             cuda::std::span<size_t> initial_str_offsets,
+                             cudf::device_span<bool const> page_mask,
+                             cudf::device_span<size_t> initial_str_offsets,
                              kernel_error::pointer error_code,
                              cuda::stream_ref stream)
 {
@@ -1037,8 +1036,8 @@ void decode_delta_length_byte_array(cudf::detail::hostdevice_span<PageInfo> page
                                     size_t num_rows,
                                     size_t min_row,
                                     int level_type_size,
-                                    cuda::std::span<bool const> page_mask,
-                                    cuda::std::span<size_t> initial_str_offsets,
+                                    cudf::device_span<bool const> page_mask,
+                                    cudf::device_span<size_t> initial_str_offsets,
                                     kernel_error::pointer error_code,
                                     cuda::stream_ref stream)
 {

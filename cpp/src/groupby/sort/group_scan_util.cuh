@@ -27,7 +27,6 @@
 
 #include <cuda/iterator>
 #include <cuda/std/functional>
-#include <cuda/std/span>
 #include <cuda/stream>
 #include <thrust/scan.h>
 
@@ -49,7 +48,7 @@ struct group_scan_dispatcher {
   template <typename T>
   std::unique_ptr<column> operator()(column_view const& values,
                                      size_type num_groups,
-                                     cuda::std::span<cudf::size_type const> group_labels,
+                                     cudf::device_span<cudf::size_type const> group_labels,
                                      cuda::stream_ref stream,
                                      rmm::device_async_resource_ref mr)
   {
@@ -78,7 +77,7 @@ template <aggregation::Kind K, typename T>
 struct group_scan_functor<K, T, std::enable_if_t<is_group_scan_supported<K, T>()>> {
   static std::unique_ptr<column> invoke(column_view const& values,
                                         size_type num_groups,
-                                        cuda::std::span<cudf::size_type const> group_labels,
+                                        cudf::device_span<cudf::size_type const> group_labels,
                                         cuda::stream_ref stream,
                                         rmm::device_async_resource_ref mr)
   {
@@ -138,7 +137,7 @@ struct group_scan_functor<K,
                           std::enable_if_t<is_group_scan_supported<K, cudf::string_view>()>> {
   static std::unique_ptr<column> invoke(column_view const& values,
                                         size_type num_groups,
-                                        cuda::std::span<cudf::size_type const> group_labels,
+                                        cudf::device_span<cudf::size_type const> group_labels,
                                         cuda::stream_ref stream,
                                         rmm::device_async_resource_ref mr)
   {
@@ -185,7 +184,7 @@ struct group_scan_functor<K,
                           std::enable_if_t<is_group_scan_supported<K, cudf::struct_view>()>> {
   static std::unique_ptr<column> invoke(column_view const& values,
                                         size_type num_groups,
-                                        cuda::std::span<cudf::size_type const> group_labels,
+                                        cudf::device_span<cudf::size_type const> group_labels,
                                         cuda::stream_ref stream,
                                         rmm::device_async_resource_ref mr)
   {

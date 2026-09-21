@@ -11,7 +11,6 @@
 #include <cudf/utilities/span.hpp>
 #include <cudf/utilities/traits.hpp>
 
-#include <cuda/std/span>
 #include <cuda/std/utility>
 #include <cuda/stream>
 
@@ -366,7 +365,7 @@ std::unique_ptr<column> make_fixed_width_column(
  * @return Constructed strings column
  */
 std::unique_ptr<column> make_strings_column(
-  cuda::std::span<cuda::std::pair<char const*, size_type> const> strings,
+  cudf::device_span<cuda::std::pair<char const*, size_type> const> strings,
   cuda::stream_ref stream           = cudf::get_default_stream(),
   rmm::device_async_resource_ref mr = cudf::get_current_device_resource_ref());
 
@@ -386,7 +385,7 @@ std::unique_ptr<column> make_strings_column(
  * @return Array of constructed strings columns
  */
 std::vector<std::unique_ptr<column>> make_strings_column_batch(
-  std::vector<cuda::std::span<cuda::std::pair<char const*, size_type> const>> const& input,
+  std::vector<cudf::device_span<cuda::std::pair<char const*, size_type> const>> const& input,
   cuda::stream_ref stream           = cudf::get_default_stream(),
   rmm::device_async_resource_ref mr = cudf::get_current_device_resource_ref());
 
@@ -417,7 +416,7 @@ std::vector<std::unique_ptr<column>> make_strings_column_batch(
   * @return Constructed strings column
  */
 std::unique_ptr<column> make_strings_column(
-  cuda::std::span<string_view const> string_views,
+  cudf::device_span<string_view const> string_views,
   string_view const null_placeholder,
   cuda::stream_ref stream           = cudf::get_default_stream(),
   rmm::device_async_resource_ref mr = cudf::get_current_device_resource_ref());

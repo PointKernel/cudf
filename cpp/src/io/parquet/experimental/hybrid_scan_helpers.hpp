@@ -14,7 +14,6 @@
 #include <cudf/io/types.hpp>
 #include <cudf/utilities/memory_resource.hpp>
 
-#include <cuda/std/span>
 #include <cuda/stream>
 
 #include <memory>
@@ -307,7 +306,7 @@ class aggregate_reader_metadata : public aggregate_reader_metadata_base {
    * @return Filtered row group indices, if any are filtered
    */
   [[nodiscard]] std::vector<std::vector<size_type>> filter_row_groups_with_bloom_filters(
-    std::span<cuda::std::span<uint8_t const> const> bloom_filter_data,
+    std::span<cudf::device_span<uint8_t const> const> bloom_filter_data,
     std::span<std::vector<size_type> const> row_group_indices,
     std::span<data_type const> output_dtypes,
     std::span<cudf::size_type const> output_column_schemas,

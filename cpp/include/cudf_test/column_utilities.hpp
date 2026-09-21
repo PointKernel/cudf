@@ -19,7 +19,6 @@
 #include <cudf/utilities/memory_resource.hpp>
 
 #include <cuda/iterator>
-#include <cuda/std/span>
 #include <cuda/stream>
 #include <thrust/host_vector.h>
 
@@ -203,7 +202,7 @@ std::pair<thrust::host_vector<T>, std::vector<bitmask_type>> to_host(
   cuda::stream_ref stream   = cudf::test::get_default_stream(),
   cudf::memory_resources mr = cudf::get_current_device_resource_ref())
 {
-  auto col_span  = cuda::std::span<T const>(c.data<T>(), c.size());
+  auto col_span  = cudf::device_span<T const>(c.data<T>(), c.size());
   auto host_data = cudf::detail::make_host_vector(col_span, stream);
   return {std::move(host_data), bitmask_to_host(c, stream, mr)};
 }

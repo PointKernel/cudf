@@ -8,7 +8,6 @@
 
 #include <cudf/utilities/span.hpp>
 
-#include <cuda/std/span>
 #include <cuda/stream>
 
 namespace cudf {
@@ -38,9 +37,9 @@ struct schemadesc_s {
  * @param[in] min_row_size Minimum size in bytes of a row
  * @param[in] stream CUDA stream to use
  */
-void DecodeAvroColumnData(cuda::std::span<block_desc_s const> blocks,
+void DecodeAvroColumnData(cudf::device_span<block_desc_s const> blocks,
                           schemadesc_s* schema,
-                          cuda::std::span<string_index_pair const> global_dictionary,
+                          cudf::device_span<string_index_pair const> global_dictionary,
                           uint8_t const* avro_data,
                           uint32_t schema_len,
                           uint32_t min_row_size,

@@ -11,7 +11,6 @@
 #include <cudf/detail/utilities/integer_utils.hpp>
 
 #include <cub/cub.cuh>
-#include <cuda/std/span>
 #include <cuda/stream>
 
 namespace cudf::io::detail {
@@ -59,15 +58,15 @@ struct unsnap_state_s {
   CUDF_HOST_DEVICE constexpr unsnap_state_s() noexcept {
   }  // required to compile on ctk-12.2 + aarch64
 
-  uint8_t const* base{};               ///< base ptr of compressed stream
-  uint8_t const* end{};                ///< end of compressed stream
-  uint32_t uncompressed_size{};        ///< uncompressed stream size
-  uint32_t bytes_left{};               ///< remaining bytes to decompress
-  int32_t error{};                     ///< current error status
-  uint32_t tstart{};                   ///< start time for perf logging
-  unsnap_queue_s volatile q{};         ///< queue for cross-warp communication
-  cuda::std::span<uint8_t const> src;  ///< input for current block
-  cuda::std::span<uint8_t> dst;        ///< output for current block
+  uint8_t const* base{};           ///< base ptr of compressed stream
+  uint8_t const* end{};            ///< end of compressed stream
+  uint32_t uncompressed_size{};    ///< uncompressed stream size
+  uint32_t bytes_left{};           ///< remaining bytes to decompress
+  int32_t error{};                 ///< current error status
+  uint32_t tstart{};               ///< start time for perf logging
+  unsnap_queue_s volatile q{};     ///< queue for cross-warp communication
+  device_span<uint8_t const> src;  ///< input for current block
+  device_span<uint8_t> dst;        ///< output for current block
 };
 
 inline __device__ volatile uint8_t& byte_access(unsnap_state_s* s, uint32_t pos)
@@ -631,9 +630,9 @@ __device__ void snappy_process_symbols(unsnap_state_s* s, int t, Storage& temp_s
  */
 template <int block_size>
 CUDF_KERNEL void __launch_bounds__(block_size)
-  unsnap_kernel_no_racecheck(cuda::std::span<cuda::std::span<uint8_t const> const> inputs,
-                             cuda::std::span<cuda::std::span<uint8_t> const> outputs,
-                             cuda::std::span<codec_exec_result> results)
+  unsnap_kernel_no_racecheck(device_span<device_span<uint8_t const> const> inputs,
+                             device_span<device_span<uint8_t> const> outputs,
+                             device_span<codec_exec_result> results)
 {
   __shared__ __align__(16) unsnap_state_s state_g;
   __shared__ cub::WarpReduce<uint32_t>::TempStorage temp_storage;
@@ -708,9 +707,9 @@ CUDF_KERNEL void __launch_bounds__(block_size)
   }
 }
 
-void gpu_unsnap(cuda::std::span<cuda::std::span<uint8_t const> const> inputs,
-                cuda::std::span<cuda::std::span<uint8_t> const> outputs,
-                cuda::std::span<codec_exec_result> results,
+void gpu_unsnap(device_span<device_span<uint8_t const> const> inputs,
+                device_span<device_span<uint8_t> const> outputs,
+                device_span<codec_exec_result> results,
                 cuda::stream_ref stream)
 {
   if (inputs.empty()) { return; }
@@ -724,8 +723,7 @@ void gpu_unsnap(cuda::std::span<cuda::std::span<uint8_t const> const> inputs,
 }
 
 CUDF_KERNEL void get_snappy_uncompressed_size_kernel(
-  cuda::std::span<cuda::std::span<uint8_t const> const> inputs,
-  cuda::std::span<size_t> uncompressed_sizes)
+  device_span<device_span<uint8_t const> const> inputs, device_span<size_t> uncompressed_sizes)
 {
   auto const idx = cudf::detail::grid_1d::global_thread_id();
   if (idx >= inputs.size()) return;
@@ -750,8 +748,8 @@ CUDF_KERNEL void get_snappy_uncompressed_size_kernel(
   uncompressed_sizes[idx] = 0;
 }
 
-void get_snappy_uncompressed_size(cuda::std::span<cuda::std::span<uint8_t const> const> inputs,
-                                  cuda::std::span<size_t> uncompressed_sizes,
+void get_snappy_uncompressed_size(device_span<device_span<uint8_t const> const> inputs,
+                                  device_span<size_t> uncompressed_sizes,
                                   cuda::stream_ref stream)
 {
   if (inputs.empty()) { return; }

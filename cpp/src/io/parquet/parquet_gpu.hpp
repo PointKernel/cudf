@@ -26,7 +26,6 @@
 #include <cuda/std/limits>
 #include <cuda/std/mdspan>
 #include <cuda/std/optional>
-#include <cuda/std/span>
 #include <cuda/stream>
 #include <cuda_runtime.h>
 
@@ -426,7 +425,7 @@ struct get_page_key {
 /**
  * @brief Return an iterator that returns they keys for a vector of pages.
  */
-inline auto make_page_key_iterator(cuda::std::span<PageInfo const> pages)
+inline auto make_page_key_iterator(device_span<PageInfo const> pages)
 {
   return cuda::transform_iterator(pages.begin(), get_page_key{});
 }
@@ -819,8 +818,8 @@ void count_page_headers(cudf::detail::hostdevice_span<ColumnChunkDesc> chunks,
  * @param[out] error_code Error code for kernel failures
  * @param[in] stream CUDA stream to use
  */
-void decode_page_headers(cuda::std::span<ColumnChunkDesc const> chunks,
-                         cuda::std::span<chunk_page_info> chunk_pages,
+void decode_page_headers(cudf::device_span<ColumnChunkDesc const> chunks,
+                         cudf::device_span<chunk_page_info> chunk_pages,
                          kernel_error::pointer error_code,
                          cuda::stream_ref stream);
 
@@ -837,10 +836,10 @@ void decode_page_headers(cuda::std::span<ColumnChunkDesc const> chunks,
  * @param[in] stream CUDA stream to use
  */
 void decode_page_headers_from_page_data(
-  cuda::std::span<ColumnChunkDesc const> chunks,
-  cuda::std::span<PageInfo> pages,
-  cuda::std::span<cuda::std::span<uint8_t const> const> page_data,
-  cuda::std::span<size_type const> chunk_page_offsets,
+  cudf::device_span<ColumnChunkDesc const> chunks,
+  cudf::device_span<PageInfo> pages,
+  cudf::device_span<cudf::device_span<uint8_t const> const> page_data,
+  cudf::device_span<size_type const> chunk_page_offsets,
   kernel_error::pointer error_code,
   cuda::stream_ref stream);
 
@@ -895,7 +894,7 @@ uint32_t get_aggregated_decode_kernel_mask(cudf::detail::hostdevice_span<PageInf
  */
 void compute_page_sizes(cudf::detail::hostdevice_span<PageInfo> pages,
                         cudf::detail::hostdevice_span<ColumnChunkDesc const> chunks,
-                        cuda::std::span<bool const> page_mask,
+                        cudf::device_span<bool const> page_mask,
                         size_t min_row,
                         size_t num_rows,
                         bool compute_num_rows,
@@ -924,8 +923,8 @@ void compute_page_sizes(cudf::detail::hostdevice_span<PageInfo> pages,
  */
 void compute_page_string_sizes_pass1(cudf::detail::hostdevice_span<PageInfo> pages,
                                      cudf::detail::hostdevice_span<ColumnChunkDesc const> chunks,
-                                     cuda::std::span<bool const> page_mask,
-                                     cuda::std::span<size_t const> page_string_offset_indices,
+                                     cudf::device_span<bool const> page_mask,
+                                     cudf::device_span<size_t const> page_string_offset_indices,
                                      size_t min_row,
                                      size_t num_rows,
                                      uint32_t kernel_mask,
@@ -970,7 +969,7 @@ void decode_page_data(cudf::detail::hostdevice_span<PageInfo> pages,
                       size_t num_rows,
                       size_t min_row,
                       int level_type_size,
-                      cuda::std::span<bool const> page_mask,
+                      cudf::device_span<bool const> page_mask,
                       kernel_error::pointer error_code,
                       cuda::stream_ref stream);
 
@@ -994,7 +993,7 @@ void decode_split_page_data(cudf::detail::hostdevice_span<PageInfo> pages,
                             size_t num_rows,
                             size_t min_row,
                             int level_type_size,
-                            cuda::std::span<bool const> page_mask,
+                            cudf::device_span<bool const> page_mask,
                             kernel_error::pointer error_code,
                             cuda::stream_ref stream);
 
@@ -1030,7 +1029,7 @@ void decode_delta_binary(cudf::detail::hostdevice_span<PageInfo> pages,
                          size_t num_rows,
                          size_t min_row,
                          int level_type_size,
-                         cuda::std::span<bool const> page_mask,
+                         cudf::device_span<bool const> page_mask,
                          kernel_error::pointer error_code,
                          cuda::stream_ref stream);
 
@@ -1055,8 +1054,8 @@ void decode_delta_byte_array(cudf::detail::hostdevice_span<PageInfo> pages,
                              size_t num_rows,
                              size_t min_row,
                              int level_type_size,
-                             cuda::std::span<bool const> page_mask,
-                             cuda::std::span<size_t> initial_str_offsets,
+                             cudf::device_span<bool const> page_mask,
+                             cudf::device_span<size_t> initial_str_offsets,
                              kernel_error::pointer error_code,
                              cuda::stream_ref stream);
 
@@ -1081,8 +1080,8 @@ void decode_delta_length_byte_array(cudf::detail::hostdevice_span<PageInfo> page
                                     size_t num_rows,
                                     size_t min_row,
                                     int level_type_size,
-                                    cuda::std::span<bool const> page_mask,
-                                    cuda::std::span<size_t> initial_str_offsets,
+                                    cudf::device_span<bool const> page_mask,
+                                    cudf::device_span<size_t> initial_str_offsets,
                                     kernel_error::pointer error_code,
                                     cuda::stream_ref stream);
 
@@ -1103,8 +1102,8 @@ void decode_delta_length_byte_array(cudf::detail::hostdevice_span<PageInfo> page
  */
 void preprocess_string_offsets(cudf::detail::hostdevice_span<PageInfo> pages,
                                cudf::detail::hostdevice_span<ColumnChunkDesc const> chunks,
-                               cuda::std::span<size_t const> page_string_offset_indices,
-                               cuda::std::span<bool const> page_mask,
+                               cudf::device_span<size_t const> page_string_offset_indices,
+                               cudf::device_span<bool const> page_mask,
                                size_t min_row,
                                size_t num_rows,
                                kernel_error::pointer error_code,
@@ -1127,7 +1126,7 @@ void preprocess_string_offsets(cudf::detail::hostdevice_span<PageInfo> pages,
  */
 void preprocess_levels(cudf::detail::hostdevice_span<PageInfo> pages,
                        cudf::detail::hostdevice_span<ColumnChunkDesc const> chunks,
-                       cuda::std::span<bool const> page_mask,
+                       cudf::device_span<bool const> page_mask,
                        size_t min_row,
                        size_t num_rows,
                        int level_type_size,
@@ -1144,10 +1143,10 @@ void preprocess_levels(cudf::detail::hostdevice_span<PageInfo> pages,
  * @param[in] num_rows Number of rows to read
  * @param[in] stream CUDA stream to use
  */
-void fill_pruned_offsets(cuda::std::span<PageInfo> pages,
-                         cuda::std::span<ColumnChunkDesc const> chunks,
-                         cuda::std::span<bool const> page_mask,
-                         cuda::std::span<size_t> initial_str_offsets,
+void fill_pruned_offsets(cudf::device_span<PageInfo> pages,
+                         cudf::device_span<ColumnChunkDesc const> chunks,
+                         cudf::device_span<bool const> page_mask,
+                         cudf::device_span<size_t> initial_str_offsets,
                          size_t skip_rows,
                          size_t num_rows,
                          cuda::stream_ref stream);
@@ -1176,9 +1175,9 @@ void decode_page_data(cudf::detail::hostdevice_span<PageInfo> pages,
                       size_t min_row,
                       int level_type_size,
                       decode_kernel_mask kernel_mask,
-                      cuda::std::span<bool const> page_mask,
-                      cuda::std::span<size_t> initial_str_offsets,
-                      cuda::std::span<size_t const> page_string_offset_indices,
+                      cudf::device_span<bool const> page_mask,
+                      cudf::device_span<size_t> initial_str_offsets,
+                      cudf::device_span<size_t const> page_string_offset_indices,
                       kernel_error::pointer error_code,
                       cuda::stream_ref stream);
 
@@ -1197,9 +1196,9 @@ void decode_page_data(cudf::detail::hostdevice_span<PageInfo> pages,
  * @param[in] stream CUDA stream to use
  */
 void InitRowGroupFragments(cuda::std::mdspan<PageFragment, cuda::std::dextents<size_t, 2>> frag,
-                           cuda::std::span<parquet_column_device_view const> col_desc,
-                           cuda::std::span<partition_info const> partitions,
-                           cuda::std::span<int const> first_frag_in_part,
+                           device_span<parquet_column_device_view const> col_desc,
+                           device_span<partition_info const> partitions,
+                           device_span<int const> first_frag_in_part,
                            uint32_t fragment_size,
                            cuda::stream_ref stream);
 
@@ -1215,8 +1214,8 @@ void InitRowGroupFragments(cuda::std::mdspan<PageFragment, cuda::std::dextents<s
  * @param[in] column_frag_sizes Number of rows per fragment per column [column_id]
  * @param[in] stream CUDA stream to use
  */
-void CalculatePageFragments(cuda::std::span<PageFragment> frag,
-                            cuda::std::span<size_type const> column_frag_sizes,
+void CalculatePageFragments(device_span<PageFragment> frag,
+                            device_span<size_type const> column_frag_sizes,
                             cuda::stream_ref stream);
 
 /**
@@ -1226,8 +1225,8 @@ void CalculatePageFragments(cuda::std::span<PageFragment> frag,
  * @param[in] fragments Page fragments [total_fragments]
  * @param[in] stream CUDA stream to use
  */
-void InitFragmentStatistics(cuda::std::span<statistics_group> groups,
-                            cuda::std::span<PageFragment const> fragments,
+void InitFragmentStatistics(device_span<statistics_group> groups,
+                            device_span<PageFragment const> fragments,
                             cuda::stream_ref stream);
 
 /**
@@ -1251,10 +1250,10 @@ void InitFragmentStatistics(cuda::std::span<statistics_group> groups,
  * @param[in] stream CUDA stream to use
  */
 void InitEncoderPages(cuda::std::mdspan<EncColumnChunk, cuda::std::dextents<size_t, 2>> chunks,
-                      cuda::std::span<EncPage> pages,
-                      cuda::std::span<size_type> page_sizes,
-                      cuda::std::span<size_type const> comp_page_sizes,
-                      cuda::std::span<parquet_column_device_view const> col_desc,
+                      device_span<EncPage> pages,
+                      device_span<size_type> page_sizes,
+                      device_span<size_type const> comp_page_sizes,
+                      device_span<parquet_column_device_view const> col_desc,
                       int32_t num_columns,
                       size_t max_page_size_bytes,
                       size_type max_page_size_rows,
@@ -1279,11 +1278,11 @@ void InitEncoderPages(cuda::std::mdspan<EncColumnChunk, cuda::std::dextents<size
  * @param[out] comp_res Compressor results
  * @param[in] stream CUDA stream to use
  */
-void EncodePages(cuda::std::span<EncPage> pages,
+void EncodePages(device_span<EncPage> pages,
                  bool write_v2_headers,
-                 cuda::std::span<cuda::std::span<uint8_t const>> comp_in,
-                 cuda::std::span<cuda::std::span<uint8_t>> comp_out,
-                 cuda::std::span<cudf::io::detail::codec_exec_result> comp_res,
+                 device_span<device_span<uint8_t const>> comp_in,
+                 device_span<device_span<uint8_t>> comp_out,
+                 device_span<cudf::io::detail::codec_exec_result> comp_res,
                  cuda::stream_ref stream);
 
 /**
@@ -1295,7 +1294,7 @@ void EncodePages(cuda::std::span<EncPage> pages,
  * @param[in] page_level_compression If true, V2 pages can independently decide compression
  * @param[in] stream CUDA stream to use
  */
-void decide_compression(cuda::std::span<EncColumnChunk> chunks,
+void decide_compression(device_span<EncColumnChunk> chunks,
                         bool page_level_compression,
                         cuda::stream_ref stream);
 
@@ -1308,9 +1307,9 @@ void decide_compression(cuda::std::span<EncColumnChunk> chunks,
  * @param[in] chunk_stats Optional chunk-level statistics to be encoded
  * @param[in] stream CUDA stream to use
  */
-void EncodePageHeaders(cuda::std::span<EncPage> pages,
-                       cuda::std::span<cudf::io::detail::codec_exec_result const> comp_res,
-                       cuda::std::span<statistics_chunk const> page_stats,
+void EncodePageHeaders(device_span<EncPage> pages,
+                       device_span<cudf::io::detail::codec_exec_result const> comp_res,
+                       device_span<statistics_chunk const> page_stats,
                        statistics_chunk const* chunk_stats,
                        cuda::stream_ref stream);
 
@@ -1320,7 +1319,7 @@ void EncodePageHeaders(cuda::std::span<EncPage> pages,
  * @param[in,out] chunks Column chunks
  * @param[in] stream CUDA stream to use
  */
-void GatherPages(cuda::std::span<EncColumnChunk> chunks, cuda::stream_ref stream);
+void GatherPages(device_span<EncColumnChunk> chunks, cuda::stream_ref stream);
 
 /**
  * @brief Launches kernel to calculate ColumnIndex information per chunk
@@ -1330,8 +1329,8 @@ void GatherPages(cuda::std::span<EncColumnChunk> chunks, cuda::stream_ref stream
  * @param[in] column_index_truncate_length Max length of min/max values
  * @param[in] stream CUDA stream to use
  */
-void EncodeColumnIndexes(cuda::std::span<EncColumnChunk> chunks,
-                         cuda::std::span<statistics_chunk const> column_stats,
+void EncodeColumnIndexes(device_span<EncColumnChunk> chunks,
+                         device_span<statistics_chunk const> column_stats,
                          int32_t column_index_truncate_length,
                          cuda::stream_ref stream);
 

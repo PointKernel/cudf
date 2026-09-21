@@ -1,5 +1,5 @@
 /*
- * SPDX-FileCopyrightText: Copyright (c) 2019-2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2019-2026, NVIDIA CORPORATION.
  * SPDX-License-Identifier: Apache-2.0
  */
 
@@ -23,7 +23,6 @@
 #include <rmm/device_uvector.hpp>
 #include <rmm/exec_policy.hpp>
 
-#include <cuda/std/span>
 #include <cuda/std/utility>
 #include <thrust/execution_policy.h>
 #include <thrust/host_vector.h>
@@ -156,11 +155,11 @@ TEST_F(StringsFactoriesTest, CreateColumnFromOffsets)
 
   // check string data
   auto h_chars_data = cudf::detail::make_std_vector(
-    cuda::std::span<char const>(strings_view.chars_begin(cudf::get_default_stream()),
-                                strings_view.chars_size(cudf::get_default_stream())),
+    cudf::device_span<char const>(strings_view.chars_begin(cudf::get_default_stream()),
+                                  strings_view.chars_size(cudf::get_default_stream())),
     cudf::get_default_stream());
   auto h_offsets_data = cudf::detail::make_std_vector(
-    cuda::std::span<cudf::size_type const>(
+    cudf::device_span<cudf::size_type const>(
       strings_view.offsets().data<cudf::size_type>() + strings_view.offset(),
       strings_view.size() + 1),
     cudf::get_default_stream());
@@ -235,7 +234,7 @@ TEST_F(StringsBatchConstructionTest, EmptyColumns)
   auto const stream          = cudf::get_default_stream();
 
   auto const d_string_pairs = rmm::device_uvector<string_pair>{0, stream};
-  auto const input          = std::vector<cuda::std::span<string_pair const>>(
+  auto const input          = std::vector<cudf::device_span<string_pair const>>(
     num_columns, {d_string_pairs.data(), d_string_pairs.size()});
   auto const output = cudf::make_strings_column_batch(input, stream);
 
@@ -256,7 +255,7 @@ TEST_F(StringsBatchConstructionTest, AllNullsColumns)
                                d_string_pairs.data(),
                                d_string_pairs.size(),
                                string_pair{nullptr, 0});
-  auto const input = std::vector<cuda::std::span<string_pair const>>(
+  auto const input = std::vector<cudf::device_span<string_pair const>>(
     num_columns, {d_string_pairs.data(), d_string_pairs.size()});
   auto const output = cudf::make_strings_column_batch(input, stream);
 
@@ -321,7 +320,7 @@ TEST_F(StringsBatchConstructionTest, CreateColumnsFromPairs)
   auto const d_is_null = cudf::detail::make_device_uvector_async(is_null, stream, mr);
 
   std::vector<rmm::device_uvector<string_pair>> d_input;
-  std::vector<cuda::std::span<string_pair const>> input;
+  std::vector<cudf::device_span<string_pair const>> input;
   d_input.reserve(num_columns);
   input.reserve(num_columns);
 
@@ -392,7 +391,7 @@ TEST_F(StringsBatchConstructionTest, DISABLED_CreateLongStringsColumns)
                                            1.5 / h_offsets.back());
 
   std::vector<rmm::device_uvector<string_pair>> d_input;
-  std::vector<cuda::std::span<string_pair const>> input;
+  std::vector<cudf::device_span<string_pair const>> input;
   d_input.reserve(num_columns);
   input.reserve(num_columns);
 

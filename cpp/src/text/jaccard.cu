@@ -28,7 +28,6 @@
 #include <cuda/iterator>
 #include <cuda/std/functional>
 #include <cuda/std/iterator>
-#include <cuda/std/span>
 #include <cuda/stream>
 #include <thrust/binary_search.h>
 #include <thrust/execution_policy.h>
@@ -57,7 +56,7 @@ __device__ auto get_row(uint32_t const* values, int64_t const* offsets, cudf::si
   auto const offset = offsets[row_idx];
   auto const size   = offsets[row_idx + 1] - offset;
   auto const begin  = values + offset;
-  return cuda::std::span<uint32_t const>(begin, size);
+  return cudf::device_span<uint32_t const>(begin, size);
 }
 
 /**

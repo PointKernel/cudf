@@ -1,5 +1,5 @@
 /*
- * SPDX-FileCopyrightText: Copyright (c) 2018-2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2018-2025, NVIDIA CORPORATION.
  * SPDX-License-Identifier: Apache-2.0
  */
 
@@ -15,8 +15,6 @@
 #include <cudf/utilities/export.hpp>
 #include <cudf/utilities/span.hpp>
 
-#include <cuda/std/span>
-
 #include <optional>
 
 namespace cudf {
@@ -31,8 +29,8 @@ namespace detail {
  *
  * @return Boolean value; true if string is found, false otherwise
  */
-__device__ inline bool serialized_trie_contains(cuda::std::span<serial_trie_node const> trie,
-                                                cuda::std::span<char const> key)
+__device__ inline bool serialized_trie_contains(device_span<serial_trie_node const> trie,
+                                                device_span<char const> key)
 {
   if (trie.empty()) { return false; }
   if (key.empty()) { return trie.front().is_leaf; }

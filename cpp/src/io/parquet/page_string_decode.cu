@@ -16,7 +16,6 @@
 
 #include <cooperative_groups/reduce.h>
 #include <cuda/functional>
-#include <cuda/std/span>
 #include <cuda/std/utility>
 #include <thrust/transform_scan.h>
 
@@ -521,8 +520,8 @@ __device__ cuda::std::pair<size_t, size_t> totalDeltaByteArraySize(uint8_t const
 template <typename level_t>
 CUDF_KERNEL void __launch_bounds__(preprocess_block_size)
   compute_string_page_bounds_kernel(PageInfo* pages,
-                                    cuda::std::span<ColumnChunkDesc const> chunks,
-                                    cuda::std::span<bool const> page_mask,
+                                    device_span<ColumnChunkDesc const> chunks,
+                                    device_span<bool const> page_mask,
                                     size_t min_row,
                                     size_t num_rows,
                                     bool all_rows)
@@ -610,8 +609,8 @@ CUDF_KERNEL void __launch_bounds__(preprocess_block_size)
  */
 CUDF_KERNEL void __launch_bounds__(delta_preproc_block_size)
   compute_delta_page_string_sizes_kernel(PageInfo* pages,
-                                         cuda::std::span<ColumnChunkDesc const> chunks,
-                                         cuda::std::span<bool const> page_mask,
+                                         device_span<ColumnChunkDesc const> chunks,
+                                         device_span<bool const> page_mask,
                                          size_t min_row,
                                          size_t num_rows)
 {
@@ -701,8 +700,8 @@ CUDF_KERNEL void __launch_bounds__(delta_preproc_block_size)
  */
 CUDF_KERNEL void __launch_bounds__(delta_length_block_size)
   compute_delta_length_page_string_sizes_kernel(PageInfo* pages,
-                                                cuda::std::span<ColumnChunkDesc const> chunks,
-                                                cuda::std::span<bool const> page_mask,
+                                                device_span<ColumnChunkDesc const> chunks,
+                                                device_span<bool const> page_mask,
                                                 size_t min_row,
                                                 size_t num_rows)
 {
@@ -824,9 +823,9 @@ CUDF_KERNEL void __launch_bounds__(delta_length_block_size)
  */
 CUDF_KERNEL void __launch_bounds__(preprocess_block_size)
   compute_page_string_sizes_kernel(PageInfo* pages,
-                                   cuda::std::span<ColumnChunkDesc const> chunks,
-                                   cuda::std::span<bool const> page_mask,
-                                   cuda::std::span<size_t const> page_string_offset_indices,
+                                   device_span<ColumnChunkDesc const> chunks,
+                                   device_span<bool const> page_mask,
+                                   device_span<size_t const> page_string_offset_indices,
                                    size_t min_row,
                                    size_t num_rows)
 {
@@ -956,8 +955,8 @@ struct page_tform_functor {
  */
 void compute_page_string_sizes_pass1(cudf::detail::hostdevice_span<PageInfo> pages,
                                      cudf::detail::hostdevice_span<ColumnChunkDesc const> chunks,
-                                     cuda::std::span<bool const> page_mask,
-                                     cuda::std::span<size_t const> page_string_offset_indices,
+                                     cudf::device_span<bool const> page_mask,
+                                     cudf::device_span<size_t const> page_string_offset_indices,
                                      size_t min_row,
                                      size_t num_rows,
                                      uint32_t kernel_mask,
@@ -1295,9 +1294,9 @@ inline __device__ void read_string_offsets_sequential(auto* s,
 template <int decode_block_size, size_t prefetch_size>
 CUDF_KERNEL void preprocess_string_offsets_kernel(
   PageInfo* pages,
-  cuda::std::span<ColumnChunkDesc const> chunks,
-  cuda::std::span<size_t const> page_string_offset_indices,
-  cuda::std::span<bool const> page_mask,
+  device_span<ColumnChunkDesc const> chunks,
+  device_span<size_t const> page_string_offset_indices,
+  cudf::device_span<bool const> page_mask,
   size_t min_row,
   size_t num_rows,
   kernel_error::pointer error_code)
@@ -1381,8 +1380,8 @@ CUDF_KERNEL void preprocess_string_offsets_kernel(
  */
 void preprocess_string_offsets(cudf::detail::hostdevice_span<PageInfo> pages,
                                cudf::detail::hostdevice_span<ColumnChunkDesc const> chunks,
-                               cuda::std::span<size_t const> page_string_offset_indices,
-                               cuda::std::span<bool const> page_mask,
+                               cudf::device_span<size_t const> page_string_offset_indices,
+                               cudf::device_span<bool const> page_mask,
                                size_t min_row,
                                size_t num_rows,
                                kernel_error::pointer error_code,

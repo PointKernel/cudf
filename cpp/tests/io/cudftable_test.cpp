@@ -22,7 +22,6 @@
 
 #include <rmm/device_buffer.hpp>
 
-#include <cuda/std/span>
 #include <cuda_runtime.h>
 
 #include <fstream>
@@ -518,7 +517,7 @@ TEST_F(CudftableTest, DeviceBufferSource)
   // take the stream
   stream.sync();
 
-  auto device_span = cuda::std::span<std::byte const>(
+  auto device_span = cudf::device_span<std::byte const>(
     static_cast<std::byte const*>(device_buffer.data()), device_buffer.size());
   auto result = cudf::io::experimental::read_cudftable(
     cudf::io::experimental::cudftable_reader_options::builder(cudf::io::source_info{device_span})

@@ -19,7 +19,6 @@
 
 #include <cuda/functional>
 #include <cuda/iterator>
-#include <cuda/std/span>
 #include <thrust/binary_search.h>
 #include <thrust/host_vector.h>
 #include <thrust/transform_scan.h>
@@ -33,7 +32,7 @@ using parquet::detail::pass_intermediate_data;
 
 void hybrid_scan_reader_impl::handle_chunking(
   read_mode mode,
-  std::span<cuda::std::span<uint8_t const> const> column_chunk_data,
+  std::span<cudf::device_span<uint8_t const> const> column_chunk_data,
   host_span<bool const> data_page_mask,
   std::optional<cudf::column_view> row_mask)
 {
@@ -77,7 +76,7 @@ void hybrid_scan_reader_impl::handle_chunking(
 }
 
 void hybrid_scan_reader_impl::setup_next_pass(
-  std::span<cuda::std::span<uint8_t const> const> column_chunk_data,
+  std::span<cudf::device_span<uint8_t const> const> column_chunk_data,
   std::span<bool const> data_page_mask,
   std::optional<cudf::column_view> row_mask)
 {

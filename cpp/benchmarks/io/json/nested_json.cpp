@@ -14,8 +14,6 @@
 #include <cudf/types.hpp>
 #include <cudf/utilities/memory_resource.hpp>
 
-#include <cuda/std/span>
-
 #include <nvbench/nvbench.cuh>
 
 #include <string>
@@ -159,7 +157,7 @@ void BM_NESTED_JSON(nvbench::state& state)
   state.exec(nvbench::exec_tag::sync, [&](nvbench::launch& launch) {
     // Allocate device-side temporary storage & run algorithm
     cudf::io::json::detail::device_parse_nested_json(
-      cuda::std::span<char const>{input->data(), static_cast<size_t>(input->size())},
+      cudf::device_span<char const>{input->data(), static_cast<size_t>(input->size())},
       default_options,
       cudf::get_default_stream(),
       cudf::get_current_device_resource_ref());
@@ -182,7 +180,7 @@ void BM_NESTED_JSON_DEPTH(nvbench::state& state)
 
   auto d_scalar = cudf::string_scalar(
     generate_json(100'000'000, 10, depth, 10, 10, string_size), true, cudf::get_default_stream());
-  auto input = cuda::std::span<char const>(d_scalar.data(), d_scalar.size());
+  auto input = cudf::device_span<char const>(d_scalar.data(), d_scalar.size());
 
   state.add_element_count(input.size());
   auto const default_options = cudf::io::json_reader_options{};

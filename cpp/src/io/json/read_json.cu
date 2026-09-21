@@ -26,7 +26,6 @@
 #include <rmm/exec_policy.hpp>
 
 #include <cuda/iterator>
-#include <cuda/std/span>
 #include <thrust/execution_policy.h>
 #include <thrust/scatter.h>
 
@@ -254,7 +253,7 @@ std::size_t get_batch_size(std::size_t chunk_size)
  *
  * @return Position of first delimiter character in device array
  */
-size_type find_first_delimiter(cuda::std::span<char const> d_data,
+size_type find_first_delimiter(device_span<char const> d_data,
                                char const delimiter,
                                cuda::stream_ref stream)
 {
@@ -316,7 +315,7 @@ get_record_range_raw_input(host_span<std::unique_ptr<datasource>> sources,
     std::min(total_source_size, chunk_size + num_subchunks_prealloced * size_per_subchunk) +
     num_extra_delimiters;
   rmm::device_buffer buffer(buffer_size, stream);
-  cuda::std::span<char> bufspan(reinterpret_cast<char*>(buffer.data()), buffer.size());
+  device_span<char> bufspan(reinterpret_cast<char*>(buffer.data()), buffer.size());
 
   // Offset within buffer indicating first read position
   std::int64_t buffer_offset = 0;
@@ -333,7 +332,7 @@ get_record_range_raw_input(host_span<std::unique_ptr<datasource>> sources,
   // nevertheless; even if the record terminates
   // with a delimiter, adding a extra delimiter does not affect the table constructed since the
   // parser ignores empty lines.
-  auto insert_delimiter = [delimiter, stream](cuda::std::span<char> subspan) {
+  auto insert_delimiter = [delimiter, stream](device_span<char> subspan) {
     auto last_char = delimiter;
     cudf::detail::cuda_memcpy<char>(subspan, host_span<char const>(&last_char, 1, false), stream);
   };
@@ -390,7 +389,7 @@ get_record_range_raw_input(host_span<std::unique_ptr<datasource>> sources,
           CUDF_EXPECTS(trailing_bytes < batch_size,
                        "A single JSON line cannot be larger than the batch size limit");
           buffer.resize(buffer_size, stream);
-          bufspan = cuda::std::span<char>(reinterpret_cast<char*>(buffer.data()), buffer.size());
+          bufspan = device_span<char>(reinterpret_cast<char*>(buffer.data()), buffer.size());
         }
       }
     }
@@ -413,7 +412,7 @@ get_record_range_raw_input(host_span<std::unique_ptr<datasource>> sources,
           next_delim_pos - first_delim_pos - shift_for_nonzero_offset + 1),
         std::nullopt);
     }
-    cuda::std::span<char const> bufsubspan =
+    device_span<char const> bufsubspan =
       bufspan.subspan(first_delim_pos + shift_for_nonzero_offset,
                       requested_size - first_delim_pos - shift_for_nonzero_offset);
     auto rev_it_begin = cuda::std::make_reverse_iterator(bufsubspan.end());
@@ -498,7 +497,7 @@ std::pair<table_with_metadata, std::optional<table_with_metadata>> read_batch(
 
   // Helper: parse one buffer, optionally appending schema-mismatch diagnostics. The two call sites
   // below would otherwise duplicate this branching.
-  auto parse_buffer = [&](cuda::std::span<char const> buf) {
+  auto parse_buffer = [&](cudf::device_span<char const> buf) {
     if (diagnostics_out != nullptr) {
       auto result = device_parse_nested_json_with_diagnostics(
         buf, reader_opts, diagnostics_out->collect_schema_mismatch_rows, stream, mr);
@@ -508,7 +507,7 @@ std::pair<table_with_metadata, std::optional<table_with_metadata>> read_batch(
     return device_parse_nested_json(buf, reader_opts, stream, mr);
   };
 
-  auto buffer = cuda::std::span<char const>(
+  auto buffer = cudf::device_span<char const>(
     reinterpret_cast<char const*>(owning_buffers.first.data()), owning_buffers.first.size());
   auto first_partial_table = parse_buffer(buffer);
   if (!owning_buffers.second.has_value())
@@ -522,9 +521,9 @@ std::pair<table_with_metadata, std::optional<table_with_metadata>> read_batch(
                             cudf::get_current_device_resource_ref());
     stream.sync();
   }
-  buffer =
-    cuda::std::span<char const>(reinterpret_cast<char const*>(owning_buffers.second.value().data()),
-                                owning_buffers.second.value().size());
+  buffer = cudf::device_span<char const>(
+    reinterpret_cast<char const*>(owning_buffers.second.value().data()),
+    owning_buffers.second.value().size());
   auto second_partial_table = parse_buffer(buffer);
   return std::make_pair(std::move(first_partial_table), std::move(second_partial_table));
 }
@@ -743,12 +742,12 @@ table_with_metadata read_json_impl(host_span<std::unique_ptr<datasource>> source
 
 }  // anonymous namespace
 
-cuda::std::span<char> ingest_raw_input(cuda::std::span<char> buffer,
-                                       host_span<std::unique_ptr<datasource>> sources,
-                                       std::size_t range_offset,
-                                       std::size_t range_size,
-                                       char delimiter,
-                                       cuda::stream_ref stream)
+device_span<char> ingest_raw_input(device_span<char> buffer,
+                                   host_span<std::unique_ptr<datasource>> sources,
+                                   std::size_t range_offset,
+                                   std::size_t range_size,
+                                   char delimiter,
+                                   cuda::stream_ref stream)
 {
   CUDF_FUNC_RANGE();
   // We append a line delimiter between two files to make sure the last line of file i and the first

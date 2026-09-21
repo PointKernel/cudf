@@ -14,7 +14,6 @@
 #include <cudf/utilities/traits.hpp>
 
 #include <cuda/iterator>
-#include <cuda/std/span>
 #include <cuda/stream>
 #include <thrust/binary_search.h>
 #include <thrust/execution_policy.h>
@@ -30,7 +29,7 @@ namespace {
  * The offset position is used to identify which segment to copy from.
  */
 struct segmented_shift_filter {
-  cuda::std::span<size_type const> const segment_offsets;
+  device_span<size_type const> const segment_offsets;
   size_type const offset;
 
   __device__ bool operator()(size_type const i) const
@@ -59,7 +58,7 @@ struct segmented_shift_functor {
 template <typename T>
 struct segmented_shift_functor<T, std::enable_if_t<is_rep_layout_compatible<T>()>> {
   std::unique_ptr<column> operator()(column_view const& segmented_values,
-                                     cuda::std::span<size_type const> segment_offsets,
+                                     device_span<size_type const> segment_offsets,
                                      size_type offset,
                                      scalar const& fill_value,
                                      cuda::stream_ref stream,
@@ -88,7 +87,7 @@ struct segmented_shift_functor<T, std::enable_if_t<is_rep_layout_compatible<T>()
 template <>
 struct segmented_shift_functor<string_view> {
   std::unique_ptr<column> operator()(column_view const& segmented_values,
-                                     cuda::std::span<size_type const> segment_offsets,
+                                     device_span<size_type const> segment_offsets,
                                      size_type offset,
                                      scalar const& fill_value,
                                      cuda::stream_ref stream,
@@ -115,7 +114,7 @@ struct segmented_shift_functor<string_view> {
 struct segmented_shift_functor_forwarder {
   template <typename T>
   std::unique_ptr<column> operator()(column_view const& segmented_values,
-                                     cuda::std::span<size_type const> segment_offsets,
+                                     device_span<size_type const> segment_offsets,
                                      size_type offset,
                                      scalar const& fill_value,
                                      cuda::stream_ref stream,
@@ -129,7 +128,7 @@ struct segmented_shift_functor_forwarder {
 }  // namespace
 
 std::unique_ptr<column> segmented_shift(column_view const& segmented_values,
-                                        cuda::std::span<size_type const> segment_offsets,
+                                        device_span<size_type const> segment_offsets,
                                         size_type offset,
                                         scalar const& fill_value,
                                         cuda::stream_ref stream,

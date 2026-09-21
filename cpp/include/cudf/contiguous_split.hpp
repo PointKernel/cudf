@@ -10,8 +10,6 @@
 #include <cudf/utilities/export.hpp>
 #include <cudf/utilities/memory_resource.hpp>
 
-#include <cuda/std/span>
-
 #include <cstdint>
 #include <memory>
 #include <span>
@@ -129,7 +127,7 @@ struct contiguous_split_state;
  *
  * while (chunked_packer->has_next()) {
  *   // get a user buffer of size `user_buffer_size`
- *   cuda::std::span<uint8_t> user_buffer = ...;
+ *   cudf::device_span<uint8_t> user_buffer = ...;
  *   std::size_t bytes_copied = chunked_packer->next(user_buffer);
  *
  *   // buffer will hold the contents of at most `user_buffer_size` bytes
@@ -197,7 +195,7 @@ class chunked_pack {
    * @return The number of bytes that were written to `user_buffer` (at most
    *          `user_buffer_size`)
    */
-  [[nodiscard]] std::size_t next(cuda::std::span<uint8_t> const& user_buffer);
+  [[nodiscard]] std::size_t next(cudf::device_span<uint8_t> const& user_buffer);
 
   /**
    * @brief Build the opaque metadata for all added columns.

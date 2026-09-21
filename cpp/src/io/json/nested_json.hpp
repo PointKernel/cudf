@@ -11,8 +11,6 @@
 #include <cudf/types.hpp>
 #include <cudf/utilities/export.hpp>
 
-#include <cuda/std/span>
-
 #include <map>
 #include <unordered_set>
 #include <vector>
@@ -234,10 +232,10 @@ namespace detail {
 CUDF_EXPORT
 std::tuple<compressed_sparse_row, column_tree_properties> reduce_to_column_tree(
   tree_meta_t& node_tree,
-  cuda::std::span<NodeIndexT const> original_col_ids,
-  cuda::std::span<NodeIndexT const> sorted_col_ids,
-  cuda::std::span<NodeIndexT const> ordered_node_ids,
-  cuda::std::span<size_type const> row_offsets,
+  device_span<NodeIndexT const> original_col_ids,
+  device_span<NodeIndexT const> sorted_col_ids,
+  device_span<NodeIndexT const> ordered_node_ids,
+  device_span<size_type const> row_offsets,
   bool is_array_of_arrays,
   NodeIndexT row_array_parent_col_id,
   cuda::stream_ref stream);
@@ -264,7 +262,7 @@ namespace detail {
  * @param[in] stream The cuda stream to dispatch GPU kernels to
  */
 CUDF_EXPORT
-void get_stack_context(cuda::std::span<SymbolT const> json_in,
+void get_stack_context(device_span<SymbolT const> json_in,
                        SymbolT* d_top_of_stack,
                        stack_behavior_t stack_behavior,
                        SymbolT delimiter,
@@ -281,8 +279,8 @@ void get_stack_context(cuda::std::span<SymbolT const> json_in,
  */
 CUDF_EXPORT
 std::pair<rmm::device_uvector<PdaTokenT>, rmm::device_uvector<SymbolOffsetT>> process_token_stream(
-  cuda::std::span<PdaTokenT const> tokens,
-  cuda::std::span<SymbolOffsetT const> token_indices,
+  device_span<PdaTokenT const> tokens,
+  device_span<SymbolOffsetT const> token_indices,
   cuda::stream_ref stream);
 
 /**
@@ -295,9 +293,9 @@ std::pair<rmm::device_uvector<PdaTokenT>, rmm::device_uvector<SymbolOffsetT>> pr
  * @param stream The cuda stream to dispatch GPU kernels to
  */
 CUDF_EXPORT
-void validate_token_stream(cuda::std::span<char const> d_input,
-                           cuda::std::span<PdaTokenT> tokens,
-                           cuda::std::span<SymbolOffsetT> token_indices,
+void validate_token_stream(device_span<char const> d_input,
+                           device_span<PdaTokenT> tokens,
+                           device_span<SymbolOffsetT> token_indices,
                            cudf::io::json_reader_options const& options,
                            cuda::stream_ref stream);
 
@@ -313,8 +311,8 @@ void validate_token_stream(cuda::std::span<char const> d_input,
  * level, begin index, and end index in the input JSON string
  */
 CUDF_EXPORT
-tree_meta_t get_tree_representation(cuda::std::span<PdaTokenT const> tokens,
-                                    cuda::std::span<SymbolOffsetT const> token_indices,
+tree_meta_t get_tree_representation(device_span<PdaTokenT const> tokens,
+                                    device_span<SymbolOffsetT const> token_indices,
                                     bool is_strict_nested_boundaries,
                                     cuda::stream_ref stream,
                                     rmm::device_async_resource_ref mr);
@@ -336,7 +334,7 @@ tree_meta_t get_tree_representation(cuda::std::span<PdaTokenT const> tokens,
  */
 CUDF_EXPORT
 std::tuple<rmm::device_uvector<NodeIndexT>, rmm::device_uvector<size_type>>
-records_orient_tree_traversal(cuda::std::span<SymbolT const> d_input,
+records_orient_tree_traversal(device_span<SymbolT const> d_input,
                               tree_meta_t const& d_tree,
                               bool is_array_of_arrays,
                               bool is_enabled_lines,
@@ -360,8 +358,8 @@ records_orient_tree_traversal(cuda::std::span<SymbolT const> d_input,
  */
 std::pair<rmm::device_uvector<NodeIndexT>, rmm::device_uvector<NodeIndexT>>
 get_array_children_indices(TreeDepthT row_array_children_level,
-                           cuda::std::span<TreeDepthT const> node_levels,
-                           cuda::std::span<NodeIndexT const> parent_node_ids,
+                           device_span<TreeDepthT const> node_levels,
+                           device_span<NodeIndexT const> parent_node_ids,
                            cuda::stream_ref stream);
 
 /**
@@ -381,10 +379,10 @@ get_array_children_indices(TreeDepthT row_array_children_level,
 CUDF_EXPORT
 std::tuple<tree_meta_t, rmm::device_uvector<NodeIndexT>, rmm::device_uvector<size_type>>
 reduce_to_column_tree(tree_meta_t const& tree,
-                      cuda::std::span<NodeIndexT const> original_col_ids,
-                      cuda::std::span<NodeIndexT const> sorted_col_ids,
-                      cuda::std::span<NodeIndexT const> ordered_node_ids,
-                      cuda::std::span<size_type const> row_offsets,
+                      device_span<NodeIndexT const> original_col_ids,
+                      device_span<NodeIndexT const> sorted_col_ids,
+                      device_span<NodeIndexT const> ordered_node_ids,
+                      device_span<size_type const> row_offsets,
                       bool is_array_of_arrays,
                       NodeIndexT const row_array_parent_col_id,
                       cuda::stream_ref stream);
@@ -408,10 +406,10 @@ reduce_to_column_tree(tree_meta_t const& tree,
  * @param mr Device memory resource used to allocate the device memory
  * of child_offets and validity members of `d_json_column`
  */
-void make_device_json_column(cuda::std::span<SymbolT const> input,
+void make_device_json_column(device_span<SymbolT const> input,
                              tree_meta_t const& tree,
-                             cuda::std::span<NodeIndexT const> col_ids,
-                             cuda::std::span<size_type const> row_offsets,
+                             device_span<NodeIndexT const> col_ids,
+                             device_span<size_type const> row_offsets,
                              device_json_column& root,
                              bool is_array_of_arrays,
                              bool collect_schema_mismatch_rows,
@@ -441,7 +439,7 @@ cudf::io::parse_options parsing_options(cudf::io::json_reader_options const& opt
  * @return The data parsed from the given JSON input
  */
 CUDF_EXPORT
-table_with_metadata device_parse_nested_json(cuda::std::span<SymbolT const> input,
+table_with_metadata device_parse_nested_json(device_span<SymbolT const> input,
                                              cudf::io::json_reader_options const& options,
                                              cuda::stream_ref stream,
                                              rmm::device_async_resource_ref mr);
@@ -469,7 +467,7 @@ struct device_parse_nested_json_result {
  */
 CUDF_EXPORT
 device_parse_nested_json_result device_parse_nested_json_with_diagnostics(
-  cuda::std::span<SymbolT const> input,
+  device_span<SymbolT const> input,
   cudf::io::json_reader_options const& options,
   bool collect_schema_mismatch_rows,
   cuda::stream_ref stream,

@@ -27,8 +27,6 @@
 
 #include <rmm/cuda_stream.hpp>
 
-#include <cuda/std/span>
-
 #include <numeric>
 #include <random>
 #include <vector>
@@ -365,8 +363,8 @@ TYPED_TEST(TypedColumnTest, MoveConstructorWithMask)
 
 TYPED_TEST(TypedColumnTest, DeviceUvectorConstructorNoMask)
 {
-  auto data = cuda::std::span<TypeParam const>(static_cast<TypeParam*>(this->data.data()),
-                                               this->num_elements());
+  auto data = cudf::device_span<TypeParam const>(static_cast<TypeParam*>(this->data.data()),
+                                                 this->num_elements());
 
   auto original = cudf::detail::make_device_uvector_async(
     data, cudf::get_default_stream(), cudf::get_current_device_resource_ref());
@@ -381,8 +379,8 @@ TYPED_TEST(TypedColumnTest, DeviceUvectorConstructorNoMask)
 
 TYPED_TEST(TypedColumnTest, DeviceUvectorConstructorWithMask)
 {
-  auto data = cuda::std::span<TypeParam const>(static_cast<TypeParam*>(this->data.data()),
-                                               this->num_elements());
+  auto data = cudf::device_span<TypeParam const>(static_cast<TypeParam*>(this->data.data()),
+                                                 this->num_elements());
 
   auto original = cudf::detail::make_device_uvector_async(
     data, cudf::get_default_stream(), cudf::get_current_device_resource_ref());

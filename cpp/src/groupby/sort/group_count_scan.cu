@@ -15,7 +15,6 @@
 #include <rmm/exec_policy.hpp>
 
 #include <cuda/iterator>
-#include <cuda/std/span>
 #include <cuda/stream>
 #include <thrust/scan.h>
 
@@ -24,7 +23,7 @@ namespace groupby {
 namespace detail {
 std::unique_ptr<column> count_scan(column_view const& values,
                                    null_policy nulls,
-                                   cuda::std::span<size_type const> group_labels,
+                                   cudf::device_span<size_type const> group_labels,
                                    cuda::stream_ref stream,
                                    rmm::device_async_resource_ref mr)
 {

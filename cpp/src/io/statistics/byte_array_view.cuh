@@ -1,5 +1,5 @@
 /*
- * SPDX-FileCopyrightText: Copyright (c) 2022-2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2022-2026, NVIDIA CORPORATION.
  * SPDX-License-Identifier: Apache-2.0
  */
 
@@ -8,14 +8,13 @@
 #include <cudf/utilities/span.hpp>
 
 #include <cuda/std/limits>
-#include <cuda/std/span>
 
 namespace cudf::io::statistics {
 
 /**
  * @brief Wrapper for a row of a list<int8> or list<uint8> column. This is analogous to
  * `string_view` in type. It was created due to the need for comparison operators for cub reduce on
- * statistics. Otherwise, it is a cuda::std::span in all but name.
+ * statistics. Otherwise, it is a device_span in all but name.
  *
  */
 class byte_array_view {
@@ -179,7 +178,7 @@ class byte_array_view {
   }
 
  private:
-  cuda::std::span<element_type> _data{};
+  device_span<element_type> _data{};
 };
 
 }  // namespace cudf::io::statistics

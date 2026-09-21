@@ -22,7 +22,6 @@
 #include <cuda/iterator>
 #include <cuda/std/functional>
 #include <cuda/std/iterator>
-#include <cuda/std/span>
 #include <cuda/stream>
 #include <thrust/binary_search.h>
 #include <thrust/gather.h>
@@ -326,9 +325,9 @@ void normalize_single_quotes(datasource::owning_buffer<rmm::device_buffer>& inda
 
 std::
   tuple<rmm::device_uvector<char>, rmm::device_uvector<size_type>, rmm::device_uvector<size_type>>
-  normalize_whitespace(cuda::std::span<char const> d_input,
-                       cuda::std::span<size_type const> col_offsets,
-                       cuda::std::span<size_type const> col_lengths,
+  normalize_whitespace(device_span<char const> d_input,
+                       device_span<size_type const> col_offsets,
+                       device_span<size_type const> col_lengths,
                        cuda::stream_ref stream,
                        rmm::device_async_resource_ref mr)
 {

@@ -21,7 +21,6 @@
 #include <cudf/utilities/error.hpp>
 
 #include <cuda/std/mdspan>
-#include <cuda/std/span>
 #include <cuda/stream>
 
 #include <memory>
@@ -130,7 +129,7 @@ class writer::impl {
    */
   void write_parquet_data_to_sink(
     std::unique_ptr<aggregate_writer_metadata>& updated_agg_meta,
-    cuda::std::span<EncPage const> pages,
+    device_span<EncPage const> pages,
     cuda::std::mdspan<EncColumnChunk const, cuda::std::dextents<size_t, 2>> chunks,
     host_span<size_t const> global_rowgroup_base,
     host_span<int const> first_rg_in_part,

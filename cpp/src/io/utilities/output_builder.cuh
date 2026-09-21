@@ -13,7 +13,6 @@
 #include <rmm/exec_policy.hpp>
 #include <rmm/resource_ref.hpp>
 
-#include <cuda/std/span>
 #include <cuda/stream>
 #include <thrust/copy.h>
 
@@ -46,8 +45,8 @@ class split_device_span {
 
   split_device_span() = default;
 
-  explicit CUDF_HOST_DEVICE constexpr split_device_span(cuda::std::span<T> head,
-                                                        cuda::std::span<T> tail = {})
+  explicit CUDF_HOST_DEVICE constexpr split_device_span(device_span<T> head,
+                                                        device_span<T> tail = {})
     : _head{head}, _tail{tail}
   {
   }
@@ -62,17 +61,17 @@ class split_device_span {
     return _head.size() + _tail.size();
   }
 
-  [[nodiscard]] CUDF_HOST_DEVICE constexpr cuda::std::span<T> head() const { return _head; }
+  [[nodiscard]] CUDF_HOST_DEVICE constexpr device_span<T> head() const { return _head; }
 
-  [[nodiscard]] CUDF_HOST_DEVICE constexpr cuda::std::span<T> tail() const { return _tail; }
+  [[nodiscard]] CUDF_HOST_DEVICE constexpr device_span<T> tail() const { return _tail; }
 
   [[nodiscard]] CUDF_HOST_DEVICE constexpr iterator begin() const;
 
   [[nodiscard]] CUDF_HOST_DEVICE constexpr iterator end() const;
 
  private:
-  cuda::std::span<T> _head;
-  cuda::std::span<T> _tail;
+  device_span<T> _head;
+  device_span<T> _tail;
 };
 
 /**
@@ -363,9 +362,9 @@ class output_builder {
    * @param vector The vector.
    * @return The span of unused elements.
    */
-  static cuda::std::span<T> get_free_span(rmm::device_uvector<T>& vector)
+  static device_span<T> get_free_span(rmm::device_uvector<T>& vector)
   {
-    return cuda::std::span<T>{vector.data() + vector.size(), vector.capacity() - vector.size()};
+    return device_span<T>{vector.data() + vector.size(), vector.capacity() - vector.size()};
   }
 
   size_type _size{0};

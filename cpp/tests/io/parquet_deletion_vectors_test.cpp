@@ -16,7 +16,6 @@
 #include <cudf/table/table_view.hpp>
 
 #include <cuda/iterator>
-#include <cuda/std/span>
 #include <cuda/stream>
 #include <thrust/sequence.h>
 
@@ -78,7 +77,7 @@ auto build_column_from_host_data(cudf::host_span<T const> host_data,
   auto const num_rows = host_data.size();
   rmm::device_buffer buffer{num_rows * sizeof(T), stream, mr};
   cudf::detail::cuda_memcpy<T>(
-    cuda::std::span<T>{static_cast<T*>(buffer.data()), num_rows}, host_data, stream);
+    cudf::device_span<T>{static_cast<T*>(buffer.data()), num_rows}, host_data, stream);
   return std::make_unique<cudf::column>(
     cudf::data_type{data_type}, num_rows, std::move(buffer), rmm::device_buffer{}, 0);
 }
@@ -619,7 +618,8 @@ TEST_F(DeletionVectorsCountTests, NoRowIndex)
       num_rows, deletion_probability, row_indices, stream, mr, are_retention_vectors);
 
     auto const expected_row_mask = cudf::detail::make_host_vector(
-      cuda::std::span<bool const>(expected_row_mask_column->view().data<bool>(), num_rows), stream);
+      cudf::device_span<bool const>(expected_row_mask_column->view().data<bool>(), num_rows),
+      stream);
     auto const expected_deleted =
       std::count(expected_row_mask.begin(), expected_row_mask.end(), false);
 
@@ -687,7 +687,7 @@ TEST_F(DeletionVectorsCountTests, CustomRowIndex)
     num_rows, deletion_probability, expected_row_indices, stream, mr);
 
   auto const expected_row_mask = cudf::detail::make_host_vector(
-    cuda::std::span<bool const>(expected_row_mask_column->view().data<bool>(), num_rows), stream);
+    cudf::device_span<bool const>(expected_row_mask_column->view().data<bool>(), num_rows), stream);
   size_t const expected_deleted =
     std::count(expected_row_mask.begin(), expected_row_mask.end(), false);
 
@@ -740,7 +740,7 @@ TEST_F(DeletionVectorsCountTests, MultipleDeletionVectors)
       num_rows_per_dv, deletion_probability, local_indices, stream, mr);
 
     auto const host_mask = cudf::detail::make_host_vector(
-      cuda::std::span<bool const>(mask_col->view().data<bool>(), num_rows_per_dv), stream);
+      cudf::device_span<bool const>(mask_col->view().data<bool>(), num_rows_per_dv), stream);
     total_expected_deleted += std::count(host_mask.begin(), host_mask.end(), false);
 
     serialized_bitmaps.emplace_back(std::move(dv));

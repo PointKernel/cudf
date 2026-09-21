@@ -15,7 +15,6 @@
 #include <cub/device/device_copy.cuh>
 #include <cuda/functional>
 #include <cuda/iterator>
-#include <cuda/std/span>
 #include <cuda/stream>
 #include <thrust/iterator/transform_iterator.h>
 #include <thrust/transform.h>
@@ -33,7 +32,7 @@ namespace detail {
  * @return The data in device spans all set to value
  */
 template <typename T>
-void batched_memset(cudf::host_span<cuda::std::span<T> const> host_buffers,
+void batched_memset(cudf::host_span<cudf::device_span<T> const> host_buffers,
                     T const value,
                     cuda::stream_ref stream)
 {

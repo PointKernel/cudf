@@ -12,7 +12,6 @@
 #include <rmm/device_uvector.hpp>
 #include <rmm/resource_ref.hpp>
 
-#include <cuda/std/span>
 #include <cuda/stream>
 
 #include <type_traits>
@@ -66,20 +65,20 @@ class device_scalar {
 
   [[nodiscard]] T value(cuda::stream_ref stream) const
   {
-    cuda_memcpy<T>(bounce_buffer, cuda::std::span<T const>{data(), 1}, stream);
+    cuda_memcpy<T>(bounce_buffer, device_span<T const>{data(), 1}, stream);
     return std::move(bounce_buffer[0]);
   }
 
   void set_value_async(T const& value, cuda::stream_ref stream)
   {
     bounce_buffer[0] = value;
-    cuda_memcpy_async<T>(cuda::std::span<T>{data(), 1}, bounce_buffer, stream);
+    cuda_memcpy_async<T>(device_span<T>{data(), 1}, bounce_buffer, stream);
   }
 
   void set_value_async(T&& value, cuda::stream_ref stream)
   {
     bounce_buffer[0] = std::move(value);
-    cuda_memcpy_async<T>(cuda::std::span<T>{data(), 1}, bounce_buffer, stream);
+    cuda_memcpy_async<T>(device_span<T>{data(), 1}, bounce_buffer, stream);
   }
 
   void set_value_to_zero_async(cuda::stream_ref stream) { set_value_async(T{}, stream); }

@@ -413,7 +413,7 @@ class column_view : public detail::column_view_base {
   auto child_end() const noexcept { return _children.cend(); }
 
   /**
-   * @brief Construct a column view from a cuda::std::span<T>.
+   * @brief Construct a column view from a device_span<T>.
    *
    * Only numeric and chrono types are supported.
    *
@@ -421,7 +421,7 @@ class column_view : public detail::column_view_base {
    * @param data A typed device span containing the column view's data.
    */
   template <typename T, CUDF_ENABLE_IF(cudf::is_numeric<T>() or cudf::is_chrono<T>())>
-  column_view(cuda::std::span<T const> data)
+  column_view(device_span<T const> data)
     : column_view(
         cudf::data_type{cudf::type_to_id<T>()}, data.size(), data.data(), nullptr, 0, 0, {})
   {
@@ -443,12 +443,12 @@ class column_view : public detail::column_view_base {
    * @return A typed device span of the column view's data.
    */
   template <typename T, CUDF_ENABLE_IF(cudf::is_numeric<T>() or cudf::is_chrono<T>())>
-  [[nodiscard]] operator cuda::std::span<T const>() const
+  [[nodiscard]] operator device_span<T const>() const
   {
     CUDF_EXPECTS(type() == cudf::data_type{cudf::type_to_id<T>()},
                  "Device span type must match column view type.");
     CUDF_EXPECTS(!nullable(), "A nullable column view cannot be converted to a device span.");
-    return cuda::std::span<T const>(data<T>(), size());
+    return device_span<T const>(data<T>(), size());
   }
 
  protected:

@@ -12,7 +12,6 @@
 #include <rmm/device_buffer.hpp>
 #include <rmm/resource_ref.hpp>
 
-#include <cuda/std/span>
 #include <cuda/stream>
 
 #include <cstddef>
@@ -136,7 +135,7 @@ enum class io_submission_policy : int8_t {
  * to wait on the read tasks
  */
 std::tuple<std::vector<rmm::device_buffer>,
-           std::vector<cuda::std::span<uint8_t const>>,
+           std::vector<cudf::device_span<uint8_t const>>,
            std::future<void>>
 fetch_byte_ranges_to_device_async(
   cudf::io::datasource& datasource,
@@ -160,7 +159,7 @@ fetch_byte_ranges_to_device_async(
  * per byte range per datasource), and a future to wait on the read tasks
  */
 std::tuple<std::vector<rmm::device_buffer>,
-           std::vector<std::vector<cuda::std::span<uint8_t const>>>,
+           std::vector<std::vector<cudf::device_span<uint8_t const>>>,
            std::future<void>>
 fetch_byte_ranges_to_device_async(
   cudf::host_span<std::reference_wrapper<cudf::io::datasource> const> datasources,
@@ -184,7 +183,7 @@ fetch_byte_ranges_to_device_async(
  * @return A pair containing buffers that own the fetched bitsets and one device span per input byte
  * range
  */
-std::pair<std::vector<rmm::device_buffer>, std::vector<cuda::std::span<uint8_t const>>>
+std::pair<std::vector<rmm::device_buffer>, std::vector<cudf::device_span<uint8_t const>>>
 fetch_bloom_filters_to_device(cudf::io::datasource& datasource,
                               cudf::host_span<byte_range_info const> bloom_filter_byte_ranges,
                               io_submission_policy policy,
@@ -206,7 +205,8 @@ fetch_bloom_filters_to_device(cudf::io::datasource& datasource,
  * @return A pair containing buffers that own the fetched bitsets and per-source device spans, with
  * one inner vector per datasource
  */
-std::pair<std::vector<rmm::device_buffer>, std::vector<std::vector<cuda::std::span<uint8_t const>>>>
+std::pair<std::vector<rmm::device_buffer>,
+          std::vector<std::vector<cudf::device_span<uint8_t const>>>>
 fetch_bloom_filters_to_device(
   cudf::host_span<std::reference_wrapper<cudf::io::datasource> const> datasources,
   cudf::host_span<std::vector<byte_range_info> const> bloom_filter_byte_ranges_per_source,
@@ -234,7 +234,7 @@ fetch_bloom_filters_to_device(
  */
 [[deprecated("Use the overload that takes io_submission_policy.")]]
 std::tuple<std::vector<rmm::device_buffer>,
-           std::vector<cuda::std::span<uint8_t const>>,
+           std::vector<cudf::device_span<uint8_t const>>,
            std::future<void>>
 fetch_byte_ranges_to_device_async(
   cudf::io::datasource& datasource,
@@ -262,7 +262,7 @@ fetch_byte_ranges_to_device_async(
  */
 [[deprecated("Use the overload that takes io_submission_policy.")]]
 std::tuple<std::vector<rmm::device_buffer>,
-           std::vector<std::vector<cuda::std::span<uint8_t const>>>,
+           std::vector<std::vector<cudf::device_span<uint8_t const>>>,
            std::future<void>>
 fetch_byte_ranges_to_device_async(
   cudf::host_span<std::reference_wrapper<cudf::io::datasource> const> datasources,
@@ -290,7 +290,7 @@ fetch_byte_ranges_to_device_async(
  * range
  */
 [[deprecated("Use the overload that takes io_submission_policy.")]]
-std::pair<std::vector<rmm::device_buffer>, std::vector<cuda::std::span<uint8_t const>>>
+std::pair<std::vector<rmm::device_buffer>, std::vector<cudf::device_span<uint8_t const>>>
 fetch_bloom_filters_to_device(cudf::io::datasource& datasource,
                               cudf::host_span<byte_range_info const> bloom_filter_byte_ranges,
                               cuda::stream_ref stream   = cudf::get_default_stream(),
@@ -316,7 +316,8 @@ fetch_bloom_filters_to_device(cudf::io::datasource& datasource,
  * one inner vector per datasource
  */
 [[deprecated("Use the overload that takes io_submission_policy.")]]
-std::pair<std::vector<rmm::device_buffer>, std::vector<std::vector<cuda::std::span<uint8_t const>>>>
+std::pair<std::vector<rmm::device_buffer>,
+          std::vector<std::vector<cudf::device_span<uint8_t const>>>>
 fetch_bloom_filters_to_device(
   cudf::host_span<std::reference_wrapper<cudf::io::datasource> const> datasources,
   cudf::host_span<std::vector<byte_range_info> const> bloom_filter_byte_ranges_per_source,

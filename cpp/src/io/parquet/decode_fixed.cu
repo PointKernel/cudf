@@ -14,7 +14,6 @@
 #include <cooperative_groups.h>
 #include <cuda/std/bit>
 #include <cuda/std/iterator>
-#include <cuda/std/span>
 
 namespace cudf::io::parquet::detail {
 
@@ -1082,12 +1081,12 @@ CUDF_HOST_DEVICE constexpr bool is_split_decode()
 template <typename level_t, int decode_block_size_t, decode_kernel_mask kernel_mask_t>
 CUDF_KERNEL void __launch_bounds__(decode_block_size_t, 8)
   decode_page_data_generic(PageInfo* pages,
-                           cuda::std::span<ColumnChunkDesc const> chunks,
+                           device_span<ColumnChunkDesc const> chunks,
                            size_t min_row,
                            size_t num_rows,
-                           cuda::std::span<bool const> page_mask,
-                           cuda::std::span<size_t> initial_str_offsets,
-                           cuda::std::span<size_t const> page_string_offset_indices,
+                           cudf::device_span<bool const> page_mask,
+                           cudf::device_span<size_t> initial_str_offsets,
+                           cudf::device_span<size_t const> page_string_offset_indices,
                            kernel_error::pointer error_code)
 {
   constexpr bool has_dict_t     = has_dict<kernel_mask_t>();
@@ -1368,9 +1367,9 @@ void decode_page_data(cudf::detail::hostdevice_span<PageInfo> pages,
                       size_t min_row,
                       int level_type_size,
                       decode_kernel_mask kernel_mask,
-                      cuda::std::span<bool const> page_mask,
-                      cuda::std::span<size_t> initial_str_offsets,
-                      cuda::std::span<size_t const> page_string_offset_indices,
+                      cudf::device_span<bool const> page_mask,
+                      cudf::device_span<size_t> initial_str_offsets,
+                      cudf::device_span<size_t const> page_string_offset_indices,
                       kernel_error::pointer error_code,
                       cuda::stream_ref stream)
 {

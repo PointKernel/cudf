@@ -13,7 +13,6 @@
 #include <cudf/types.hpp>
 #include <cudf/utilities/span.hpp>
 
-#include <cuda/std/span>
 #include <cuda/stream>
 
 namespace cudf {
@@ -54,7 +53,7 @@ void launch_mixed_join_semi(bool has_nulls,
                             table_device_view build,
                             row_equality const equality_probe,
                             hash_set_ref_type set_ref,
-                            cuda::std::span<bool> left_table_keep_mask,
+                            cudf::device_span<bool> left_table_keep_mask,
                             cudf::ast::detail::expression_device_view device_expression_data,
                             detail::grid_1d const config,
                             int64_t shmem_size_per_block,

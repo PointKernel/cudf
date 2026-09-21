@@ -18,7 +18,6 @@
 
 #include <cuda/iterator>
 #include <cuda/std/functional>
-#include <cuda/std/span>
 #include <cuda/stream>
 
 namespace cudf::groupby::detail {
@@ -29,7 +28,7 @@ struct bitwise_group_reduction_functor {
   template <typename T, CUDF_ENABLE_IF(std::is_integral_v<T>)>
   std::unique_ptr<column> operator()(bitwise_op bit_op,
                                      column_view const& values,
-                                     cuda::std::span<size_type const> group_labels,
+                                     device_span<size_type const> group_labels,
                                      size_type num_groups,
                                      cuda::stream_ref stream,
                                      rmm::device_async_resource_ref mr) const
@@ -92,7 +91,7 @@ struct bitwise_group_reduction_functor {
 
 std::unique_ptr<column> group_bitwise(bitwise_op bit_op,
                                       column_view const& values,
-                                      cuda::std::span<size_type const> group_labels,
+                                      device_span<size_type const> group_labels,
                                       size_type num_groups,
                                       cuda::stream_ref stream,
                                       rmm::device_async_resource_ref mr)

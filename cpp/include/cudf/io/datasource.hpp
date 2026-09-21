@@ -10,7 +10,6 @@
 #include <cudf/utilities/export.hpp>
 #include <cudf/utilities/span.hpp>
 
-#include <cuda/std/span>
 #include <cuda/stream>
 
 #include <future>
@@ -128,7 +127,7 @@ class datasource {
    * @param buffer Device buffer object
    * @return Constructed datasource object
    */
-  static std::unique_ptr<datasource> create(cuda::std::span<std::byte const> buffer);
+  static std::unique_ptr<datasource> create(cudf::device_span<std::byte const> buffer);
 
   /**
    * @brief Creates a source from an user implemented datasource object.

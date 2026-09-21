@@ -28,7 +28,6 @@
 
 #include <cuda/functional>
 #include <cuda/iterator>
-#include <cuda/std/span>
 #include <cuda/stream>
 #include <thrust/count.h>
 #include <thrust/scatter.h>
@@ -308,7 +307,7 @@ std::unique_ptr<table> scatter(table_view const& source,
 }
 
 std::unique_ptr<table> scatter(table_view const& source,
-                               cuda::std::span<size_type const> const scatter_map,
+                               device_span<size_type const> const scatter_map,
                                table_view const& target,
                                cuda::stream_ref stream,
                                rmm::device_async_resource_ref mr)

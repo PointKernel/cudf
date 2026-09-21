@@ -12,7 +12,6 @@
 #include <cub/cub.cuh>
 #include <cuda/std/array>
 #include <cuda/std/mdspan>
-#include <cuda/std/span>
 #include <cuda/stream>
 #include <thrust/copy.h>
 #include <thrust/execution_policy.h>
@@ -59,8 +58,8 @@ CUDF_KERNEL void __launch_bounds__(128, 8)
       uint32_t block_len = shuffle((lane_id == 0) ? cur[0] | (cur[1] << 8) | (cur[2] << 16) : 0);
       auto const is_uncompressed = static_cast<bool>(block_len & 1);
       uint64_t uncompressed_size;
-      cuda::std::span<uint8_t const>* init_in_ctl = nullptr;
-      cuda::std::span<uint8_t>* init_out_ctl      = nullptr;
+      device_span<uint8_t const>* init_in_ctl = nullptr;
+      device_span<uint8_t>* init_out_ctl      = nullptr;
       block_len >>= 1;
       cur += block_header_size;
       if (block_len > compression_block_size || cur + block_len > end) {
@@ -523,7 +522,7 @@ CUDF_KERNEL void __launch_bounds__(128, 8)
 
 template <int block_size>
 CUDF_KERNEL void __launch_bounds__(block_size) reduce_pushdown_masks_kernel(
-  cuda::std::span<orc_column_device_view const> orc_columns,
+  device_span<orc_column_device_view const> orc_columns,
   cuda::std::mdspan<rowgroup_rows const, cuda::std::dextents<size_t, 2>> rowgroup_bounds,
   cuda::std::mdspan<size_type, cuda::std::dextents<size_t, 2>> set_counts)
 {
@@ -602,7 +601,7 @@ void __host__ parse_row_group_index(row_group* row_groups,
 }
 
 void __host__ reduce_pushdown_masks(
-  cuda::std::span<orc_column_device_view const> columns,
+  device_span<orc_column_device_view const> columns,
   cuda::std::mdspan<rowgroup_rows const, cuda::std::dextents<size_t, 2>> rowgroups,
   cuda::std::mdspan<cudf::size_type, cuda::std::dextents<size_t, 2>> valid_counts,
   cuda::stream_ref stream)

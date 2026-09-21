@@ -14,7 +14,6 @@
 
 #include <cuda/functional>
 #include <cuda/iterator>
-#include <cuda/std/span>
 
 namespace cudf::io::parquet::detail {
 
@@ -45,10 +44,10 @@ constexpr int rolling_buf_size  = decode_block_size * 2;
 template <int lvl_buf_size, typename level_t>
 CUDF_KERNEL void __launch_bounds__(decode_block_size)
   decode_split_page_data_kernel(PageInfo* pages,
-                                cuda::std::span<ColumnChunkDesc const> chunks,
+                                device_span<ColumnChunkDesc const> chunks,
                                 size_t min_row,
                                 size_t num_rows,
-                                cuda::std::span<bool const> page_mask,
+                                cudf::device_span<bool const> page_mask,
                                 kernel_error::pointer error_code)
 {
   __shared__ __align__(16) full_page_decode_state state_g;
@@ -259,10 +258,10 @@ CUDF_KERNEL void __launch_bounds__(decode_block_size)
 template <int lvl_buf_size, typename level_t>
 CUDF_KERNEL void __launch_bounds__(decode_block_size)
   decode_page_data(PageInfo* pages,
-                   cuda::std::span<ColumnChunkDesc const> chunks,
+                   device_span<ColumnChunkDesc const> chunks,
                    size_t min_row,
                    size_t num_rows,
-                   cuda::std::span<bool const> page_mask,
+                   cudf::device_span<bool const> page_mask,
                    kernel_error::pointer error_code)
 {
   __shared__ __align__(16) full_page_decode_state state_g;
@@ -518,7 +517,7 @@ void decode_page_data(cudf::detail::hostdevice_span<PageInfo> pages,
                       size_t num_rows,
                       size_t min_row,
                       int level_type_size,
-                      cuda::std::span<bool const> page_mask,
+                      cudf::device_span<bool const> page_mask,
                       kernel_error::pointer error_code,
                       cuda::stream_ref stream)
 {
@@ -546,7 +545,7 @@ void decode_split_page_data(cudf::detail::hostdevice_span<PageInfo> pages,
                             size_t num_rows,
                             size_t min_row,
                             int level_type_size,
-                            cuda::std::span<bool const> page_mask,
+                            cudf::device_span<bool const> page_mask,
                             kernel_error::pointer error_code,
                             cuda::stream_ref stream)
 {

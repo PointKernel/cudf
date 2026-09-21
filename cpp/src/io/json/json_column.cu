@@ -24,7 +24,6 @@
 #include <cuda/atomic>
 #include <cuda/functional>
 #include <cuda/iterator>
-#include <cuda/std/span>
 #include <cuda/std/utility>
 #include <cuda/stream>
 #include <thrust/for_each.h>
@@ -92,10 +91,10 @@ void print_tree(host_span<SymbolT const> input,
  */
 std::tuple<tree_meta_t, rmm::device_uvector<NodeIndexT>, rmm::device_uvector<size_type>>
 reduce_to_column_tree(tree_meta_t const& tree,
-                      cuda::std::span<NodeIndexT const> original_col_ids,
-                      cuda::std::span<NodeIndexT const> sorted_col_ids,
-                      cuda::std::span<NodeIndexT const> ordered_node_ids,
-                      cuda::std::span<size_type const> row_offsets,
+                      device_span<NodeIndexT const> original_col_ids,
+                      device_span<NodeIndexT const> sorted_col_ids,
+                      device_span<NodeIndexT const> ordered_node_ids,
+                      device_span<size_type const> row_offsets,
                       bool is_array_of_arrays,
                       NodeIndexT const row_array_parent_col_id,
                       cuda::stream_ref stream)
@@ -285,7 +284,7 @@ reduce_to_column_tree(tree_meta_t const& tree,
 
 std::pair<std::unique_ptr<column>, std::vector<column_name_info>> device_json_column_to_cudf_column(
   device_json_column& json_col,
-  cuda::std::span<SymbolT const> d_input,
+  device_span<SymbolT const> d_input,
   cudf::io::parse_options const& options,
   bool prune_columns,
   std::optional<schema_element> schema,
@@ -512,7 +511,7 @@ namespace {
 // value tree contained a schema-mismatch are pushed onto it (deduplicated, order preserved by
 // the column order of the result). When null, schema-mismatch information is dropped.
 table_with_metadata device_parse_nested_json_impl(
-  cuda::std::span<SymbolT const> d_input,
+  device_span<SymbolT const> d_input,
   cudf::io::json_reader_options const& options,
   cuda::stream_ref stream,
   rmm::device_async_resource_ref mr,
@@ -545,7 +544,7 @@ table_with_metadata device_parse_nested_json_impl(
     auto const size_to_copy = std::min(size_t{2}, gpu_tree.node_categories.size());
     if (size_to_copy == 0) return false;
     auto const h_node_categories = cudf::detail::make_host_vector(
-      cuda::std::span<NodeT const>{gpu_tree.node_categories.data(), size_to_copy}, stream);
+      device_span<NodeT const>{gpu_tree.node_categories.data(), size_to_copy}, stream);
 
     if (options.is_enabled_lines()) return h_node_categories[0] == NC_LIST;
     return h_node_categories.size() >= 2 and h_node_categories[0] == NC_LIST and
@@ -742,7 +741,7 @@ table_with_metadata device_parse_nested_json_impl(
 
 }  // namespace
 
-table_with_metadata device_parse_nested_json(cuda::std::span<SymbolT const> d_input,
+table_with_metadata device_parse_nested_json(device_span<SymbolT const> d_input,
                                              cudf::io::json_reader_options const& options,
                                              cuda::stream_ref stream,
                                              rmm::device_async_resource_ref mr)
@@ -753,7 +752,7 @@ table_with_metadata device_parse_nested_json(cuda::std::span<SymbolT const> d_in
 }
 
 device_parse_nested_json_result device_parse_nested_json_with_diagnostics(
-  cuda::std::span<SymbolT const> d_input,
+  device_span<SymbolT const> d_input,
   cudf::io::json_reader_options const& options,
   bool collect_schema_mismatch_rows,
   cuda::stream_ref stream,

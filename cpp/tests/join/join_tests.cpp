@@ -30,7 +30,6 @@
 #include <rmm/device_uvector.hpp>
 #include <rmm/mr/statistics_resource_adaptor.hpp>
 
-#include <cuda/std/span>
 #include <cuda/stream>
 
 #include <algorithm>
@@ -86,8 +85,8 @@ std::unique_ptr<cudf::table> join_and_gather(
   auto const [left_join_indices, right_join_indices] =
     join_impl(left_selected, right_selected, compare_nulls, stream, mr);
 
-  auto left_indices_span  = cuda::std::span<cudf::size_type const>{*left_join_indices};
-  auto right_indices_span = cuda::std::span<cudf::size_type const>{*right_join_indices};
+  auto left_indices_span  = cudf::device_span<cudf::size_type const>{*left_join_indices};
+  auto right_indices_span = cudf::device_span<cudf::size_type const>{*right_join_indices};
 
   auto left_indices_col  = cudf::column_view{left_indices_span};
   auto right_indices_col = cudf::column_view{right_indices_span};
@@ -321,10 +320,10 @@ std::unique_ptr<cudf::table> full_join(
           std::make_unique<cudf::join_match_context>(std::move(match_ctx)), 0, left.num_rows()};
         auto [left_idx, right_idx] = hash_joiner.partitioned_full_join(part_ctx, stream, mr);
 
-        std::vector<cuda::std::span<cudf::size_type const>> left_partials{
-          cuda::std::span<cudf::size_type const>{left_idx->data(), left_idx->size()}};
-        std::vector<cuda::std::span<cudf::size_type const>> right_partials{
-          cuda::std::span<cudf::size_type const>{right_idx->data(), right_idx->size()}};
+        std::vector<cudf::device_span<cudf::size_type const>> left_partials{
+          cudf::device_span<cudf::size_type const>{left_idx->data(), left_idx->size()}};
+        std::vector<cudf::device_span<cudf::size_type const>> right_partials{
+          cudf::device_span<cudf::size_type const>{right_idx->data(), right_idx->size()}};
         return cudf::hash_join::finalize_partitioned_full_join(
           left_partials, right_partials, left.num_rows(), right.num_rows(), stream, mr);
       },
@@ -1187,8 +1186,8 @@ TEST_F(JoinTest, PartitionedInnerJoinWithNulls)
     auto const [left_join_indices, right_join_indices] =
       obj.partitioned_inner_join(cxt, stream, cudf::get_current_device_resource_ref());
 
-    auto left_indices_span  = cuda::std::span<cudf::size_type const>{*left_join_indices};
-    auto right_indices_span = cuda::std::span<cudf::size_type const>{*right_join_indices};
+    auto left_indices_span  = cudf::device_span<cudf::size_type const>{*left_join_indices};
+    auto right_indices_span = cudf::device_span<cudf::size_type const>{*right_join_indices};
 
     auto left_indices_col  = cudf::column_view{left_indices_span};
     auto right_indices_col = cudf::column_view{right_indices_span};
@@ -1834,10 +1833,10 @@ TEST_F(JoinTest, EmptyLeftTableFullJoin)
   column_wrapper<cudf::size_type> expected_right_indices{{0, 1, 2, 3, 4}};
   CUDF_TEST_EXPECT_COLUMNS_EQUAL(
     expected_left_indices,
-    cudf::column_view{cuda::std::span<cudf::size_type const>{*left_indices}});
+    cudf::column_view{cudf::device_span<cudf::size_type const>{*left_indices}});
   CUDF_TEST_EXPECT_COLUMNS_EQUAL(
     expected_right_indices,
-    cudf::column_view{cuda::std::span<cudf::size_type const>{*right_indices}});
+    cudf::column_view{cudf::device_span<cudf::size_type const>{*right_indices}});
 }
 
 // Empty Right Table
@@ -3192,7 +3191,7 @@ struct JoinTestLists : public cudf::test::BaseFixture {
 
   auto column_view_from_device_uvector(rmm::device_uvector<cudf::size_type> const& vector)
   {
-    auto const indices_span = cuda::std::span<cudf::size_type const>{vector};
+    auto const indices_span = cudf::device_span<cudf::size_type const>{vector};
     return cudf::column_view{indices_span};
   }
 
@@ -3497,8 +3496,8 @@ TEST_F(JoinTest, HashJoinPartitionedInnerJoin)
 
   auto join_and_gather = [&](cudf::join_partition_context const& ctx) {
     auto const [left_idx, right_idx] = hash_joiner.partitioned_inner_join(ctx, stream, mr);
-    auto left_col  = cudf::column_view{cuda::std::span<cudf::size_type const>{*left_idx}};
-    auto right_col = cudf::column_view{cuda::std::span<cudf::size_type const>{*right_idx}};
+    auto left_col  = cudf::column_view{cudf::device_span<cudf::size_type const>{*left_idx}};
+    auto right_col = cudf::column_view{cudf::device_span<cudf::size_type const>{*right_idx}};
     auto left_res  = cudf::gather(t0, left_col, cudf::out_of_bounds_policy::DONT_CHECK);
     auto right_res = cudf::gather(t1, right_col, cudf::out_of_bounds_policy::DONT_CHECK);
     auto joined    = left_res->release();
@@ -3566,8 +3565,8 @@ TEST_F(JoinTest, HashJoinPartitionedLeftJoin)
 
   auto join_and_gather = [&](cudf::join_partition_context const& ctx) {
     auto const [left_idx, right_idx] = hash_joiner.partitioned_left_join(ctx, stream, mr);
-    auto left_col  = cudf::column_view{cuda::std::span<cudf::size_type const>{*left_idx}};
-    auto right_col = cudf::column_view{cuda::std::span<cudf::size_type const>{*right_idx}};
+    auto left_col  = cudf::column_view{cudf::device_span<cudf::size_type const>{*left_idx}};
+    auto right_col = cudf::column_view{cudf::device_span<cudf::size_type const>{*right_idx}};
     auto left_res  = cudf::gather(t0, left_col, cudf::out_of_bounds_policy::NULLIFY);
     auto right_res = cudf::gather(t1, right_col, cudf::out_of_bounds_policy::NULLIFY);
     auto joined    = left_res->release();
@@ -3643,8 +3642,8 @@ TEST_F(JoinTest, HashJoinPartitionedFullJoin)
     right_idx_parts.push_back(std::move(right_idx));
   }
 
-  std::vector<cuda::std::span<cudf::size_type const>> left_partials;
-  std::vector<cuda::std::span<cudf::size_type const>> right_partials;
+  std::vector<cudf::device_span<cudf::size_type const>> left_partials;
+  std::vector<cudf::device_span<cudf::size_type const>> right_partials;
   left_partials.reserve(left_idx_parts.size());
   right_partials.reserve(right_idx_parts.size());
   for (std::size_t i = 0; i < left_idx_parts.size(); ++i) {
@@ -3660,8 +3659,8 @@ TEST_F(JoinTest, HashJoinPartitionedFullJoin)
                                                     stream,
                                                     mr);
 
-  auto left_col  = cudf::column_view{cuda::std::span<cudf::size_type const>{*final_left}};
-  auto right_col = cudf::column_view{cuda::std::span<cudf::size_type const>{*final_right}};
+  auto left_col  = cudf::column_view{cudf::device_span<cudf::size_type const>{*final_left}};
+  auto right_col = cudf::column_view{cudf::device_span<cudf::size_type const>{*final_right}};
   auto left_res  = cudf::gather(t0, left_col, cudf::out_of_bounds_policy::NULLIFY);
   auto right_res = cudf::gather(t1, right_col, cudf::out_of_bounds_policy::NULLIFY);
   auto joined    = left_res->release();
@@ -3728,8 +3727,8 @@ TEST_F(JoinTest, HashJoinPartitionedWholeTable)
     std::make_unique<cudf::join_match_context>(std::move(match_ctx)), 0, t0.num_rows()};
 
   auto [left_idx, right_idx] = hash_joiner.partitioned_inner_join(part_ctx, stream, mr);
-  auto left_col              = cudf::column_view{cuda::std::span<cudf::size_type const>{*left_idx}};
-  auto right_col = cudf::column_view{cuda::std::span<cudf::size_type const>{*right_idx}};
+  auto left_col  = cudf::column_view{cudf::device_span<cudf::size_type const>{*left_idx}};
+  auto right_col = cudf::column_view{cudf::device_span<cudf::size_type const>{*right_idx}};
   auto left_res  = cudf::gather(t0, left_col, cudf::out_of_bounds_policy::DONT_CHECK);
   auto right_res = cudf::gather(t1, right_col, cudf::out_of_bounds_policy::DONT_CHECK);
   auto joined    = left_res->release();
@@ -3783,8 +3782,8 @@ TEST_F(JoinTest, HashJoinPartitionedEmptyBuildTableUsesGlobalLeftIndices)
                                                   cudf::JoinNoMatch,
                                                   cudf::JoinNoMatch}};
 
-  auto const left_view  = cudf::column_view{cuda::std::span<cudf::size_type const>{*left_idx}};
-  auto const right_view = cudf::column_view{cuda::std::span<cudf::size_type const>{*right_idx}};
+  auto const left_view  = cudf::column_view{cudf::device_span<cudf::size_type const>{*left_idx}};
+  auto const right_view = cudf::column_view{cudf::device_span<cudf::size_type const>{*right_idx}};
   CUDF_TEST_EXPECT_COLUMNS_EQUAL(expected_left, left_view);
   CUDF_TEST_EXPECT_COLUMNS_EQUAL(expected_right, right_view);
 }
@@ -3841,8 +3840,8 @@ TEST_F(JoinTest, HashJoinPartitionedSlicedMultiBlock)
     part_ctx.left_start_idx          = s;
     part_ctx.left_end_idx            = e;
     auto const [left_idx, right_idx] = hash_joiner.partitioned_inner_join(part_ctx, stream, mr);
-    auto left_col_view  = cudf::column_view{cuda::std::span<cudf::size_type const>{*left_idx}};
-    auto right_col_view = cudf::column_view{cuda::std::span<cudf::size_type const>{*right_idx}};
+    auto left_col_view  = cudf::column_view{cudf::device_span<cudf::size_type const>{*left_idx}};
+    auto right_col_view = cudf::column_view{cudf::device_span<cudf::size_type const>{*right_idx}};
     auto left_res       = cudf::gather(
       cudf::table_view{left_view}, left_col_view, cudf::out_of_bounds_policy::DONT_CHECK);
     auto right_res = cudf::gather(right, right_col_view, cudf::out_of_bounds_policy::DONT_CHECK);

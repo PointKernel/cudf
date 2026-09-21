@@ -21,7 +21,6 @@
 #include <rmm/exec_policy.hpp>
 
 #include <cuda/iterator>
-#include <cuda/std/span>
 #include <cuda/stream>
 #include <thrust/execution_policy.h>
 #include <thrust/for_each.h>
@@ -76,9 +75,9 @@ struct quantiles_functor {
   template <typename T>
   std::unique_ptr<column> operator()(column_view const& values,
                                      column_view const& group_sizes,
-                                     cuda::std::span<size_type const> group_offsets,
+                                     cudf::device_span<size_type const> group_offsets,
                                      size_type const num_groups,
-                                     cuda::std::span<double const> quantile,
+                                     device_span<double const> quantile,
                                      interpolation interpolation,
                                      cuda::stream_ref stream,
                                      rmm::device_async_resource_ref mr)
@@ -149,7 +148,7 @@ struct quantiles_functor {
 // TODO: add optional check for is_sorted. Use context.flag_sorted
 std::unique_ptr<column> group_quantiles(column_view const& values,
                                         column_view const& group_sizes,
-                                        cuda::std::span<size_type const> group_offsets,
+                                        cudf::device_span<size_type const> group_offsets,
                                         size_type const num_groups,
                                         std::vector<double> const& quantiles,
                                         interpolation interp,

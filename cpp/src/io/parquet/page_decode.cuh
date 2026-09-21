@@ -13,7 +13,6 @@
 
 #include <cooperative_groups.h>
 #include <cuda/atomic>
-#include <cuda/std/span>
 #include <cuda/std/tuple>
 
 namespace cudf::io::parquet::detail {
@@ -164,7 +163,7 @@ __device__ inline bool should_process_nulls(auto* s)
  * @brief Test if the given page is in a string column
  */
 __device__ constexpr bool is_string_col(PageInfo const& page,
-                                        cuda::std::span<ColumnChunkDesc const> chunks)
+                                        device_span<ColumnChunkDesc const> chunks)
 {
   if ((page.flags & PAGEINFO_FLAGS_DICTIONARY) != 0) { return false; }
   auto const& col = chunks[page.chunk_idx];
@@ -1069,7 +1068,7 @@ enum class page_processing_stage {
 template <typename Filter>
 inline __device__ bool setup_local_page_info(auto* const s,
                                              PageInfo const* p,
-                                             cuda::std::span<ColumnChunkDesc const> chunks,
+                                             device_span<ColumnChunkDesc const> chunks,
                                              size_t min_row,
                                              size_t num_rows,
                                              Filter filter,

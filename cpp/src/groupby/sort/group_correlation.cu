@@ -19,7 +19,6 @@
 #include <rmm/exec_policy.hpp>
 
 #include <cuda/iterator>
-#include <cuda/std/span>
 #include <cuda/std/tuple>
 #include <cuda/stream>
 #include <thrust/transform.h>
@@ -101,7 +100,7 @@ struct covariance_transform {
 
 std::unique_ptr<column> group_covariance(column_view const& values_0,
                                          column_view const& values_1,
-                                         cuda::std::span<size_type const> group_labels,
+                                         cudf::device_span<size_type const> group_labels,
                                          size_type num_groups,
                                          column_view const& count,
                                          column_view const& mean_0,

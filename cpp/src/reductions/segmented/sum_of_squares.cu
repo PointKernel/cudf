@@ -8,7 +8,6 @@
 #include <cudf/reduction/detail/segmented_reduction_functions.hpp>
 #include <cudf/utilities/memory_resource.hpp>
 
-#include <cuda/std/span>
 #include <cuda/stream>
 
 namespace cudf {
@@ -16,7 +15,7 @@ namespace reduction {
 namespace detail {
 
 std::unique_ptr<cudf::column> segmented_sum_of_squares(column_view const& col,
-                                                       cuda::std::span<size_type const> offsets,
+                                                       device_span<size_type const> offsets,
                                                        cudf::data_type const output_dtype,
                                                        null_policy null_handling,
                                                        cuda::stream_ref stream,

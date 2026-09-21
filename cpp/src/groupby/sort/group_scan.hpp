@@ -10,7 +10,6 @@
 #include <cudf/utilities/memory_resource.hpp>
 #include <cudf/utilities/span.hpp>
 
-#include <cuda/std/span>
 #include <cuda/stream>
 
 #include <memory>
@@ -29,7 +28,7 @@ namespace detail {
  */
 std::unique_ptr<column> sum_scan(column_view const& values,
                                  size_type num_groups,
-                                 cuda::std::span<size_type const> group_labels,
+                                 device_span<size_type const> group_labels,
                                  cuda::stream_ref stream,
                                  rmm::device_async_resource_ref mr);
 
@@ -46,7 +45,7 @@ std::unique_ptr<column> sum_scan(column_view const& values,
  */
 std::unique_ptr<column> product_scan(column_view const& values,
                                      size_type num_groups,
-                                     cuda::std::span<size_type const> group_labels,
+                                     device_span<size_type const> group_labels,
                                      cuda::stream_ref stream,
                                      rmm::device_async_resource_ref mr);
 
@@ -61,7 +60,7 @@ std::unique_ptr<column> product_scan(column_view const& values,
  */
 std::unique_ptr<column> min_scan(column_view const& values,
                                  size_type num_groups,
-                                 cuda::std::span<size_type const> group_labels,
+                                 device_span<size_type const> group_labels,
                                  cuda::stream_ref stream,
                                  rmm::device_async_resource_ref mr);
 
@@ -76,7 +75,7 @@ std::unique_ptr<column> min_scan(column_view const& values,
  */
 std::unique_ptr<column> max_scan(column_view const& values,
                                  size_type num_groups,
-                                 cuda::std::span<size_type const> group_labels,
+                                 device_span<size_type const> group_labels,
                                  cuda::stream_ref stream,
                                  rmm::device_async_resource_ref mr);
 
@@ -92,7 +91,7 @@ std::unique_ptr<column> max_scan(column_view const& values,
  */
 std::unique_ptr<column> count_scan(column_view const& values,
                                    null_policy nulls,
-                                   cuda::std::span<size_type const> group_labels,
+                                   device_span<size_type const> group_labels,
                                    cuda::stream_ref stream,
                                    rmm::device_async_resource_ref mr);
 
@@ -110,8 +109,8 @@ std::unique_ptr<column> count_scan(column_view const& values,
  */
 std::unique_ptr<column> min_rank_scan(column_view const& grouped_values,
                                       column_view const& value_order,
-                                      cuda::std::span<size_type const> group_labels,
-                                      cuda::std::span<size_type const> group_offsets,
+                                      device_span<size_type const> group_labels,
+                                      device_span<size_type const> group_offsets,
                                       cuda::stream_ref stream,
                                       rmm::device_async_resource_ref mr);
 
@@ -120,15 +119,15 @@ std::unique_ptr<column> min_rank_scan(column_view const& grouped_values,
  *
  * @details  @copydetails min_rank_scan(column_view const& grouped_values,
  *                                      column_view const& value_order,
- *                                      cuda::std::span<size_type const> group_labels,
- *                                      cuda::std::span<size_type const> group_offsets,
+ *                                      device_span<size_type const> group_labels,
+ *                                      device_span<size_type const> group_offsets,
  *                                      cuda::stream_ref stream,
  *                                      rmm::device_async_resource_ref mr)
  */
 std::unique_ptr<column> max_rank_scan(column_view const& grouped_values,
                                       column_view const& value_order,
-                                      cuda::std::span<size_type const> group_labels,
-                                      cuda::std::span<size_type const> group_offsets,
+                                      device_span<size_type const> group_labels,
+                                      device_span<size_type const> group_offsets,
                                       cuda::stream_ref stream,
                                       rmm::device_async_resource_ref mr);
 
@@ -137,15 +136,15 @@ std::unique_ptr<column> max_rank_scan(column_view const& grouped_values,
  *
  * @details  @copydetails min_rank_scan(column_view const& grouped_values,
  *                                      column_view const& value_order,
- *                                      cuda::std::span<size_type const> group_labels,
- *                                      cuda::std::span<size_type const> group_offsets,
+ *                                      device_span<size_type const> group_labels,
+ *                                      device_span<size_type const> group_offsets,
  *                                      cuda::stream_ref stream,
  *                                      rmm::device_async_resource_ref mr)
  */
 std::unique_ptr<column> first_rank_scan(column_view const& grouped_values,
                                         column_view const& value_order,
-                                        cuda::std::span<size_type const> group_labels,
-                                        cuda::std::span<size_type const> group_offsets,
+                                        device_span<size_type const> group_labels,
+                                        device_span<size_type const> group_offsets,
                                         cuda::stream_ref stream,
                                         rmm::device_async_resource_ref mr);
 
@@ -154,15 +153,15 @@ std::unique_ptr<column> first_rank_scan(column_view const& grouped_values,
  *
  * @details  @copydetails min_rank_scan(column_view const& grouped_values,
  *                                      column_view const& value_order,
- *                                      cuda::std::span<size_type const> group_labels,
- *                                      cuda::std::span<size_type const> group_offsets,
+ *                                      device_span<size_type const> group_labels,
+ *                                      device_span<size_type const> group_offsets,
  *                                      cuda::stream_ref stream,
  *                                      rmm::device_async_resource_ref mr)
  */
 std::unique_ptr<column> average_rank_scan(column_view const& grouped_values,
                                           column_view const& value_order,
-                                          cuda::std::span<size_type const> group_labels,
-                                          cuda::std::span<size_type const> group_offsets,
+                                          device_span<size_type const> group_labels,
+                                          device_span<size_type const> group_offsets,
                                           cuda::stream_ref stream,
                                           rmm::device_async_resource_ref mr);
 
@@ -179,8 +178,8 @@ std::unique_ptr<column> average_rank_scan(column_view const& grouped_values,
  */
 std::unique_ptr<column> dense_rank_scan(column_view const& grouped_values,
                                         column_view const& value_order,
-                                        cuda::std::span<size_type const> group_labels,
-                                        cuda::std::span<size_type const> group_offsets,
+                                        device_span<size_type const> group_labels,
+                                        device_span<size_type const> group_offsets,
                                         cuda::stream_ref stream,
                                         rmm::device_async_resource_ref mr);
 
@@ -202,8 +201,8 @@ std::unique_ptr<column> group_rank_to_percentage(rank_method const method,
                                                  rank_percentage const percentage,
                                                  column_view const& rank,
                                                  column_view const& count,
-                                                 cuda::std::span<size_type const> group_labels,
-                                                 cuda::std::span<size_type const> group_offsets,
+                                                 device_span<size_type const> group_labels,
+                                                 device_span<size_type const> group_offsets,
                                                  cuda::stream_ref stream,
                                                  rmm::device_async_resource_ref mr);
 

@@ -22,7 +22,6 @@
 
 #include <cuco/static_set.cuh>
 #include <cuda/iterator>
-#include <cuda/std/span>
 #include <cuda/stream>
 #include <thrust/scatter.h>
 #include <thrust/transform.h>
@@ -163,7 +162,7 @@ template rmm::device_uvector<size_type> extract_populated_keys<nullable_global_s
 
 rmm::device_uvector<size_type> compute_key_transform_map(
   size_type num_total_keys,
-  cuda::std::span<size_type const> unique_key_indices,
+  device_span<size_type const> unique_key_indices,
   cuda::stream_ref stream,
   rmm::device_async_resource_ref mr)
 {
@@ -180,11 +179,10 @@ rmm::device_uvector<size_type> compute_key_transform_map(
   return key_transform_map;
 }
 
-rmm::device_uvector<size_type> compute_target_indices(
-  cuda::std::span<size_type const> input,
-  cuda::std::span<size_type const> transform_map,
-  cuda::stream_ref stream,
-  rmm::device_async_resource_ref mr)
+rmm::device_uvector<size_type> compute_target_indices(device_span<size_type const> input,
+                                                      device_span<size_type const> transform_map,
+                                                      cuda::stream_ref stream,
+                                                      rmm::device_async_resource_ref mr)
 {
   rmm::device_uvector<size_type> target_indices(input.size(), stream, mr);
   thrust::transform(rmm::exec_policy_nosync(stream, cudf::get_current_device_resource_ref()),

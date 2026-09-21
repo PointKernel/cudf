@@ -23,7 +23,6 @@
 #include <rmm/resource_ref.hpp>
 
 #include <cuda/iterator>
-#include <cuda/std/span>
 #include <cuda/std/tuple>
 #include <cuda/stream>
 
@@ -55,7 +54,7 @@ namespace cudf::io::parquet {
 
 namespace {
 
-using device_spans_per_source_type = std::vector<cuda::std::span<uint8_t const>>;
+using device_spans_per_source_type = std::vector<cudf::device_span<uint8_t const>>;
 using host_read_buffer             = std::unique_ptr<cudf::io::datasource::buffer>;
 
 /**
@@ -641,7 +640,7 @@ fetch_bloom_filters_to_device_impl(
                  copy_sizes.begin(),
                  flat_output_spans.begin(),
                  [](auto const dst, auto const size) {
-                   return cuda::std::span<uint8_t const>{static_cast<uint8_t const*>(dst), size};
+                   return cudf::device_span<uint8_t const>{static_cast<uint8_t const*>(dst), size};
                  });
 
   // One batched copy (entries with a null source or zero size are ignored by the batch API)
@@ -708,7 +707,7 @@ std::vector<std::unique_ptr<cudf::io::datasource::buffer>> fetch_page_indexes_to
 }
 
 std::tuple<std::vector<rmm::device_buffer>,
-           std::vector<cuda::std::span<uint8_t const>>,
+           std::vector<cudf::device_span<uint8_t const>>,
            std::future<void>>
 fetch_byte_ranges_to_device_async(cudf::io::datasource& datasource,
                                   std::span<cudf::io::text::byte_range_info const> byte_ranges,
@@ -734,7 +733,7 @@ fetch_byte_ranges_to_device_async(cudf::io::datasource& datasource,
 }
 
 std::tuple<std::vector<rmm::device_buffer>,
-           std::vector<std::vector<cuda::std::span<uint8_t const>>>,
+           std::vector<std::vector<cudf::device_span<uint8_t const>>>,
            std::future<void>>
 fetch_byte_ranges_to_device_async(
   cudf::host_span<std::reference_wrapper<cudf::io::datasource> const> datasources,
@@ -759,7 +758,7 @@ fetch_byte_ranges_to_device_async(
     mr.get_output_mr());
 }
 
-std::pair<std::vector<rmm::device_buffer>, std::vector<cuda::std::span<uint8_t const>>>
+std::pair<std::vector<rmm::device_buffer>, std::vector<cudf::device_span<uint8_t const>>>
 fetch_bloom_filters_to_device(
   cudf::io::datasource& datasource,
   cudf::host_span<cudf::io::text::byte_range_info const> bloom_filter_byte_ranges,
@@ -784,7 +783,8 @@ fetch_bloom_filters_to_device(
   return {std::move(buffers), std::move(fetched_byte_ranges.front())};
 }
 
-std::pair<std::vector<rmm::device_buffer>, std::vector<std::vector<cuda::std::span<uint8_t const>>>>
+std::pair<std::vector<rmm::device_buffer>,
+          std::vector<std::vector<cudf::device_span<uint8_t const>>>>
 fetch_bloom_filters_to_device(
   cudf::host_span<std::reference_wrapper<cudf::io::datasource> const> datasources,
   cudf::host_span<std::vector<cudf::io::text::byte_range_info> const>
@@ -811,7 +811,7 @@ fetch_bloom_filters_to_device(
 }
 
 std::tuple<std::vector<rmm::device_buffer>,
-           std::vector<cuda::std::span<uint8_t const>>,
+           std::vector<cudf::device_span<uint8_t const>>,
            std::future<void>>
 fetch_byte_ranges_to_device_async(cudf::io::datasource& datasource,
                                   std::span<cudf::io::text::byte_range_info const> byte_ranges,
@@ -823,7 +823,7 @@ fetch_byte_ranges_to_device_async(cudf::io::datasource& datasource,
 }
 
 std::tuple<std::vector<rmm::device_buffer>,
-           std::vector<std::vector<cuda::std::span<uint8_t const>>>,
+           std::vector<std::vector<cudf::device_span<uint8_t const>>>,
            std::future<void>>
 fetch_byte_ranges_to_device_async(
   cudf::host_span<std::reference_wrapper<cudf::io::datasource> const> datasources,
@@ -835,7 +835,7 @@ fetch_byte_ranges_to_device_async(
     datasources, byte_ranges_per_source, io_submission_policy::SERIALIZE, stream, mr);
 }
 
-std::pair<std::vector<rmm::device_buffer>, std::vector<cuda::std::span<uint8_t const>>>
+std::pair<std::vector<rmm::device_buffer>, std::vector<cudf::device_span<uint8_t const>>>
 fetch_bloom_filters_to_device(
   cudf::io::datasource& datasource,
   cudf::host_span<cudf::io::text::byte_range_info const> bloom_filter_byte_ranges,
@@ -846,7 +846,8 @@ fetch_bloom_filters_to_device(
     datasource, bloom_filter_byte_ranges, io_submission_policy::SERIALIZE, stream, mr);
 }
 
-std::pair<std::vector<rmm::device_buffer>, std::vector<std::vector<cuda::std::span<uint8_t const>>>>
+std::pair<std::vector<rmm::device_buffer>,
+          std::vector<std::vector<cudf::device_span<uint8_t const>>>>
 fetch_bloom_filters_to_device(
   cudf::host_span<std::reference_wrapper<cudf::io::datasource> const> datasources,
   cudf::host_span<std::vector<cudf::io::text::byte_range_info> const>

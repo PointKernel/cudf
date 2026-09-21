@@ -25,7 +25,6 @@
 
 #include <cuco/extent.cuh>
 #include <cuda/iterator>
-#include <cuda/std/span>
 #include <cuda/stream>
 #include <thrust/copy.h>
 #include <thrust/sequence.h>
@@ -66,7 +65,7 @@ namespace {
 
 struct gather_mask {
   join_kind kind;
-  cuda::std::span<bool const> flagged;
+  device_span<bool const> flagged;
   __device__ bool operator()(size_type idx) const noexcept
   {
     return flagged[idx] == (kind == join_kind::LEFT_SEMI_JOIN);
@@ -138,7 +137,7 @@ std::unique_ptr<rmm::device_uvector<cudf::size_type>> filtered_join::semi_anti_j
   }();
 
   auto contains_map            = rmm::device_uvector<bool>(left.num_rows(), stream, temp_mr);
-  auto const contains_map_span = cuda::std::span<bool>{contains_map.data(), contains_map.size()};
+  auto const contains_map_span = cudf::device_span<bool>{contains_map.data(), contains_map.size()};
   if (_right_mode == row_operator_mode::PRIMITIVE) {
     query_right_table_primitive(left, preprocessed_left, contains_map_span, stream);
   } else if (_right_mode == row_operator_mode::NESTED) {

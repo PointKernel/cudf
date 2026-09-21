@@ -12,7 +12,6 @@
 
 #include <rmm/resource_ref.hpp>
 
-#include <cuda/std/span>
 #include <cuda/stream>
 
 #include <algorithm>
@@ -34,7 +33,7 @@ struct trie_node {
 };
 
 struct trie_device_view {
-  cuda::std::span<trie_node const> _nodes;
+  device_span<trie_node const> _nodes;
 
   /**
    * @brief create a multistate which contains all partial path matches for the given token.

@@ -13,7 +13,6 @@
 #include <rmm/device_uvector.hpp>
 #include <rmm/resource_ref.hpp>
 
-#include <cuda/std/span>
 #include <cuda/stream>
 
 #include <cstddef>
@@ -41,8 +40,8 @@ std::pair<std::unique_ptr<rmm::device_uvector<size_type>>,
           std::unique_ptr<rmm::device_uvector<size_type>>>
 filter_join_indices(table_view const& left,
                     table_view const& right,
-                    cuda::std::span<size_type const> left_indices,
-                    cuda::std::span<size_type const> right_indices,
+                    device_span<size_type const> left_indices,
+                    device_span<size_type const> right_indices,
                     ast::expression const& predicate,
                     join_kind join_kind,
                     std::optional<std::size_t> output_size,

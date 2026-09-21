@@ -19,7 +19,6 @@
 #include <cudf_streaming/partition_utils.hpp>
 #include <cudf_streaming/table_chunk.hpp>
 
-#include <cuda/std/span>
 #include <cuda/stream>
 
 #include <rapidsmpf/communicator/communicator.hpp>
@@ -168,7 +167,7 @@ streaming::Message semi_join_chunk(std::shared_ptr<streaming::Context> ctx,
   ctx->logger()->debug("semi_join_chunk: left.num_rows()=", left_chunk.table_view().num_rows());
   ctx->logger()->debug("semi_join_chunk: match.size()=", match->size());
 
-  cudf::column_view indices = cuda::std::span<cudf::size_type const>(*match);
+  cudf::column_view indices = cudf::device_span<cudf::size_type const>(*match);
   auto result_columns       = cudf::gather(left_carrier,
                                      indices,
                                      cudf::out_of_bounds_policy::DONT_CHECK,
@@ -219,8 +218,8 @@ streaming::Message inner_join_chunk(std::shared_ptr<streaming::Context> ctx,
   auto [probe_match, build_match] =
     joiner.inner_join(probe_keys, std::nullopt, chunk_stream, ctx->br()->device_mr());
 
-  cudf::column_view build_indices = cuda::std::span<cudf::size_type const>(*build_match);
-  cudf::column_view probe_indices = cuda::std::span<cudf::size_type const>(*probe_match);
+  cudf::column_view build_indices = cudf::device_span<cudf::size_type const>(*build_match);
+  cudf::column_view probe_indices = cudf::device_span<cudf::size_type const>(*probe_match);
   // build_carrier is valid on build_stream, but chunk_stream is
   // waiting for build_stream work to be done, so running this on
   // chunk_stream is fine.

@@ -14,7 +14,6 @@
 
 #include <cub/block/block_reduce.cuh>
 #include <cuda/iterator>
-#include <cuda/std/span>
 #include <cuda/std/tuple>
 
 #include <cstddef>
@@ -105,7 +104,7 @@ __device__ __inline__ bool is_like_float(std::size_t len,
  */
 template <int BlockSize, typename OptionsView, typename ColumnStringIter>
 CUDF_KERNEL void infer_column_type_kernel(OptionsView options,
-                                          cuda::std::span<char const> data,
+                                          device_span<char const> data,
                                           ColumnStringIter offset_length_begin,
                                           std::size_t size,
                                           cudf::io::column_type_histogram* column_info)
@@ -226,7 +225,7 @@ CUDF_KERNEL void infer_column_type_kernel(OptionsView options,
  */
 template <typename OptionsView, typename ColumnStringIter>
 cudf::io::column_type_histogram infer_column_type(OptionsView const& options,
-                                                  cuda::std::span<char const> data,
+                                                  cudf::device_span<char const> data,
                                                   ColumnStringIter offset_length_begin,
                                                   std::size_t const size,
                                                   cuda::stream_ref stream)
@@ -248,7 +247,7 @@ cudf::io::column_type_histogram infer_column_type(OptionsView const& options,
 
 cudf::data_type infer_data_type(
   cudf::io::json_inference_options_view const& options,
-  cuda::std::span<char const> data,
+  device_span<char const> data,
   cuda::zip_iterator<size_type const*, size_type const*> offset_length_begin,
   std::size_t const size,
   cuda::stream_ref stream)

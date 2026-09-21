@@ -10,7 +10,6 @@
 #include <cudf/utilities/memory_resource.hpp>
 #include <cudf/utilities/span.hpp>
 
-#include <cuda/std/span>
 #include <cuda/stream>
 
 #include <memory>
@@ -41,7 +40,7 @@ namespace detail {
  */
 std::unique_ptr<column> group_sum(column_view const& values,
                                   size_type num_groups,
-                                  cuda::std::span<size_type const> group_labels,
+                                  cudf::device_span<size_type const> group_labels,
                                   cuda::stream_ref stream,
                                   rmm::device_async_resource_ref mr);
 
@@ -61,7 +60,7 @@ std::unique_ptr<column> group_sum(column_view const& values,
 [[nodiscard]] std::unique_ptr<column> group_sum_overflow(
   column_view const& values,
   size_type num_groups,
-  cuda::std::span<size_type const> group_labels,
+  cudf::device_span<size_type const> group_labels,
   cuda::stream_ref stream,
   rmm::device_async_resource_ref mr);
 
@@ -84,7 +83,7 @@ std::unique_ptr<column> group_sum(column_view const& values,
  */
 std::unique_ptr<column> group_product(column_view const& values,
                                       size_type num_groups,
-                                      cuda::std::span<size_type const> group_labels,
+                                      cudf::device_span<size_type const> group_labels,
                                       cuda::stream_ref stream,
                                       rmm::device_async_resource_ref mr);
 
@@ -107,7 +106,7 @@ std::unique_ptr<column> group_product(column_view const& values,
  */
 std::unique_ptr<column> group_min(column_view const& values,
                                   size_type num_groups,
-                                  cuda::std::span<size_type const> group_labels,
+                                  cudf::device_span<size_type const> group_labels,
                                   cuda::stream_ref stream,
                                   rmm::device_async_resource_ref mr);
 
@@ -130,7 +129,7 @@ std::unique_ptr<column> group_min(column_view const& values,
  */
 std::unique_ptr<column> group_max(column_view const& values,
                                   size_type num_groups,
-                                  cuda::std::span<size_type const> group_labels,
+                                  cudf::device_span<size_type const> group_labels,
                                   cuda::stream_ref stream,
                                   rmm::device_async_resource_ref mr);
 
@@ -154,7 +153,7 @@ std::unique_ptr<column> group_max(column_view const& values,
  */
 std::unique_ptr<column> group_argmax(column_view const& values,
                                      size_type num_groups,
-                                     cuda::std::span<size_type const> group_labels,
+                                     cudf::device_span<size_type const> group_labels,
                                      column_view const& key_sort_order,
                                      cuda::stream_ref stream,
                                      rmm::device_async_resource_ref mr);
@@ -179,7 +178,7 @@ std::unique_ptr<column> group_argmax(column_view const& values,
  */
 std::unique_ptr<column> group_argmin(column_view const& values,
                                      size_type num_groups,
-                                     cuda::std::span<size_type const> group_labels,
+                                     cudf::device_span<size_type const> group_labels,
                                      column_view const& key_sort_order,
                                      cuda::stream_ref stream,
                                      rmm::device_async_resource_ref mr);
@@ -203,7 +202,7 @@ std::unique_ptr<column> group_argmin(column_view const& values,
  * @param mr Device memory resource used to allocate the returned column's device memory
  */
 std::unique_ptr<column> group_count_valid(column_view const& values,
-                                          cuda::std::span<size_type const> group_labels,
+                                          cudf::device_span<size_type const> group_labels,
                                           size_type num_groups,
                                           cuda::stream_ref stream,
                                           rmm::device_async_resource_ref mr);
@@ -223,7 +222,7 @@ std::unique_ptr<column> group_count_valid(column_view const& values,
  * @param stream CUDA stream used for device memory operations and kernel launches.
  * @param mr Device memory resource used to allocate the returned column's device memory
  */
-std::unique_ptr<column> group_count_all(cuda::std::span<size_type const> group_offsets,
+std::unique_ptr<column> group_count_all(cudf::device_span<size_type const> group_offsets,
                                         size_type num_groups,
                                         cuda::stream_ref stream,
                                         rmm::device_async_resource_ref mr);
@@ -250,7 +249,7 @@ std::unique_ptr<column> group_count_all(cuda::std::span<size_type const> group_o
  * @param mr Device memory resource used to allocate the returned column's device memory
  */
 std::unique_ptr<column> group_histogram(column_view const& values,
-                                        cuda::std::span<size_type const> group_labels,
+                                        cudf::device_span<size_type const> group_labels,
                                         size_type num_groups,
                                         cuda::stream_ref stream,
                                         rmm::device_async_resource_ref mr);
@@ -275,7 +274,7 @@ std::unique_ptr<column> group_histogram(column_view const& values,
  */
 std::unique_ptr<column> group_m2(column_view const& values,
                                  column_view const& group_means,
-                                 cuda::std::span<size_type const> group_labels,
+                                 cudf::device_span<size_type const> group_labels,
                                  cuda::stream_ref stream,
                                  rmm::device_async_resource_ref mr);
 
@@ -304,7 +303,7 @@ std::unique_ptr<column> group_m2(column_view const& values,
 std::unique_ptr<column> group_var(column_view const& values,
                                   column_view const& group_means,
                                   column_view const& group_sizes,
-                                  cuda::std::span<size_type const> group_labels,
+                                  cudf::device_span<size_type const> group_labels,
                                   size_type ddof,
                                   cuda::stream_ref stream,
                                   rmm::device_async_resource_ref mr);
@@ -333,7 +332,7 @@ std::unique_ptr<column> group_var(column_view const& values,
  */
 std::unique_ptr<column> group_quantiles(column_view const& values,
                                         column_view const& group_sizes,
-                                        cuda::std::span<size_type const> group_offsets,
+                                        cudf::device_span<size_type const> group_offsets,
                                         size_type const num_groups,
                                         std::vector<double> const& quantiles,
                                         interpolation interp,
@@ -365,9 +364,9 @@ std::unique_ptr<column> group_quantiles(column_view const& values,
  * @param mr Device memory resource used to allocate the returned column's device memory
  */
 std::unique_ptr<column> group_nunique(column_view const& values,
-                                      cuda::std::span<size_type const> group_labels,
+                                      cudf::device_span<size_type const> group_labels,
                                       size_type const num_groups,
-                                      cuda::std::span<size_type const> group_offsets,
+                                      cudf::device_span<size_type const> group_offsets,
                                       null_policy null_handling,
                                       cuda::stream_ref stream,
                                       rmm::device_async_resource_ref mr);
@@ -399,8 +398,8 @@ std::unique_ptr<column> group_nunique(column_view const& values,
  */
 std::unique_ptr<column> group_nth_element(column_view const& values,
                                           column_view const& group_sizes,
-                                          cuda::std::span<size_type const> group_labels,
-                                          cuda::std::span<size_type const> group_offsets,
+                                          cudf::device_span<size_type const> group_labels,
+                                          cudf::device_span<size_type const> group_offsets,
                                           size_type num_groups,
                                           size_type n,
                                           null_policy null_handling,
@@ -426,7 +425,7 @@ std::unique_ptr<column> group_nth_element(column_view const& values,
  * @param mr Device memory resource used to allocate the returned column's device memory.
  */
 std::unique_ptr<column> group_collect(column_view const& values,
-                                      cuda::std::span<size_type const> group_offsets,
+                                      cudf::device_span<size_type const> group_offsets,
                                       size_type num_groups,
                                       null_policy null_handling,
                                       cuda::stream_ref stream,
@@ -450,7 +449,7 @@ std::unique_ptr<column> group_collect(column_view const& values,
  * @param mr Device memory resource used to allocate the returned column's device memory.
  */
 std::unique_ptr<column> group_merge_lists(column_view const& values,
-                                          cuda::std::span<size_type const> group_offsets,
+                                          cudf::device_span<size_type const> group_offsets,
                                           size_type num_groups,
                                           cuda::stream_ref stream,
                                           rmm::device_async_resource_ref mr);
@@ -476,7 +475,7 @@ std::unique_ptr<column> group_merge_lists(column_view const& values,
  * @param mr Device memory resource used to allocate the returned column's device memory
  */
 std::unique_ptr<column> group_merge_m2(column_view const& values,
-                                       cuda::std::span<size_type const> group_offsets,
+                                       cudf::device_span<size_type const> group_offsets,
                                        size_type num_groups,
                                        cuda::stream_ref stream,
                                        rmm::device_async_resource_ref mr);
@@ -503,7 +502,7 @@ std::unique_ptr<column> group_merge_m2(column_view const& values,
  * @param mr Device memory resource used to allocate the returned column's device memory
  */
 std::unique_ptr<column> group_merge_histogram(column_view const& values,
-                                              cuda::std::span<size_type const> group_offsets,
+                                              cudf::device_span<size_type const> group_offsets,
                                               size_type num_groups,
                                               cuda::stream_ref stream,
                                               rmm::device_async_resource_ref mr);
@@ -525,7 +524,7 @@ std::unique_ptr<column> group_merge_histogram(column_view const& values,
  */
 std::unique_ptr<column> group_covariance(column_view const& values_0,
                                          column_view const& values_1,
-                                         cuda::std::span<size_type const> group_labels,
+                                         cudf::device_span<size_type const> group_labels,
                                          size_type num_groups,
                                          column_view const& count,
                                          column_view const& mean_0,
@@ -562,7 +561,7 @@ std::unique_ptr<column> group_correlation(column_view const& covariance,
  */
 std::unique_ptr<column> group_bitwise(bitwise_op bit_op,
                                       column_view const& grouped_values,
-                                      cuda::std::span<size_type const> group_labels,
+                                      device_span<size_type const> group_labels,
                                       size_type num_groups,
                                       cuda::stream_ref stream,
                                       rmm::device_async_resource_ref mr);
@@ -580,7 +579,7 @@ std::unique_ptr<column> group_bitwise(bitwise_op bit_op,
 std::unique_ptr<column> group_top_k(size_type k,
                                     order topk_order,
                                     column_view const& values,
-                                    cuda::std::span<size_type const> group_offsets,
+                                    device_span<size_type const> group_offsets,
                                     cuda::stream_ref stream,
                                     rmm::device_async_resource_ref mr);
 }  // namespace detail

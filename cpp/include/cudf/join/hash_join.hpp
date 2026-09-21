@@ -16,7 +16,6 @@
 
 #include <rmm/device_uvector.hpp>
 
-#include <cuda/std/span>
 #include <cuda/stream>
 
 #include <optional>
@@ -436,8 +435,8 @@ class hash_join {
   [[nodiscard]] static std::pair<std::unique_ptr<rmm::device_uvector<size_type>>,
                                  std::unique_ptr<rmm::device_uvector<size_type>>>
   finalize_partitioned_full_join(
-    cudf::host_span<cuda::std::span<size_type const> const> left_partials,
-    cudf::host_span<cuda::std::span<size_type const> const> right_partials,
+    cudf::host_span<cudf::device_span<size_type const> const> left_partials,
+    cudf::host_span<cudf::device_span<size_type const> const> right_partials,
     size_type left_table_num_rows,
     size_type right_table_num_rows,
     cuda::stream_ref stream           = cudf::get_default_stream(),

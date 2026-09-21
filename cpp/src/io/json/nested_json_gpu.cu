@@ -28,7 +28,6 @@
 #include <rmm/exec_policy.hpp>
 
 #include <cuda/iterator>
-#include <cuda/std/span>
 #include <cuda/std/tuple>
 #include <thrust/transform.h>
 
@@ -1417,7 +1416,7 @@ void json_column::append_row(uint32_t row_index,
 
 namespace detail {
 
-void get_stack_context(cuda::std::span<SymbolT const> json_in,
+void get_stack_context(device_span<SymbolT const> json_in,
                        SymbolT* d_top_of_stack,
                        stack_behavior_t stack_behavior,
                        SymbolT delimiter,
@@ -1483,7 +1482,7 @@ void get_stack_context(cuda::std::span<SymbolT const> json_in,
   if (stack_behavior == stack_behavior_t::ResetOnDelimiter) {
     fst::sparse_stack_op_to_top_of_stack<fst::stack_op_support::WITH_RESET_SUPPORT, StackLevelT>(
       stack_ops.data(),
-      cuda::std::span<SymbolOffsetT>{stack_op_indices.data(), num_stack_ops},
+      device_span<SymbolOffsetT>{stack_op_indices.data(), num_stack_ops},
       JSONWithRecoveryToStackOp{},
       d_top_of_stack,
       root_symbol,
@@ -1493,7 +1492,7 @@ void get_stack_context(cuda::std::span<SymbolT const> json_in,
   } else {
     fst::sparse_stack_op_to_top_of_stack<fst::stack_op_support::NO_RESET_SUPPORT, StackLevelT>(
       stack_ops.data(),
-      cuda::std::span<SymbolOffsetT>{stack_op_indices.data(), num_stack_ops},
+      device_span<SymbolOffsetT>{stack_op_indices.data(), num_stack_ops},
       JSONToStackOp{},
       d_top_of_stack,
       root_symbol,
@@ -1504,8 +1503,8 @@ void get_stack_context(cuda::std::span<SymbolT const> json_in,
 }
 
 std::pair<rmm::device_uvector<PdaTokenT>, rmm::device_uvector<SymbolOffsetT>> process_token_stream(
-  cuda::std::span<PdaTokenT const> tokens,
-  cuda::std::span<SymbolOffsetT const> token_indices,
+  device_span<PdaTokenT const> tokens,
+  device_span<SymbolOffsetT const> token_indices,
   cuda::stream_ref stream)
 {
   CUDF_FUNC_RANGE();
@@ -1558,7 +1557,7 @@ std::pair<rmm::device_uvector<PdaTokenT>, rmm::device_uvector<SymbolOffsetT>> pr
 }
 
 std::pair<rmm::device_uvector<PdaTokenT>, rmm::device_uvector<SymbolOffsetT>> get_token_stream(
-  cuda::std::span<SymbolT const> json_in,
+  device_span<SymbolT const> json_in,
   cudf::io::json_reader_options const& options,
   cuda::stream_ref stream,
   rmm::device_async_resource_ref mr)
@@ -1691,7 +1690,7 @@ std::pair<rmm::device_uvector<PdaTokenT>, rmm::device_uvector<SymbolOffsetT>> ge
 void make_json_column(json_column& root_column,
                       std::stack<tree_node>& current_data_path,
                       host_span<SymbolT const> input,
-                      cuda::std::span<SymbolT const> d_input,
+                      device_span<SymbolT const> d_input,
                       cudf::io::json_reader_options const& options,
                       bool include_quote_char,
                       cuda::stream_ref stream,
@@ -2093,7 +2092,7 @@ cudf::io::parse_options parsing_options(cudf::io::json_reader_options const& opt
 
 std::pair<std::unique_ptr<column>, std::vector<column_name_info>> json_column_to_cudf_column(
   json_column const& json_col,
-  cuda::std::span<SymbolT const> d_input,
+  device_span<SymbolT const> d_input,
   cudf::io::json_reader_options const& options,
   std::optional<schema_element> schema,
   cuda::stream_ref stream,

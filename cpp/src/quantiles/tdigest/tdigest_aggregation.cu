@@ -647,7 +647,7 @@ void generate_cluster_limits(int delta,
 template <typename GroupInfo>
 size_t compute_simple_cluster_count(int delta,
                                     GroupInfo group_info,
-                                    cuda::std::span<size_type> group_num_clusters,
+                                    cudf::device_span<size_type> group_num_clusters,
                                     cuda::stream_ref stream)
 {
   auto const num_groups = group_num_clusters.size();
@@ -1089,7 +1089,7 @@ std::unique_ptr<column> compute_tdigests(int delta,
 template <typename T>
 struct get_scalar_minmax_grouped {
   column_device_view const col;
-  cuda::std::span<size_type const> group_offsets;
+  device_span<size_type const> group_offsets;
   size_type const* group_valid_counts;
 
   __device__ cuda::std::tuple<double, double> operator()(size_type group_index)
@@ -1122,9 +1122,9 @@ struct get_scalar_minmax {
 struct typed_group_tdigest {
   template <typename T>
   std::unique_ptr<column> operator()(column_view const& col,
-                                     cuda::std::span<size_type const> group_offsets,
-                                     cuda::std::span<size_type const> group_labels,
-                                     cuda::std::span<size_type const> group_valid_counts,
+                                     cudf::device_span<size_type const> group_offsets,
+                                     cudf::device_span<size_type const> group_labels,
+                                     cudf::device_span<size_type const> group_valid_counts,
                                      size_type num_groups,
                                      int delta,
                                      cuda::stream_ref stream,
@@ -1543,7 +1543,7 @@ std::unique_ptr<column> merge_tdigests(tdigest_column_view const& tdv,
                    group_offsets,
                    group_offsets + _p_group_offsets.size(),
                    _p_group_offsets.begin());
-      cuda::std::span<size_type const> p_group_offsets(_p_group_offsets);
+      cudf::device_span<size_type const> p_group_offsets(_p_group_offsets);
 
       rmm::device_uvector<double> p_cumulative_weights(cumulative_weights, stream, pinned_mr);
 
@@ -1558,7 +1558,7 @@ std::unique_ptr<column> merge_tdigests(tdigest_column_view const& tdv,
                    group_labels,
                    group_labels + num_group_labels,
                    _p_group_labels.begin());
-      cuda::std::span<size_type const> p_group_labels(_p_group_labels);
+      cudf::device_span<size_type const> p_group_labels(_p_group_labels);
 
       cudf::detail::sync_stream(stream);
       return generate_group_cluster_info(
@@ -1664,9 +1664,9 @@ std::unique_ptr<scalar> reduce_merge_tdigest(column_view const& input,
 }
 
 std::unique_ptr<column> group_tdigest(column_view const& col,
-                                      cuda::std::span<size_type const> group_offsets,
-                                      cuda::std::span<size_type const> group_labels,
-                                      cuda::std::span<size_type const> group_valid_counts,
+                                      cudf::device_span<size_type const> group_offsets,
+                                      cudf::device_span<size_type const> group_labels,
+                                      cudf::device_span<size_type const> group_valid_counts,
                                       size_type num_groups,
                                       int max_centroids,
                                       cuda::stream_ref stream,
@@ -1688,8 +1688,8 @@ std::unique_ptr<column> group_tdigest(column_view const& col,
 }
 
 std::unique_ptr<column> group_merge_tdigest(column_view const& input,
-                                            cuda::std::span<size_type const> group_offsets,
-                                            cuda::std::span<size_type const> group_labels,
+                                            cudf::device_span<size_type const> group_offsets,
+                                            cudf::device_span<size_type const> group_labels,
                                             size_type num_groups,
                                             int max_centroids,
                                             cuda::stream_ref stream,

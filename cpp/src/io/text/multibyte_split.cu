@@ -32,7 +32,6 @@
 #include <cub/block/block_scan.cuh>
 #include <cuda/functional>
 #include <cuda/iterator>
-#include <cuda/std/span>
 #include <cuda/std/utility>
 #include <cuda/stream>
 #include <thrust/copy.h>
@@ -57,7 +56,7 @@ int32_t constexpr ITEMS_PER_TILE   = ITEMS_PER_THREAD * THREADS_PER_TILE;
 int32_t constexpr TILES_PER_CHUNK  = 4096;
 int32_t constexpr ITEMS_PER_CHUNK  = ITEMS_PER_TILE * TILES_PER_CHUNK;
 
-__device__ constexpr multistate transition_init(char c, cuda::std::span<char const> delim)
+__device__ constexpr multistate transition_init(char c, cudf::device_span<char const> delim)
 {
   auto result = multistate();
 
@@ -72,7 +71,7 @@ __device__ constexpr multistate transition_init(char c, cuda::std::span<char con
 
 __device__ constexpr multistate transition(char c,
                                            multistate state,
-                                           cuda::std::span<char const> delim)
+                                           cudf::device_span<char const> delim)
 {
   auto result = multistate();
 
@@ -102,7 +101,7 @@ struct PatternScan {
 
   __device__ inline void Scan(cudf::size_type tile_idx,
                               cudf::io::text::detail::scan_tile_state_view<multistate> tile_state,
-                              cuda::std::span<char const> delim,
+                              cudf::device_span<char const> delim,
                               char (&thread_data)[ITEMS_PER_THREAD],
                               multistate& thread_multistate)
   {
@@ -155,8 +154,8 @@ CUDF_KERNEL __launch_bounds__(THREADS_PER_TILE) void multibyte_split_kernel(
   output_offset base_output_offset,
   cudf::io::text::detail::scan_tile_state_view<multistate> tile_multistates,
   cudf::io::text::detail::scan_tile_state_view<output_offset> tile_output_offsets,
-  cuda::std::span<char const> delim,
-  cuda::std::span<char const> chunk_input_chars,
+  cudf::device_span<char const> delim,
+  cudf::device_span<char const> chunk_input_chars,
   cudf::split_device_span<byte_offset> row_offsets)
 {
   using InputLoad =
@@ -232,7 +231,7 @@ CUDF_KERNEL __launch_bounds__(THREADS_PER_TILE) void byte_split_kernel(
   output_offset base_output_offset,
   cudf::io::text::detail::scan_tile_state_view<output_offset> tile_output_offsets,
   char delim,
-  cuda::std::span<char const> chunk_input_chars,
+  cudf::device_span<char const> chunk_input_chars,
   cudf::split_device_span<byte_offset> row_offsets)
 {
   using InputLoad =

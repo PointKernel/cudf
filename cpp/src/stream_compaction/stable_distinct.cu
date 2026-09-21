@@ -12,7 +12,6 @@
 #include <cudf/utilities/span.hpp>
 
 #include <cuda/iterator>
-#include <cuda/std/span>
 #include <thrust/scatter.h>
 #include <thrust/uninitialized_fill.h>
 
@@ -62,7 +61,7 @@ std::unique_ptr<table> stable_distinct(table_view const& input,
   }();
 
   return cudf::detail::apply_mask(
-    input, cuda::std::span<bool const>(output_markers), mask_type::RETENTION, stream, mr);
+    input, cudf::device_span<bool const>(output_markers), mask_type::RETENTION, stream, mr);
 }
 
 }  // namespace detail

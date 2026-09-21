@@ -13,7 +13,6 @@
 #include <cudf/utilities/span.hpp>
 #include <cudf/utilities/traits.hpp>
 
-#include <cuda/std/span>
 #include <cuda/stream>
 
 #include <initializer_list>
@@ -156,7 +155,7 @@ std::unique_ptr<column> shift(column_view const& input,
  * @note If `offset == 0`, a copy of @p segmented_values is returned.
  */
 std::unique_ptr<column> segmented_shift(column_view const& segmented_values,
-                                        cuda::std::span<size_type const> segment_offsets,
+                                        device_span<size_type const> segment_offsets,
                                         size_type offset,
                                         scalar const& fill_value,
                                         cuda::stream_ref stream,

@@ -12,7 +12,6 @@
 #include <rmm/device_uvector.hpp>
 #include <rmm/resource_ref.hpp>
 
-#include <cuda/std/span>
 #include <cuda/stream>
 
 #include <memory>
@@ -92,7 +91,7 @@ VectorPair get_trivial_left_join_indices(table_view const& left,
 VectorPair finalize_full_join(VectorPair&& indices,
                               size_type left_table_num_rows,
                               size_type right_table_num_rows,
-                              std::optional<cuda::std::span<size_type const>> right_matches,
+                              std::optional<cudf::device_span<size_type const>> right_matches,
                               cuda::stream_ref stream,
                               rmm::device_async_resource_ref mr,
                               std::optional<size_type> unmatched_right_count = std::nullopt);
@@ -117,8 +116,8 @@ VectorPair finalize_full_join(VectorPair&& indices,
  * @return `[left_indices, right_indices]` sized `sum(left_partials[i].size()) + num_unmatched`.
  */
 VectorPair finalize_full_join(
-  cudf::host_span<cuda::std::span<size_type const> const> left_partials,
-  cudf::host_span<cuda::std::span<size_type const> const> right_partials,
+  cudf::host_span<cudf::device_span<size_type const> const> left_partials,
+  cudf::host_span<cudf::device_span<size_type const> const> right_partials,
   size_type left_table_num_rows,
   size_type right_table_num_rows,
   cuda::stream_ref stream,

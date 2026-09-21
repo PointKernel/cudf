@@ -27,7 +27,6 @@
 
 #include <cuco/bloom_filter_ref.cuh>
 #include <cuda/iterator>
-#include <cuda/std/span>
 #include <cuda/stream>
 #include <thrust/tabulate.h>
 
@@ -63,7 +62,7 @@ using arrow_filter_policy =
  *
  */
 struct bloom_filter_caster {
-  cuda::std::span<cuda::std::span<cuda::std::byte const> const> bloom_filter_spans;
+  cudf::device_span<cudf::device_span<cuda::std::byte const> const> bloom_filter_spans;
   host_span<Type const> parquet_types;
   std::size_t total_row_groups;
   std::size_t num_equality_columns;
@@ -97,7 +96,7 @@ struct bloom_filter_caster {
     auto constexpr bytes_per_block = sizeof(word_type) * policy_type::words_per_block;
 
     rmm::device_buffer results{total_row_groups, stream, cudf::get_current_device_resource_ref()};
-    cuda::std::span<bool> results_span{static_cast<bool*>(results.data()), total_row_groups};
+    cudf::device_span<bool> results_span{static_cast<bool*>(results.data()), total_row_groups};
 
     // Query literal in bloom filters from each column chunk (row group).
     thrust::tabulate(
@@ -282,7 +281,7 @@ std::optional<std::pair<int64_t, std::size_t>> parse_bloom_filter_header(
                    static_cast<std::size_t>(header.num_bytes)};
 }
 
-std::pair<std::vector<rmm::device_buffer>, std::vector<cuda::std::span<cuda::std::byte const>>>
+std::pair<std::vector<rmm::device_buffer>, std::vector<cudf::device_span<cuda::std::byte const>>>
 aggregate_reader_metadata::read_bloom_filters(
   host_span<std::unique_ptr<datasource> const> sources,
   host_span<std::vector<size_type> const> row_group_indices,
@@ -355,7 +354,7 @@ aggregate_reader_metadata::read_bloom_filters(
                                   mr);
 
   // Flatten the per-source bitset spans into per-chunk order
-  std::vector<cuda::std::span<cuda::std::byte const>> bloom_filter_data;
+  std::vector<cudf::device_span<cuda::std::byte const>> bloom_filter_data;
   bloom_filter_data.reserve(num_chunks);
   auto flat_bitset_spans = bitset_spans_per_source | std::views::join;
   std::transform(flat_bitset_spans.begin(),
@@ -367,7 +366,7 @@ aggregate_reader_metadata::read_bloom_filters(
 }
 
 std::optional<std::vector<std::vector<size_type>>> aggregate_reader_metadata::apply_bloom_filters(
-  cudf::host_span<cuda::std::span<cuda::std::byte const> const> bloom_filter_data,
+  cudf::host_span<cudf::device_span<cuda::std::byte const> const> bloom_filter_data,
   host_span<std::vector<size_type> const> input_row_group_indices,
   host_span<std::vector<ast::literal*> const> literals,
   size_type total_row_groups,

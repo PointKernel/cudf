@@ -19,7 +19,6 @@
 #include <cuda/functional>
 #include <cuda/iterator>
 #include <cuda/std/algorithm>
-#include <cuda/std/span>
 #include <thrust/for_each.h>
 #include <thrust/gather.h>
 #include <thrust/scan.h>
@@ -269,7 +268,7 @@ void generate_depth_remappings(
 }
 
 void fill_in_page_info(host_span<ColumnChunkDesc> chunks,
-                       cuda::std::span<PageInfo> pages,
+                       device_span<PageInfo> pages,
                        cuda::stream_ref stream)
 {
   auto const num_pages = pages.size();
@@ -341,7 +340,7 @@ std::string encoding_to_string(Encoding encoding)
   return result;
 }
 
-[[nodiscard]] std::string list_unsupported_encodings(cuda::std::span<PageInfo const> pages,
+[[nodiscard]] std::string list_unsupported_encodings(device_span<PageInfo const> pages,
                                                      cuda::stream_ref stream)
 {
   auto const to_mask     = cuda::proclaim_return_type<uint32_t>([] __device__(auto const& page) {
@@ -352,8 +351,8 @@ std::string encoding_to_string(Encoding encoding)
   return encoding_bitmask_to_str(unsupported);
 }
 
-cudf::detail::hostdevice_vector<PageInfo> sort_pages(cuda::std::span<PageInfo const> unsorted_pages,
-                                                     cuda::std::span<ColumnChunkDesc const> chunks,
+cudf::detail::hostdevice_vector<PageInfo> sort_pages(device_span<PageInfo const> unsorted_pages,
+                                                     device_span<ColumnChunkDesc const> chunks,
                                                      cuda::stream_ref stream)
 {
   CUDF_FUNC_RANGE();
@@ -435,8 +434,8 @@ enum class page_data_source_type : uint8_t {
  */
 template <page_data_source_type data_source_type>
 void decode_page_headers_impl(pass_intermediate_data& pass,
-                              cuda::std::span<PageInfo> unsorted_pages,
-                              std::span<cuda::std::span<uint8_t const> const> page_data,
+                              device_span<PageInfo> unsorted_pages,
+                              std::span<cudf::device_span<uint8_t const> const> page_data,
                               cuda::stream_ref stream)
 {
   CUDF_FUNC_RANGE();
@@ -473,17 +472,17 @@ void decode_page_headers_impl(pass_intermediate_data& pass,
     auto device_page_data = cudf::detail::make_device_uvector_async(
       page_data, stream, cudf::get_current_device_resource_ref());
     decode_page_headers_from_page_data(
-      cuda::std::span<ColumnChunkDesc const>(pass.chunks.device_ptr(), pass.chunks.size()),
+      device_span<ColumnChunkDesc const>(pass.chunks.device_ptr(), pass.chunks.size()),
       unsorted_pages,
       device_page_data,
-      cuda::std::span<size_type const>(chunk_page_offsets.data(), chunk_page_offsets.size()),
+      device_span<size_type const>(chunk_page_offsets.data(), chunk_page_offsets.size()),
       error_code.data(),
       stream);
   }
   // If offset index is present, collect data spans for all pages and launch the accelerated decode
   // page headers kernel
   else if constexpr (data_source_type == page_data_source_type::OFFSET_INDEX) {
-    auto host_page_data = cudf::detail::make_pinned_vector_async<cuda::std::span<uint8_t const>>(
+    auto host_page_data = cudf::detail::make_pinned_vector_async<cudf::device_span<uint8_t const>>(
       unsorted_pages.size(), stream);
     auto curr_page_idx = 0;
 
@@ -539,17 +538,17 @@ void decode_page_headers_impl(pass_intermediate_data& pass,
 
     // Accelerated decode page headers, one thread per page
     decode_page_headers_from_page_data(
-      cuda::std::span<ColumnChunkDesc const>(pass.chunks.device_ptr(), pass.chunks.size()),
+      device_span<ColumnChunkDesc const>(pass.chunks.device_ptr(), pass.chunks.size()),
       unsorted_pages,
       page_data,
-      cuda::std::span<size_type const>(chunk_page_offsets.data(), chunk_page_offsets.size()),
+      device_span<size_type const>(chunk_page_offsets.data(), chunk_page_offsets.size()),
       error_code.data(),
       stream);
   } else {
     // (Slow) decode page headers, one warp (lane) per pages of a column chunk
     decode_page_headers(
-      cuda::std::span<ColumnChunkDesc const>(pass.chunks.device_ptr(), pass.chunks.size()),
-      cuda::std::span<chunk_page_info>(d_chunk_page_info.data(), d_chunk_page_info.size()),
+      device_span<ColumnChunkDesc const>(pass.chunks.device_ptr(), pass.chunks.size()),
+      device_span<chunk_page_info>(d_chunk_page_info.data(), d_chunk_page_info.size()),
       error_code.data(),
       stream);
   }
@@ -585,7 +584,7 @@ void decode_page_headers_impl(pass_intermediate_data& pass,
   // sort the pages in chunk/schema order.
   pass.pages =
     sort_pages(unsorted_pages,
-               cuda::std::span<ColumnChunkDesc const>(pass.chunks.device_ptr(), pass.chunks.size()),
+               device_span<ColumnChunkDesc const>(pass.chunks.device_ptr(), pass.chunks.size()),
                stream);
 
   // compute offsets to each group of input pages.
@@ -593,8 +592,8 @@ void decode_page_headers_impl(pass_intermediate_data& pass,
   //
   // result:      0,          4,          8
   rmm::device_uvector<size_type> page_counts(pass.pages.size() + 1, stream);
-  auto page_keys = make_page_key_iterator(
-    cuda::std::span<PageInfo const>(pass.pages.device_ptr(), pass.pages.size()));
+  auto page_keys =
+    make_page_key_iterator(device_span<PageInfo const>(pass.pages.device_ptr(), pass.pages.size()));
   auto const page_counts_end = cudf::detail::reduce_by_key(page_keys,
                                                            page_keys + pass.pages.size(),
                                                            cuda::make_constant_iterator(1),
@@ -628,7 +627,7 @@ void decode_page_headers_impl(pass_intermediate_data& pass,
 }  // namespace
 
 void decode_page_headers(pass_intermediate_data& pass,
-                         cuda::std::span<PageInfo> unsorted_pages,
+                         device_span<PageInfo> unsorted_pages,
                          bool has_offset_index,
                          cuda::stream_ref stream)
 {
@@ -641,8 +640,8 @@ void decode_page_headers(pass_intermediate_data& pass,
 }
 
 void decode_page_headers(pass_intermediate_data& pass,
-                         cuda::std::span<PageInfo> unsorted_pages,
-                         std::span<cuda::std::span<uint8_t const> const> page_data,
+                         device_span<PageInfo> unsorted_pages,
+                         std::span<cudf::device_span<uint8_t const> const> page_data,
                          cuda::stream_ref stream)
 {
   decode_page_headers_impl<page_data_source_type::PAGE_SPANS>(

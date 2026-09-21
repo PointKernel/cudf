@@ -30,7 +30,6 @@
 #include <cuda/functional>
 #include <cuda/iterator>
 #include <cuda/std/limits>
-#include <cuda/std/span>
 #include <cuda/std/tuple>
 #include <cuda/stream>
 #include <thrust/binary_search.h>
@@ -68,8 +67,8 @@ struct token_to_node {
 
 // Convert token indices to node range for each valid node.
 struct node_ranges {
-  cuda::std::span<PdaTokenT const> tokens;
-  cuda::std::span<SymbolOffsetT const> token_indices;
+  device_span<PdaTokenT const> tokens;
+  device_span<SymbolOffsetT const> token_indices;
   bool include_quote_char;
   __device__ auto operator()(size_type i) -> cuda::std::tuple<SymbolOffsetT, SymbolOffsetT>
   {
@@ -160,7 +159,7 @@ struct checked_token_level_output {
  */
 template <typename IndexType = size_t, typename KeyType>
 std::pair<rmm::device_uvector<KeyType>, rmm::device_uvector<IndexType>> stable_sorted_key_order(
-  cuda::std::span<KeyType const> keys, cuda::stream_ref stream)
+  cudf::device_span<KeyType const> keys, cuda::stream_ref stream)
 {
   CUDF_FUNC_RANGE();
 
@@ -207,8 +206,8 @@ std::pair<rmm::device_uvector<KeyType>, rmm::device_uvector<IndexType>> stable_s
  *                       and other siblings are initialized to -1.
  * @param stream CUDA stream used for device memory operations and kernel launches.
  */
-void propagate_first_sibling_to_other(cuda::std::span<TreeDepthT const> node_levels,
-                                      cuda::std::span<NodeIndexT> parent_node_ids,
+void propagate_first_sibling_to_other(cudf::device_span<TreeDepthT const> node_levels,
+                                      cudf::device_span<NodeIndexT> parent_node_ids,
                                       cuda::stream_ref stream)
 {
   CUDF_FUNC_RANGE();
@@ -226,8 +225,8 @@ void propagate_first_sibling_to_other(cuda::std::span<TreeDepthT const> node_lev
 }
 
 // Generates a tree representation of the given tokens, token_indices.
-tree_meta_t get_tree_representation(cuda::std::span<PdaTokenT const> tokens,
-                                    cuda::std::span<SymbolOffsetT const> token_indices,
+tree_meta_t get_tree_representation(device_span<PdaTokenT const> tokens,
+                                    device_span<SymbolOffsetT const> token_indices,
                                     bool is_strict_nested_boundaries,
                                     cuda::stream_ref stream,
                                     rmm::device_async_resource_ref mr)
@@ -279,7 +278,7 @@ tree_meta_t get_tree_representation(cuda::std::span<PdaTokenT const> tokens,
                    tokens.end(),
                    token_t::ErrorBegin);
     auto error_index = cudf::detail::make_host_vector<SymbolOffsetT>(
-      cuda::std::span<SymbolOffsetT const>{
+      device_span<SymbolOffsetT const>{
         token_indices.data() + cuda::std::distance(tokens.begin(), error_location), 1},
       stream);
 
@@ -379,7 +378,7 @@ tree_meta_t get_tree_representation(cuda::std::span<PdaTokenT const> tokens,
   }
   // Propagate parent node to siblings from first sibling - inplace.
   propagate_first_sibling_to_other(
-    cuda::std::span<TreeDepthT const>{node_levels.data(), node_levels.size()},
+    cudf::device_span<TreeDepthT const>{node_levels.data(), node_levels.size()},
     parent_node_ids,
     stream);
 
@@ -495,7 +494,7 @@ tree_meta_t get_tree_representation(cuda::std::span<PdaTokenT const> tokens,
 
     // propagate parent node from first sibling to other siblings - inplace.
     propagate_first_sibling_to_other(
-      cuda::std::span<TreeDepthT const>{token_levels.data(), token_levels.size()},
+      cudf::device_span<TreeDepthT const>{token_levels.data(), token_levels.size()},
       parent_node_ids,
       stream);
 
@@ -524,9 +523,9 @@ tree_meta_t get_tree_representation(cuda::std::span<PdaTokenT const> tokens,
 
 // Return field node ids after unicode decoding of field names and matching them to same field names
 std::pair<size_t, rmm::device_uvector<size_type>> remapped_field_nodes_after_unicode_decode(
-  cuda::std::span<SymbolT const> d_input,
+  device_span<SymbolT const> d_input,
   tree_meta_t const& d_tree,
-  cuda::std::span<size_type const> keys,
+  device_span<size_type const> keys,
   cuda::stream_ref stream)
 {
   size_t num_keys = keys.size();
@@ -615,11 +614,10 @@ std::pair<size_t, rmm::device_uvector<size_type>> remapped_field_nodes_after_uni
  * @param stream CUDA stream used for device memory operations and kernel launches.
  * @return Vector of node_type ids
  */
-rmm::device_uvector<size_type> hash_node_type_with_field_name(
-  cuda::std::span<SymbolT const> d_input,
-  tree_meta_t const& d_tree,
-  bool is_enabled_experimental,
-  cuda::stream_ref stream)
+rmm::device_uvector<size_type> hash_node_type_with_field_name(device_span<SymbolT const> d_input,
+                                                              tree_meta_t const& d_tree,
+                                                              bool is_enabled_experimental,
+                                                              cuda::stream_ref stream)
 {
   CUDF_FUNC_RANGE();
 
@@ -745,8 +743,8 @@ rmm::device_uvector<size_type> hash_node_type_with_field_name(
 
 std::pair<rmm::device_uvector<NodeIndexT>, rmm::device_uvector<NodeIndexT>>
 get_array_children_indices(TreeDepthT row_array_children_level,
-                           cuda::std::span<TreeDepthT const> node_levels,
-                           cuda::std::span<NodeIndexT const> parent_node_ids,
+                           device_span<TreeDepthT const> node_levels,
+                           device_span<NodeIndexT const> parent_node_ids,
                            cuda::stream_ref stream)
 {
   // array children level: (level 2 for values, level 1 for values-JSONLines format)
@@ -795,9 +793,9 @@ get_array_children_indices(TreeDepthT row_array_children_level,
 //      hash map. This mimics set operation with hash map. This unique node ids are set ids.
 //   c. Return this converted set ids, which are the hash map keys/values, and unique set ids.
 std::pair<rmm::device_uvector<size_type>, rmm::device_uvector<size_type>> hash_node_path(
-  cuda::std::span<TreeDepthT const> node_levels,
-  cuda::std::span<size_type const> node_type,
-  cuda::std::span<NodeIndexT const> parent_node_ids,
+  device_span<TreeDepthT const> node_levels,
+  device_span<size_type const> node_type,
+  device_span<NodeIndexT const> parent_node_ids,
   bool is_array_of_arrays,
   bool is_enabled_lines,
   cuda::stream_ref stream,
@@ -947,7 +945,7 @@ std::pair<rmm::device_uvector<size_type>, rmm::device_uvector<size_type>> hash_n
  * @return column_id, parent_column_id
  */
 std::pair<rmm::device_uvector<NodeIndexT>, rmm::device_uvector<NodeIndexT>> generate_column_id(
-  cuda::std::span<SymbolT const> d_input,
+  device_span<SymbolT const> d_input,
   tree_meta_t const& d_tree,
   bool is_array_of_arrays,
   bool is_enabled_lines,
@@ -1122,7 +1120,7 @@ rmm::device_uvector<size_type> compute_row_offsets(rmm::device_uvector<NodeIndex
 //   b. scan_by_key {parent_col_id} (done only on nodes whose parent is a list)
 //   c. propagate to non-list leaves from parent list node by recursion
 std::tuple<rmm::device_uvector<NodeIndexT>, rmm::device_uvector<size_type>>
-records_orient_tree_traversal(cuda::std::span<SymbolT const> d_input,
+records_orient_tree_traversal(device_span<SymbolT const> d_input,
                               tree_meta_t const& d_tree,
                               bool is_array_of_arrays,
                               bool is_enabled_lines,

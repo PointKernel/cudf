@@ -25,7 +25,6 @@
 #include <cub/cub.cuh>
 #include <cuda/atomic>
 #include <cuda/numeric>
-#include <cuda/std/span>
 #include <cuda/stream>
 #include <thrust/execution_policy.h>
 #include <thrust/tabulate.h>
@@ -150,11 +149,11 @@ __device__ void set_null_mask_impl(bitmask_type* __restrict__ destination,
 }
 
 template <mask_set_mode MODE>
-CUDF_KERNEL void set_null_masks_kernel(cuda::std::span<bitmask_type*> destinations,
-                                       cuda::std::span<size_type const> begin_bits,
-                                       cuda::std::span<size_type const> end_bits,
-                                       cuda::std::span<bool const> valids,
-                                       cuda::std::span<size_type const> numbers_of_mask_words)
+CUDF_KERNEL void set_null_masks_kernel(cudf::device_span<bitmask_type*> destinations,
+                                       cudf::device_span<size_type const> begin_bits,
+                                       cudf::device_span<size_type const> end_bits,
+                                       cudf::device_span<bool const> valids,
+                                       cudf::device_span<size_type const> numbers_of_mask_words)
 {
   namespace cg           = cooperative_groups;
   auto const bitmask_idx = cg::this_grid().block_rank();
@@ -407,7 +406,7 @@ namespace {
  * @param global_count Output array of set bit counts for each bitmask
  */
 template <size_type block_size>
-CUDF_KERNEL void count_set_bits_kernel(cuda::std::span<bitmask_type const* const> bitmasks,
+CUDF_KERNEL void count_set_bits_kernel(device_span<bitmask_type const* const> bitmasks,
                                        size_type first_bit_index,
                                        size_type last_bit_index,
                                        size_type* global_count)
@@ -502,7 +501,7 @@ std::vector<size_type> batch_count_set_bits(host_span<bitmask_type const* const>
   // Use pinned memory to copy the result back to the host, then copy again to the output vector.
   auto h_non_zero_count = cudf::detail::make_pinned_vector<size_type>(num_bitmasks, stream);
   cudf::detail::cuda_memcpy(host_span<size_type>{h_non_zero_count.data(), num_bitmasks},
-                            cuda::std::span<size_type const>{d_non_zero_count.data(), num_bitmasks},
+                            device_span<size_type const>{d_non_zero_count.data(), num_bitmasks},
                             stream);
   std::copy(h_non_zero_count.begin(), h_non_zero_count.end(), output.begin());
 
@@ -590,7 +589,7 @@ std::vector<size_type> segmented_null_count(bitmask_type const* bitmask,
 }
 
 // Inplace Bitwise AND of the masks
-cudf::size_type inplace_bitmask_and(cuda::std::span<bitmask_type> dest_mask,
+cudf::size_type inplace_bitmask_and(device_span<bitmask_type> dest_mask,
                                     host_span<bitmask_type const* const> masks,
                                     host_span<size_type const> begin_bits,
                                     size_type mask_size,

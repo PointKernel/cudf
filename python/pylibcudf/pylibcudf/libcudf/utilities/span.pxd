@@ -12,9 +12,7 @@ cdef extern from "cudf/utilities/span.hpp" namespace "cudf" nogil:
         host_span(vector[T]) except +libcudf_exception_handler
         host_span(T* data, size_type size) noexcept
 
-
-cdef extern from "cuda/std/span" namespace "cuda::std" nogil:
-    cdef cppclass device_span "cuda::std::span"[T]:
+    cdef cppclass device_span[T]:
         device_span() noexcept
         device_span(T *data, size_t size) noexcept
         T *data() noexcept const

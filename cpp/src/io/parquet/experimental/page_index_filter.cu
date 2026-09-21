@@ -32,7 +32,6 @@
 
 #include <cuda/functional>
 #include <cuda/iterator>
-#include <cuda/std/span>
 #include <cuda/stream>
 #include <thrust/gather.h>
 
@@ -76,7 +75,7 @@ struct page_stats_caster : public stats_caster_base {
   [[nodiscard]] std::pair<rmm::device_buffer, rmm::device_buffer> build_data_and_nullmask(
     mutable_column_view input_column,
     bitmask_type const* page_nullmask,
-    cuda::std::span<size_type const> page_indices,
+    cudf::device_span<size_type const> page_indices,
     cudf::host_span<size_type const> page_row_offsets,
     cudf::data_type dtype,
     cuda::stream_ref stream,
@@ -132,7 +131,7 @@ struct page_stats_caster : public stats_caster_base {
    */
   [[nodiscard]] std::unique_ptr<column> build_is_null_device_column(
     host_column<bool> const& is_null,
-    cuda::std::span<size_type const> page_indices,
+    cudf::device_span<size_type const> page_indices,
     cudf::host_span<size_type const> page_row_offsets,
     cuda::stream_ref stream,
     rmm::device_async_resource_ref mr) const
@@ -179,7 +178,7 @@ struct page_stats_caster : public stats_caster_base {
                                    cudf::host_span<char const> host_chars,
                                    bitmask_type const* host_page_nullmask,
                                    size_type host_null_count,
-                                   cuda::std::span<size_type const> page_indices,
+                                   cudf::device_span<size_type const> page_indices,
                                    cudf::host_span<size_type const> page_row_offsets,
                                    cuda::stream_ref stream,
                                    rmm::device_async_resource_ref mr) const
@@ -584,7 +583,7 @@ struct page_stats_to_row_mask_converter : public page_stats_caster {
       auto const page_mask_nullmask =
         page_mask->null_count()
           ? cudf::detail::make_host_vector(
-              cuda::std::span<bitmask_type const>{
+              cudf::device_span<bitmask_type const>{
                 page_mask->view().null_mask(),
                 static_cast<std::size_t>(num_bitmask_words(page_mask->size()))},
               stream)

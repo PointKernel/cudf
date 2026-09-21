@@ -9,8 +9,6 @@
 #include <cudf/io/types.hpp>
 #include <cudf/utilities/span.hpp>
 
-#include <cuda/std/span>
-
 namespace CUDF_EXPORT cudf {
 namespace io::detail {
 
@@ -47,8 +45,8 @@ namespace io::detail {
  * @return writer_compression_statistics
  */
 [[nodiscard]] writer_compression_statistics collect_compression_statistics(
-  cuda::std::span<cuda::std::span<uint8_t const> const> inputs,
-  cuda::std::span<codec_exec_result const> results,
+  device_span<device_span<uint8_t const> const> inputs,
+  device_span<codec_exec_result const> results,
   cuda::stream_ref stream);
 
 }  // namespace io::detail

@@ -38,7 +38,6 @@
 #include <cuda/std/algorithm>
 #include <cuda/std/execution>
 #include <cuda/std/iterator>
-#include <cuda/std/span>
 #include <cuda/std/tuple>
 #include <cuda/stream>
 #include <thrust/binary_search.h>
@@ -87,10 +86,10 @@ struct index_mapping {
  * in the output validity mask for nested list columns.
  */
 struct list_nonnull_filter {
-  bitmask_type* validity_mask;                       ///< Output validity mask to update
-  bitmask_type const* reduced_validity_mask;         ///< Input reduced validity mask
-  cuda::std::span<size_type const> child_positions;  ///< Positions in the child column
-  size_type subset_offset;                           ///< Offset into child_positions
+  bitmask_type* validity_mask;                   ///< Output validity mask to update
+  bitmask_type const* reduced_validity_mask;     ///< Input reduced validity mask
+  device_span<size_type const> child_positions;  ///< Positions in the child column
+  size_type subset_offset;                       ///< Offset into child_positions
 
   __device__ void operator()(size_type idx) const noexcept
   {
@@ -333,8 +332,8 @@ class merge {
   table_view smaller;
   table_view larger;
   SmallerIterator sorted_smaller_order_begin;
-  cuda::std::span<size_type const> unique_smaller_rows;
-  cuda::std::span<size_type const> smaller_run_offsets;
+  device_span<size_type const> unique_smaller_rows;
+  device_span<size_type const> smaller_run_offsets;
   std::unique_ptr<detail::row::lexicographic::two_table_comparator> tt_comparator;
 
  public:
@@ -345,8 +344,8 @@ class merge {
 
   merge(table_view const& smaller,
         SmallerIterator sorted_smaller_order_begin,
-        cuda::std::span<size_type const> unique_smaller_rows,
-        cuda::std::span<size_type const> smaller_run_offsets,
+        device_span<size_type const> unique_smaller_rows,
+        device_span<size_type const> smaller_run_offsets,
         table_view const& larger,
         cuda::stream_ref stream)
     : smaller{smaller},
@@ -604,7 +603,7 @@ void sort_merge_join::preprocessed_table::populate_nonnull_filter(cuda::stream_r
                             reinterpret_cast<bitmask_type const*>(mask)};
           std::vector<size_type> begin_bits{0, 0};
           cudf::detail::inplace_bitmask_and(
-            cuda::std::span<bitmask_type>(mask, num_bitmask_words(num_rows)),
+            device_span<bitmask_type>(mask, num_bitmask_words(num_rows)),
             masks,
             begin_bits,
             num_rows,
@@ -738,8 +737,8 @@ rmm::device_uvector<size_type> sort_merge_join::preprocessed_table::map_table_to
 }
 
 void sort_merge_join::postprocess_indices(preprocessed_table const& preprocessed_left,
-                                          cuda::std::span<size_type> smaller_indices,
-                                          cuda::std::span<size_type> larger_indices,
+                                          device_span<size_type> smaller_indices,
+                                          device_span<size_type> larger_indices,
                                           cuda::stream_ref stream) const
 {
   if (compare_nulls == null_equality::UNEQUAL) {
@@ -752,7 +751,7 @@ void sort_merge_join::postprocess_indices(preprocessed_table const& preprocessed
         cub::DeviceTransform::Transform(larger_indices.begin(),
                                         larger_indices.begin(),
                                         larger_indices.size(),
-                                        index_mapping<cuda::std::span<size_type>>{left_mapping},
+                                        index_mapping<device_span<size_type>>{left_mapping},
                                         env));
     }
     if (has_nested_nulls(preprocessed_right._table_view)) {
@@ -762,7 +761,7 @@ void sort_merge_join::postprocess_indices(preprocessed_table const& preprocessed
         cub::DeviceTransform::Transform(smaller_indices.begin(),
                                         smaller_indices.begin(),
                                         smaller_indices.size(),
-                                        index_mapping<cuda::std::span<size_type>>{right_mapping},
+                                        index_mapping<device_span<size_type>>{right_mapping},
                                         env));
     }
   }
@@ -774,9 +773,9 @@ auto sort_merge_join::invoke_merge(table_view right_view,
                                    MergeOperation&& op,
                                    cuda::stream_ref stream) const
 {
-  auto const unique_right_rows = cuda::std::span<size_type const>{
-    right_run_rows->data(), static_cast<std::size_t>(num_right_runs)};
-  auto const right_offsets = cuda::std::span<size_type const>{
+  auto const unique_right_rows =
+    device_span<size_type const>{right_run_rows->data(), static_cast<std::size_t>(num_right_runs)};
+  auto const right_offsets = device_span<size_type const>{
     right_run_offsets->data(), static_cast<std::size_t>(num_right_runs) + 1};
   auto has_right_sorting_order = preprocessed_right._null_processed_table_sorted_order.has_value();
   if (has_right_sorting_order) {

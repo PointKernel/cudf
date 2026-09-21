@@ -16,7 +16,6 @@
 
 #include <cuda/functional>
 #include <cuda/iterator>
-#include <cuda/std/span>
 #include <cuda/stream>
 
 #include <stdexcept>
@@ -52,7 +51,7 @@ std::unique_ptr<table> gather(table_view const& source_table,
 }
 
 std::unique_ptr<table> gather(table_view const& source_table,
-                              cuda::std::span<size_type const> const gather_map,
+                              device_span<size_type const> const gather_map,
                               out_of_bounds_policy bounds_policy,
                               negative_index_policy neg_indices,
                               cuda::stream_ref stream,

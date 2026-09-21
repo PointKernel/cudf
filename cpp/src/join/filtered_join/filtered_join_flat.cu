@@ -18,7 +18,6 @@
 #include <cuco/operator.hpp>
 #include <cuco/static_set_ref.cuh>
 #include <cuco/utility/cuda_thread_scope.cuh>
-#include <cuda/std/span>
 #include <cuda/stream>
 
 #include <memory>
@@ -48,7 +47,7 @@ void filtered_join::insert_right_table_flat(cuda::stream_ref stream)
 void filtered_join::query_right_table_flat(
   cudf::table_view const& left,
   std::shared_ptr<cudf::detail::row::equality::preprocessed_table> const& preprocessed_left,
-  cuda::std::span<bool> contains_map,
+  cudf::device_span<bool> contains_map,
   cuda::stream_ref stream)
 {
   auto const comparator =

@@ -24,7 +24,6 @@
 #include <cuda/functional>
 #include <cuda/iterator>
 #include <cuda/std/cmath>
-#include <cuda/std/span>
 #include <cuda/std/utility>
 #include <cuda/stream>
 #include <thrust/binary_search.h>
@@ -59,7 +58,7 @@ struct make_centroid {
 
 // kernel for computing percentiles on input tdigest (mean, weight) centroid data.
 template <typename CentroidIter>
-CUDF_KERNEL void compute_percentiles_kernel(cuda::std::span<int32_t const> tdigest_offsets,
+CUDF_KERNEL void compute_percentiles_kernel(device_span<int32_t const> tdigest_offsets,
                                             column_device_view percentiles,
                                             CentroidIter centroids_,
                                             double const* min_,

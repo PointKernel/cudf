@@ -22,8 +22,6 @@
 
 #include <rmm/mr/statistics_resource_adaptor.hpp>
 
-#include <cuda/std/span>
-
 #include <algorithm>
 #include <set>
 #include <vector>
@@ -38,7 +36,7 @@ struct KeyRemappingTest : public cudf::test::BaseFixture {
   std::vector<T> to_host(cudf::column_view const& col)
   {
     return cudf::detail::make_std_vector<T>(
-      cuda::std::span<T const>{col.data<T>(), static_cast<std::size_t>(col.size())},
+      cudf::device_span<T const>{col.data<T>(), static_cast<std::size_t>(col.size())},
       cudf::get_default_stream());
   }
 

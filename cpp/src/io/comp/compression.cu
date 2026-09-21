@@ -11,15 +11,14 @@
 
 #include <cuda/functional>
 #include <cuda/iterator>
-#include <cuda/std/span>
 #include <cuda/std/tuple>
 #include <thrust/transform_reduce.h>
 
 namespace cudf::io::detail {
 
 writer_compression_statistics collect_compression_statistics(
-  cuda::std::span<cuda::std::span<uint8_t const> const> inputs,
-  cuda::std::span<codec_exec_result const> results,
+  device_span<device_span<uint8_t const> const> inputs,
+  device_span<codec_exec_result const> results,
   cuda::stream_ref stream)
 {
   // bytes_written on success

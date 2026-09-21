@@ -19,7 +19,6 @@
 #include <rmm/device_uvector.hpp>
 
 #include <cuda/std/mdspan>
-#include <cuda/std/span>
 #include <cuda/stream>
 
 #include <utility>
@@ -90,10 +89,10 @@ class hostdevice_vector {
   operator cudf::host_span<T>() { return host_span<T>(host_ptr(), size(), true); }
   operator cudf::host_span<T const>() const { return host_span<T const>(host_ptr(), size(), true); }
 
-  operator cuda::std::span<T>() { return cuda::std::span<T>(device_ptr(), size()); }
-  operator cuda::std::span<T const>() const
+  operator cudf::device_span<T>() { return cudf::device_span<T>(device_ptr(), size()); }
+  operator cudf::device_span<T const>() const
   {
-    return cuda::std::span<T const>(device_ptr(), size());
+    return cudf::device_span<T const>(device_ptr(), size());
   }
 
   void host_to_device_async(cuda::stream_ref stream)
@@ -175,8 +174,8 @@ class hostdevice_2dvector {
 
   [[nodiscard]] host_span<T> flat_host_view() { return _data; }
   [[nodiscard]] host_span<T const> flat_host_view() const { return _data; }
-  [[nodiscard]] cuda::std::span<T> flat_device_view() { return _data; }
-  [[nodiscard]] cuda::std::span<T const> flat_device_view() const { return _data; }
+  [[nodiscard]] device_span<T> flat_device_view() { return _data; }
+  [[nodiscard]] device_span<T const> flat_device_view() const { return _data; }
 
   host_span<T> operator[](size_t row)
   {
@@ -188,16 +187,6 @@ class hostdevice_2dvector {
   {
     return host_span<T const>(_data.host_ptr(), _data.size(), true)
       .subspan(row * _size.second, _size.second);
-  }
-
-  [[nodiscard]] T& operator()(size_t row, size_t column) { return host_view()(row, column); }
-  [[nodiscard]] T const& operator()(size_t row, size_t column) const
-  {
-    return host_view()(row, column);
-  }
-  [[nodiscard]] size_t extent(size_t dimension) const noexcept
-  {
-    return host_view().extent(dimension);
   }
 
   [[nodiscard]] auto size() const noexcept { return _size; }

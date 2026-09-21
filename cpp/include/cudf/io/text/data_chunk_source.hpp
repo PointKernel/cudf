@@ -11,8 +11,6 @@
 #include <rmm/cuda_stream_pool.hpp>
 #include <rmm/device_buffer.hpp>
 
-#include <cuda/std/span>
-
 /**
  * @file
  * @brief Interfaces for providing stream-ordered chunks of device data to text-based readers.
@@ -56,7 +54,7 @@ class device_data_chunk {
    *
    * @return A span over the underlying device data
    */
-  virtual operator cuda::std::span<char const>() const = 0;
+  virtual operator device_span<char const>() const = 0;
 };
 
 /**

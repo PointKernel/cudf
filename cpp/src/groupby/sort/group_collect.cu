@@ -13,7 +13,6 @@
 #include <cudf/utilities/span.hpp>
 
 #include <cuda/iterator>
-#include <cuda/std/span>
 #include <cuda/stream>
 #include <thrust/copy.h>
 #include <thrust/count.h>
@@ -77,7 +76,7 @@ std::pair<std::unique_ptr<column>, std::unique_ptr<column>> purge_null_entries(
 }
 
 std::unique_ptr<column> group_collect(column_view const& values,
-                                      cuda::std::span<size_type const> group_offsets,
+                                      cudf::device_span<size_type const> group_offsets,
                                       size_type num_groups,
                                       null_policy null_handling,
                                       cuda::stream_ref stream,

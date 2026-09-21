@@ -40,7 +40,6 @@
 #include <rmm/device_uvector.hpp>
 #include <rmm/exec_policy.hpp>
 
-#include <cuda/std/span>
 #include <cuda/stream>
 #include <thrust/execution_policy.h>
 #include <thrust/fill.h>
@@ -70,7 +69,7 @@ namespace {
 /**
  * @brief Writes a device memory buffer to the sink, from the device if the sink prefers it.
  */
-void write_to_sink(data_sink* out_sink, cuda::std::span<char const> data, cuda::stream_ref stream)
+void write_to_sink(data_sink* out_sink, device_span<char const> data, cuda::stream_ref stream)
 {
   if (out_sink->is_device_write_preferred(data.size())) {
     out_sink->device_write(data.data(), data.size(), stream);
@@ -102,8 +101,8 @@ size_t compression_block_size(compression_type compression, size_t requested_siz
  * concatenation of their payloads.
  */
 void write_compressed_to_sink(data_sink* out_sink,
-                              cuda::std::span<char const> data,
-                              cuda::std::span<char const> tail,
+                              device_span<char const> data,
+                              device_span<char const> tail,
                               compression_type compression,
                               size_t requested_block_size,
                               cuda::stream_ref stream)
@@ -115,20 +114,19 @@ void write_compressed_to_sink(data_sink* out_sink,
   auto const num_blocks      = num_data_blocks + (tail.empty() ? 0 : 1);
 
   auto h_inputs =
-    cudf::detail::make_pinned_vector_async<cuda::std::span<uint8_t const>>(num_blocks, stream);
-  auto h_outputs =
-    cudf::detail::make_pinned_vector_async<cuda::std::span<uint8_t>>(num_blocks, stream);
+    cudf::detail::make_pinned_vector_async<device_span<uint8_t const>>(num_blocks, stream);
+  auto h_outputs = cudf::detail::make_pinned_vector_async<device_span<uint8_t>>(num_blocks, stream);
 
-  auto const as_bytes = [](cuda::std::span<char const> span) {
+  auto const as_bytes = [](device_span<char const> span) {
     return reinterpret_cast<uint8_t const*>(span.data());
   };
   for (size_t block = 0; block < num_data_blocks; ++block) {
     auto const offset = block * block_size;
-    h_inputs[block]   = cuda::std::span<uint8_t const>{as_bytes(data) + offset,
-                                                       std::min(block_size, data.size() - offset)};
+    h_inputs[block]   = device_span<uint8_t const>{as_bytes(data) + offset,
+                                                   std::min(block_size, data.size() - offset)};
   }
   if (not tail.empty()) {
-    h_inputs[num_blocks - 1] = cuda::std::span<uint8_t const>{as_bytes(tail), tail.size()};
+    h_inputs[num_blocks - 1] = device_span<uint8_t const>{as_bytes(tail), tail.size()};
   }
 
   // the output buffer is laid out using the maximum compressed size of each block, since the
@@ -144,8 +142,8 @@ void write_compressed_to_sink(data_sink* out_sink,
   rmm::device_uvector<uint8_t> comp_buffer(out_offsets.back(), stream);
 
   for (size_t block = 0; block < num_blocks; ++block) {
-    h_outputs[block] = cuda::std::span<uint8_t>{comp_buffer.data() + out_offsets[block],
-                                                out_offsets[block + 1] - out_offsets[block]};
+    h_outputs[block] = device_span<uint8_t>{comp_buffer.data() + out_offsets[block],
+                                            out_offsets[block + 1] - out_offsets[block]};
   }
   auto const temp_mr   = cudf::get_current_device_resource_ref();
   auto const d_inputs  = cudf::detail::make_device_uvector_async(h_inputs, stream, temp_mr);
@@ -530,14 +528,14 @@ void write_chunked(data_sink* out_sink,
   auto const compression = options.get_compression();
   auto const block_size  = options.get_compression_block_size();
 
-  auto const data = cuda::std::span<char const>{ptr_all_bytes, total_num_bytes};
+  auto const data = device_span<char const>{ptr_all_bytes, total_num_bytes};
   if (compression != compression_type::NONE) {
     // The trailing newline that separates this chunk from the next one is compressed as an extra
     // block of the same batched call, so it costs neither a copy of the chunk nor a second write.
     return write_compressed_to_sink(
       out_sink,
       data,
-      cuda::std::span{newline.data(), static_cast<size_t>(newline.size())},
+      device_span{newline.data(), static_cast<size_t>(newline.size())},
       compression,
       block_size,
       stream);

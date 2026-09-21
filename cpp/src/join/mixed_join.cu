@@ -20,7 +20,6 @@
 #include <rmm/device_uvector.hpp>
 #include <rmm/exec_policy.hpp>
 
-#include <cuda/std/span>
 #include <cuda/stream>
 #include <thrust/uninitialized_fill.h>
 
@@ -194,7 +193,7 @@ mixed_inner_join(
   table_view const& right_conditional,
   ast::expression const& binary_predicate,
   null_equality compare_nulls,
-  std::optional<std::pair<std::size_t, cuda::std::span<size_type const>>> const output_size_data,
+  std::optional<std::pair<std::size_t, device_span<size_type const>>> const output_size_data,
   cuda::stream_ref stream,
   rmm::device_async_resource_ref mr)
 {

@@ -30,6 +30,7 @@
 #include <string>
 #include <utility>
 
+using cudf::device_span;
 using cudf::host_span;
 using cudf::detail::hostdevice_2dvector;
 
@@ -228,14 +229,14 @@ TEST(SpanTest, CanUseStdSpan)
   EXPECT_EQ(std_span.size(), message_span.size());
 }
 
-CUDF_KERNEL void simple_device_kernel(cuda::std::span<bool> result) { result[0] = true; }
+CUDF_KERNEL void simple_device_kernel(device_span<bool> result) { result[0] = true; }
 
 TEST(SpanTest, CanUseDeviceSpan)
 {
   auto d_message = cudf::detail::make_zeroed_device_uvector_async<bool>(
     1, cudf::get_default_stream(), cudf::get_current_device_resource_ref());
 
-  auto d_span = cuda::std::span<bool>(d_message.data(), d_message.size());
+  auto d_span = device_span<bool>(d_message.data(), d_message.size());
 
   simple_device_kernel<<<1, 1, 0, cudf::get_default_stream().get()>>>(d_span);
 
@@ -247,7 +248,7 @@ TEST(SpanTest, CanUseCudaStdSpan)
   auto d_message = cudf::detail::make_zeroed_device_uvector_async<int>(
     1, cudf::get_default_stream(), cudf::get_current_device_resource_ref());
 
-  auto const d_span = cuda::std::span<int const>(d_message.data(), d_message.size());
+  auto const d_span = device_span<int const>(d_message.data(), d_message.size());
 
   cuda::std::span std_span = d_span;
   EXPECT_EQ(std_span.data(), d_span.data());
@@ -281,11 +282,11 @@ CUDF_KERNEL void readwrite_kernel(cuda::std::mdspan<int, cuda::std::dextents<siz
 TEST(MdSpanTest, DeviceReadWrite)
 {
   auto vector  = hostdevice_2dvector<int>(11, 23, cudf::get_default_stream());
-  vector(5, 6) = 5;
+  vector[5][6] = 5;
   vector.host_to_device_async(cudf::get_default_stream());
   readwrite_kernel<<<1, 1, 0, cudf::get_default_stream().get()>>>(vector.device_view());
   vector.device_to_host(cudf::get_default_stream());
-  EXPECT_EQ(vector(5, 6), 30);
+  EXPECT_EQ(vector[5][6], 30);
 }
 
 TEST(MdSpanTest, HostReadWrite)
@@ -295,7 +296,7 @@ TEST(MdSpanTest, HostReadWrite)
   span(5, 6)  = 5;
   span(5, 6) *= 6;
 
-  EXPECT_EQ(vector(5, 6), 30);
+  EXPECT_EQ(vector[5][6], 30);
   EXPECT_EQ(&span(5, 6), vector.base_host_ptr(5 * 23 + 6));
 }
 
@@ -424,7 +425,7 @@ TEST(HostDeviceSpanTest, CanSendToDevice)
   EXPECT_EQ(got_message, hello_world_message);
 }
 
-CUDF_KERNEL void simple_device_char_kernel(cuda::std::span<char> result)
+CUDF_KERNEL void simple_device_char_kernel(device_span<char> result)
 {
   char const* str = "world hello";
   for (int offset = 0; offset < result.size(); ++offset) {

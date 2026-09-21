@@ -14,8 +14,6 @@
 #include <cudf/io/parquet_schema.hpp>
 #include <cudf/types.hpp>
 
-#include <cuda/std/span>
-
 #include <algorithm>
 #include <exception>
 #include <functional>
@@ -367,7 +365,7 @@ class aggregate_reader_metadata {
    * per-chunk list of bitset device spans (empty spans for chunks without a bloom filter)
    */
   [[nodiscard]] std::pair<std::vector<rmm::device_buffer>,
-                          std::vector<cuda::std::span<cuda::std::byte const>>>
+                          std::vector<cudf::device_span<cuda::std::byte const>>>
   read_bloom_filters(host_span<std::unique_ptr<datasource> const> sources,
                      host_span<std::vector<size_type> const> row_group_indices,
                      host_span<int const> column_schemas,
@@ -480,7 +478,7 @@ class aggregate_reader_metadata {
    * @return Surviving row group indices if any of them are filtered.
    */
   [[nodiscard]] std::optional<std::vector<std::vector<size_type>>> apply_bloom_filters(
-    cudf::host_span<cuda::std::span<cuda::std::byte const> const> bloom_filter_data,
+    cudf::host_span<cudf::device_span<cuda::std::byte const> const> bloom_filter_data,
     host_span<std::vector<size_type> const> input_row_group_indices,
     host_span<std::vector<ast::literal*> const> literals,
     size_type total_row_groups,

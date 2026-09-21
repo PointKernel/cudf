@@ -12,7 +12,6 @@
 #include <cudf/io/orc_types.hpp>
 
 #include <cuda/std/mdspan>
-#include <cuda/std/span>
 #include <cuda/stream>
 
 namespace cudf::io::orc::detail {
@@ -22,9 +21,9 @@ namespace cudf::io::orc::detail {
  */
 CUDF_KERNEL void rowgroup_char_counts_kernel(
   cuda::std::mdspan<size_type, cuda::std::dextents<size_t, 2>> char_counts,
-  cuda::std::span<orc_column_device_view const> orc_columns,
+  device_span<orc_column_device_view const> orc_columns,
   cuda::std::mdspan<rowgroup_rows const, cuda::std::dextents<size_t, 2>> rowgroup_bounds,
-  cuda::std::span<uint32_t const> str_col_indexes)
+  device_span<uint32_t const> str_col_indexes)
 {
   // Index of the column in the `str_col_indexes` array
   auto const str_col_idx = blockIdx.x % str_col_indexes.size();
@@ -48,9 +47,9 @@ CUDF_KERNEL void rowgroup_char_counts_kernel(
 
 void rowgroup_char_counts(
   cuda::std::mdspan<size_type, cuda::std::dextents<size_t, 2>> counts,
-  cuda::std::span<orc_column_device_view const> orc_columns,
+  device_span<orc_column_device_view const> orc_columns,
   cuda::std::mdspan<rowgroup_rows const, cuda::std::dextents<size_t, 2>> rowgroup_bounds,
-  cuda::std::span<uint32_t const> str_col_indexes,
+  device_span<uint32_t const> str_col_indexes,
   cuda::stream_ref stream)
 {
   if (rowgroup_bounds.size() == 0) { return; }
@@ -95,7 +94,7 @@ using probing_scheme_type = cuco::linear_probing<map_cg_size, hash_functor>;
 template <int block_size>
 CUDF_KERNEL void __launch_bounds__(block_size) populate_dictionary_hash_maps_kernel(
   cuda::std::mdspan<stripe_dictionary, cuda::std::dextents<size_t, 2>> dictionaries,
-  cuda::std::span<orc_column_device_view const> columns)
+  device_span<orc_column_device_view const> columns)
 {
   auto const col_idx    = blockIdx.x / dictionaries.extent(1);
   auto const stripe_idx = blockIdx.x % dictionaries.extent(1);
@@ -188,7 +187,7 @@ CUDF_KERNEL void __launch_bounds__(block_size) collect_map_entries_kernel(
 template <int block_size>
 CUDF_KERNEL void __launch_bounds__(block_size) get_dictionary_indices_kernel(
   cuda::std::mdspan<stripe_dictionary, cuda::std::dextents<size_t, 2>> dictionaries,
-  cuda::std::span<orc_column_device_view const> columns)
+  device_span<orc_column_device_view const> columns)
 {
   auto const col_idx    = blockIdx.x / dictionaries.extent(1);
   auto const stripe_idx = blockIdx.x % dictionaries.extent(1);
@@ -230,7 +229,7 @@ CUDF_KERNEL void __launch_bounds__(block_size) get_dictionary_indices_kernel(
 
 void populate_dictionary_hash_maps(
   cuda::std::mdspan<stripe_dictionary, cuda::std::dextents<size_t, 2>> dictionaries,
-  cuda::std::span<orc_column_device_view const> columns,
+  device_span<orc_column_device_view const> columns,
   cuda::stream_ref stream)
 {
   if (dictionaries.size() == 0) { return; }
@@ -253,7 +252,7 @@ void collect_map_entries(
 
 void get_dictionary_indices(
   cuda::std::mdspan<stripe_dictionary, cuda::std::dextents<size_t, 2>> dictionaries,
-  cuda::std::span<orc_column_device_view const> columns,
+  device_span<orc_column_device_view const> columns,
   cuda::stream_ref stream)
 {
   if (dictionaries.size() == 0) { return; }

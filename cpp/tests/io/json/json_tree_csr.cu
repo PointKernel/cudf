@@ -17,7 +17,6 @@
 #include <rmm/cuda_stream.hpp>
 #include <rmm/exec_policy.hpp>
 
-#include <cuda/std/span>
 #include <cuda/stream>
 #include <thrust/sequence.h>
 #include <thrust/sort.h>
@@ -56,7 +55,7 @@ void print(cudf::host_span<T const> vec, std::string name)
 }
 
 bool check_equality(cuio_json::tree_meta_t& d_a,
-                    cuda::std::span<cudf::size_type const> d_a_max_row_offsets,
+                    cudf::device_span<cudf::size_type const> d_a_max_row_offsets,
                     cuio_json::experimental::compressed_sparse_row& d_b_csr,
                     cuio_json::experimental::column_tree_properties& d_b_ctp,
                     cuda::stream_ref stream)
@@ -122,8 +121,8 @@ void run_test(std::string const& input, bool enable_lines = true)
 {
   auto const stream = cudf::get_default_stream();
   cudf::string_scalar d_scalar(input, true, stream);
-  auto d_input = cuda::std::span<cuio_json::SymbolT const>{d_scalar.data(),
-                                                           static_cast<size_t>(d_scalar.size())};
+  auto d_input = cudf::device_span<cuio_json::SymbolT const>{d_scalar.data(),
+                                                             static_cast<size_t>(d_scalar.size())};
 
   cudf::io::json_reader_options options{};
   options.enable_lines(enable_lines);

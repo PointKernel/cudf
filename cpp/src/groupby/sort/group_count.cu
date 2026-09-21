@@ -15,7 +15,6 @@
 
 #include <cuda/functional>
 #include <cuda/iterator>
-#include <cuda/std/span>
 #include <cuda/stream>
 #include <thrust/adjacent_difference.h>
 
@@ -23,7 +22,7 @@ namespace cudf {
 namespace groupby {
 namespace detail {
 std::unique_ptr<column> group_count_valid(column_view const& values,
-                                          cuda::std::span<size_type const> group_labels,
+                                          cudf::device_span<size_type const> group_labels,
                                           size_type num_groups,
                                           cuda::stream_ref stream,
                                           rmm::device_async_resource_ref mr)
@@ -67,7 +66,7 @@ std::unique_ptr<column> group_count_valid(column_view const& values,
   return result;
 }
 
-std::unique_ptr<column> group_count_all(cuda::std::span<size_type const> group_offsets,
+std::unique_ptr<column> group_count_all(cudf::device_span<size_type const> group_offsets,
                                         size_type num_groups,
                                         cuda::stream_ref stream,
                                         rmm::device_async_resource_ref mr)

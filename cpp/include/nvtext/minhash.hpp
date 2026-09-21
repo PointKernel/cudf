@@ -13,8 +13,6 @@
 #include <cudf/utilities/memory_resource.hpp>
 #include <cudf/utilities/span.hpp>
 
-#include <cuda/std/span>
-
 namespace CUDF_EXPORT nvtext {
 /**
  * @addtogroup nvtext_minhash
@@ -64,8 +62,8 @@ namespace CUDF_EXPORT nvtext {
 std::unique_ptr<cudf::column> minhash(
   cudf::strings_column_view const& input,
   uint32_t seed,
-  cuda::std::span<uint32_t const> parameter_a,
-  cuda::std::span<uint32_t const> parameter_b,
+  cudf::device_span<uint32_t const> parameter_a,
+  cudf::device_span<uint32_t const> parameter_b,
   cudf::size_type width,
   cuda::stream_ref stream           = cudf::get_default_stream(),
   rmm::device_async_resource_ref mr = cudf::get_current_device_resource_ref());
@@ -111,8 +109,8 @@ std::unique_ptr<cudf::column> minhash(
 std::unique_ptr<cudf::column> minhash64(
   cudf::strings_column_view const& input,
   uint64_t seed,
-  cuda::std::span<uint64_t const> parameter_a,
-  cuda::std::span<uint64_t const> parameter_b,
+  cudf::device_span<uint64_t const> parameter_a,
+  cudf::device_span<uint64_t const> parameter_b,
   cudf::size_type width,
   cuda::stream_ref stream           = cudf::get_default_stream(),
   rmm::device_async_resource_ref mr = cudf::get_current_device_resource_ref());
@@ -159,8 +157,8 @@ std::unique_ptr<cudf::column> minhash_ngrams(
   cudf::lists_column_view const& input,
   cudf::size_type ngrams,
   uint32_t seed,
-  cuda::std::span<uint32_t const> parameter_a,
-  cuda::std::span<uint32_t const> parameter_b,
+  cudf::device_span<uint32_t const> parameter_a,
+  cudf::device_span<uint32_t const> parameter_b,
   cuda::stream_ref stream           = cudf::get_default_stream(),
   rmm::device_async_resource_ref mr = cudf::get_current_device_resource_ref());
 
@@ -206,8 +204,8 @@ std::unique_ptr<cudf::column> minhash64_ngrams(
   cudf::lists_column_view const& input,
   cudf::size_type ngrams,
   uint64_t seed,
-  cuda::std::span<uint64_t const> parameter_a,
-  cuda::std::span<uint64_t const> parameter_b,
+  cudf::device_span<uint64_t const> parameter_a,
+  cudf::device_span<uint64_t const> parameter_b,
   cuda::stream_ref stream           = cudf::get_default_stream(),
   rmm::device_async_resource_ref mr = cudf::get_current_device_resource_ref());
 

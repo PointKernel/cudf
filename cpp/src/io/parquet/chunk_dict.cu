@@ -22,7 +22,6 @@
 #include <cuda/functional>
 #include <cuda/std/bit>
 #include <cuda/std/mdspan>
-#include <cuda/std/span>
 
 namespace cudf::io::parquet::detail {
 
@@ -268,7 +267,7 @@ struct map_find_fn {
  */
 template <int block_size>
 CUDF_KERNEL void __launch_bounds__(block_size) populate_chunk_hash_maps_kernel(
-  cuda::std::span<slot_type> const map_storage,
+  device_span<slot_type> const map_storage,
   cuda::std::mdspan<PageFragment, cuda::std::dextents<size_t, 2>> frags)
 {
   auto const col_idx  = blockIdx.y;
@@ -306,8 +305,8 @@ CUDF_KERNEL void __launch_bounds__(block_size) populate_chunk_hash_maps_kernel(
  */
 template <int block_size>
 CUDF_KERNEL void __launch_bounds__(block_size) collect_map_entries_kernel(
-  cuda::std::span<slot_type> const map_storage,
-  cuda::std::span<EncColumnChunk> chunks,
+  device_span<slot_type> const map_storage,
+  device_span<EncColumnChunk> chunks,
   cuda::std::mdspan<PageFragment const, cuda::std::dextents<size_t, 2>> frags)
 {
   auto& chunk = chunks[blockIdx.x];
@@ -319,9 +318,9 @@ CUDF_KERNEL void __launch_bounds__(block_size) collect_map_entries_kernel(
   // If a chunk has less fragments than the maximum fragments per chunk, resolve its
   // column-relative fragment range.
   if (num_frags <= MAX_FRAGMENTS_PER_CHUNK) {
-    auto const col_idx = chunk.col_desc_id;
-    auto const col_frags =
-      cuda::std::span{frags.data_handle() + col_idx * frags.extent(1), frags.extent(1)};
+    auto const col_idx   = chunk.col_desc_id;
+    auto const col_frags = device_span<PageFragment const>{
+      frags.data_handle() + col_idx * frags.extent(1), frags.extent(1)};
     auto const frag_start = static_cast<size_type>(chunk.fragments - col_frags.data());
 
     // Initialize fragment_offsets with prefix sum (exclusive) of number of dictionary values
@@ -390,7 +389,7 @@ CUDF_KERNEL void __launch_bounds__(block_size) collect_map_entries_kernel(
  */
 template <int block_size>
 CUDF_KERNEL void __launch_bounds__(block_size) get_dictionary_indices_kernel(
-  cuda::std::span<slot_type> const map_storage,
+  device_span<slot_type> const map_storage,
   cuda::std::mdspan<PageFragment const, cuda::std::dextents<size_t, 2>> frags)
 {
   auto const col_idx  = blockIdx.y;
@@ -427,7 +426,7 @@ CUDF_KERNEL void __launch_bounds__(block_size) get_dictionary_indices_kernel(
  * @param pages Pages span
  */
 CUDF_KERNEL void __launch_bounds__(DEFAULT_BLOCK_SIZE)
-  compute_page_dict_bits_kernel(cuda::std::span<EncPage> pages)
+  compute_page_dict_bits_kernel(device_span<EncPage> pages)
 {
   namespace cg = cooperative_groups;
   using cudf::detail::warp_size;
@@ -483,7 +482,7 @@ CUDF_KERNEL void __launch_bounds__(DEFAULT_BLOCK_SIZE)
 
 }  // namespace
 
-void populate_chunk_hash_maps(cuda::std::span<slot_type> const map_storage,
+void populate_chunk_hash_maps(device_span<slot_type> const map_storage,
                               cuda::std::mdspan<PageFragment, cuda::std::dextents<size_t, 2>> frags,
                               cuda::stream_ref stream)
 {
@@ -494,8 +493,8 @@ void populate_chunk_hash_maps(cuda::std::span<slot_type> const map_storage,
 }
 
 void collect_map_entries(
-  cuda::std::span<slot_type> const map_storage,
-  cuda::std::span<EncColumnChunk> chunks,
+  device_span<slot_type> const map_storage,
+  device_span<EncColumnChunk> chunks,
   cuda::std::mdspan<PageFragment const, cuda::std::dextents<size_t, 2>> frags,
   cuda::stream_ref stream)
 {
@@ -509,7 +508,7 @@ void collect_map_entries(
 }
 
 void get_dictionary_indices(
-  cuda::std::span<slot_type> const map_storage,
+  device_span<slot_type> const map_storage,
   cuda::std::mdspan<PageFragment const, cuda::std::dextents<size_t, 2>> frags,
   cuda::stream_ref stream)
 {
@@ -519,7 +518,7 @@ void get_dictionary_indices(
   CUDF_CUDA_TRY(cudaGetLastError());
 }
 
-void compute_per_page_dict_bits(cuda::std::span<EncPage> pages, cuda::stream_ref stream)
+void compute_per_page_dict_bits(device_span<EncPage> pages, cuda::stream_ref stream)
 {
   if (pages.empty()) { return; }
   auto constexpr warps_per_block = DEFAULT_BLOCK_SIZE / cudf::detail::warp_size;

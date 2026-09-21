@@ -10,15 +10,13 @@
 #include <cudf/utilities/memory_resource.hpp>
 #include <cudf/utilities/span.hpp>
 
-#include <cuda/std/span>
-
 namespace cudf {
 namespace reduction {
 namespace detail {
 
 void segmented_update_validity(column& result,
                                column_view const& col,
-                               cuda::std::span<size_type const> offsets,
+                               device_span<size_type const> offsets,
                                null_policy null_handling,
                                std::optional<std::reference_wrapper<scalar const>> init,
                                cuda::stream_ref stream,

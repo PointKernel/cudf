@@ -12,7 +12,6 @@
 #include <cudf/utilities/memory_resource.hpp>
 #include <cudf/utilities/span.hpp>
 
-#include <cuda/std/span>
 #include <cuda/stream>
 
 #include <memory>
@@ -39,12 +38,12 @@ constexpr int max_subchunks_prealloced = 3;
  * @param stream CUDA stream used for device memory operations and kernel launches
  * @returns A subspan of the input device span containing data read
  */
-cuda::std::span<char> ingest_raw_input(cuda::std::span<char> buffer,
-                                       host_span<std::unique_ptr<datasource>> sources,
-                                       size_t range_offset,
-                                       size_t range_size,
-                                       char delimiter,
-                                       cuda::stream_ref stream);
+device_span<char> ingest_raw_input(device_span<char> buffer,
+                                   host_span<std::unique_ptr<datasource>> sources,
+                                   size_t range_offset,
+                                   size_t range_size,
+                                   char delimiter,
+                                   cuda::stream_ref stream);
 
 /**
  * @brief Reads and returns the entire data set in batches.

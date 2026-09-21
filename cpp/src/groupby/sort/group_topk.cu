@@ -9,7 +9,6 @@
 #include <cudf/types.hpp>
 #include <cudf/utilities/memory_resource.hpp>
 
-#include <cuda/std/span>
 #include <cuda/stream>
 
 #include <memory>
@@ -21,7 +20,7 @@ namespace detail {
 std::unique_ptr<column> group_top_k(size_type k,
                                     order topk_order,
                                     column_view const& values,
-                                    cuda::std::span<size_type const> group_offsets,
+                                    cudf::device_span<size_type const> group_offsets,
                                     cuda::stream_ref stream,
                                     rmm::device_async_resource_ref mr)
 {

@@ -12,7 +12,6 @@
 #include <cudf/utilities/export.hpp>
 #include <cudf/utilities/span.hpp>
 
-#include <cuda/std/span>
 #include <cuda/stream>
 
 #include <cstdint>
@@ -34,9 +33,9 @@ enum class gzip_header_included { NO, YES };
  * @param[in] stream CUDA stream to use
  */
 CUDF_EXPORT
-void gpuinflate(cuda::std::span<cuda::std::span<uint8_t const> const> inputs,
-                cuda::std::span<cuda::std::span<uint8_t> const> outputs,
-                cuda::std::span<codec_exec_result> results,
+void gpuinflate(device_span<device_span<uint8_t const> const> inputs,
+                device_span<device_span<uint8_t> const> outputs,
+                device_span<codec_exec_result> results,
                 gzip_header_included parse_hdr,
                 cuda::stream_ref stream);
 
@@ -52,9 +51,9 @@ void gpuinflate(cuda::std::span<cuda::std::span<uint8_t const> const> inputs,
  * @param[in] stream CUDA stream to use
  */
 CUDF_EXPORT
-void gpu_unsnap(cuda::std::span<cuda::std::span<uint8_t const> const> inputs,
-                cuda::std::span<cuda::std::span<uint8_t> const> outputs,
-                cuda::std::span<codec_exec_result> results,
+void gpu_unsnap(device_span<device_span<uint8_t const> const> inputs,
+                device_span<device_span<uint8_t> const> outputs,
+                device_span<codec_exec_result> results,
                 cuda::stream_ref stream);
 
 /**
@@ -79,9 +78,9 @@ size_t get_gpu_debrotli_scratch_size(int max_num_inputs = 0);
  * @param[in] stream CUDA stream to use
  */
 CUDF_EXPORT
-void gpu_debrotli(cuda::std::span<cuda::std::span<uint8_t const> const> inputs,
-                  cuda::std::span<cuda::std::span<uint8_t> const> outputs,
-                  cuda::std::span<codec_exec_result> results,
+void gpu_debrotli(device_span<device_span<uint8_t const> const> inputs,
+                  device_span<device_span<uint8_t> const> outputs,
+                  device_span<codec_exec_result> results,
                   cuda::stream_ref stream);
 
 /**
@@ -95,9 +94,9 @@ void gpu_debrotli(cuda::std::span<cuda::std::span<uint8_t const> const> inputs,
  * @param[out] results List of output status structures
  * @param[in] stream CUDA stream to use
  */
-void gpu_snap(cuda::std::span<cuda::std::span<uint8_t const> const> inputs,
-              cuda::std::span<cuda::std::span<uint8_t> const> outputs,
-              cuda::std::span<codec_exec_result> results,
+void gpu_snap(device_span<device_span<uint8_t const> const> inputs,
+              device_span<device_span<uint8_t> const> outputs,
+              device_span<codec_exec_result> results,
               cuda::stream_ref stream);
 
 }  // namespace cudf::io::detail

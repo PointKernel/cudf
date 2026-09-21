@@ -37,7 +37,6 @@
 #include <cuda/functional>
 #include <cuda/iterator>
 #include <cuda/std/functional>
-#include <cuda/std/span>
 #include <cuda/std/tuple>
 #include <cuda/stream>
 #include <thrust/reduce.h>
@@ -54,8 +53,8 @@ std::pair<std::unique_ptr<rmm::device_uvector<size_type>>,
           std::unique_ptr<rmm::device_uvector<size_type>>>
 filter_join_indices(cudf::table_view const& left,
                     cudf::table_view const& right,
-                    cuda::std::span<size_type const> left_indices,
-                    cuda::std::span<size_type const> right_indices,
+                    cudf::device_span<size_type const> left_indices,
+                    cudf::device_span<size_type const> right_indices,
                     ast::expression const& predicate,
                     join_kind join_kind,
                     std::optional<std::size_t> output_size,
@@ -376,8 +375,8 @@ filter_join_indices(cudf::table_view const& left,
 std::pair<std::size_t, std::unique_ptr<rmm::device_uvector<size_type>>>
 filter_join_indices_output_size(cudf::table_view const& left,
                                 cudf::table_view const& right,
-                                cuda::std::span<size_type const> left_indices,
-                                cuda::std::span<size_type const> right_indices,
+                                cudf::device_span<size_type const> left_indices,
+                                cudf::device_span<size_type const> right_indices,
                                 ast::expression const& predicate,
                                 join_kind join_kind,
                                 cuda::stream_ref stream,
@@ -467,8 +466,8 @@ std::pair<std::unique_ptr<rmm::device_uvector<size_type>>,
           std::unique_ptr<rmm::device_uvector<size_type>>>
 filter_join_indices(cudf::table_view const& left,
                     cudf::table_view const& right,
-                    cuda::std::span<size_type const> left_indices,
-                    cuda::std::span<size_type const> right_indices,
+                    cudf::device_span<size_type const> left_indices,
+                    cudf::device_span<size_type const> right_indices,
                     ast::expression const& predicate,
                     cudf::join_kind join_kind,
                     std::optional<std::size_t> output_size,
@@ -483,8 +482,8 @@ filter_join_indices(cudf::table_view const& left,
 std::pair<std::size_t, std::unique_ptr<rmm::device_uvector<size_type>>>
 filter_join_indices_output_size(cudf::table_view const& left,
                                 cudf::table_view const& right,
-                                cuda::std::span<size_type const> left_indices,
-                                cuda::std::span<size_type const> right_indices,
+                                cudf::device_span<size_type const> left_indices,
+                                cudf::device_span<size_type const> right_indices,
                                 ast::expression const& predicate,
                                 cudf::join_kind join_kind,
                                 cuda::stream_ref stream,

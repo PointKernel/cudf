@@ -13,7 +13,6 @@
 #include <cudf_streaming/detail/approx_distinct_count.hpp>
 #include <cudf_streaming/table_chunk.hpp>
 
-#include <cuda/std/span>
 #include <cuda/stream>
 #include <cuda_runtime_api.h>
 
@@ -170,7 +169,7 @@ rapidsmpf::streaming::Actor cardinality_estimator::estimate(
       auto tmp                  = cudf::detail::make_host_vector<std::uint64_t>(1, stream);
       cudf::detail::cuda_memcpy(
         cudf::host_span<std::uint64_t>(tmp),
-        cuda::std::span{reinterpret_cast<std::uint64_t const*>(data + row_count_offset), 1},
+        cudf::device_span{reinterpret_cast<std::uint64_t const*>(data + row_count_offset), 1},
         stream);
       return std::pair{distinct_count, tmp[0]};
     });

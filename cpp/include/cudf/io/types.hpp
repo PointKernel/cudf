@@ -14,8 +14,6 @@
 #include <cudf/types.hpp>
 #include <cudf/utilities/span.hpp>
 
-#include <cuda/std/span>
-
 #include <map>
 #include <memory>
 #include <optional>
@@ -389,7 +387,7 @@ struct source_info {
    *
    * @param device_buffers Input buffers in device memory
    */
-  explicit source_info(cudf::host_span<cuda::std::span<std::byte const>> device_buffers)
+  explicit source_info(cudf::host_span<cudf::device_span<std::byte const>> device_buffers)
     : _type(io_type::DEVICE_BUFFER),
       _num_sources(device_buffers.size()),
       _device_buffers(device_buffers.begin(), device_buffers.end())
@@ -401,7 +399,7 @@ struct source_info {
    *
    * @param d_buffer Input buffer in device memory
    */
-  explicit source_info(cuda::std::span<std::byte const> d_buffer)
+  explicit source_info(cudf::device_span<std::byte const> d_buffer)
     : _type(io_type::DEVICE_BUFFER), _num_sources(1), _device_buffers({{d_buffer}})
   {
   }
@@ -485,7 +483,7 @@ struct source_info {
   std::vector<filepath_source> _filepath_sources;
   std::vector<std::string> _filepaths;
   std::vector<cudf::host_span<std::byte const>> _host_buffers;
-  std::vector<cuda::std::span<std::byte const>> _device_buffers;
+  std::vector<cudf::device_span<std::byte const>> _device_buffers;
   std::vector<cudf::io::datasource*> _user_sources;
 };
 

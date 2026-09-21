@@ -21,7 +21,6 @@
 
 #include <cuda/functional>
 #include <cuda/iterator>
-#include <cuda/std/span>
 #include <cuda/stream>
 #include <thrust/scan.h>
 
@@ -64,7 +63,7 @@ std::tuple<std::unique_ptr<column>, rmm::device_buffer, size_type>
 generate_regrouped_offsets_and_null_mask(table_device_view const& input,
                                          bool build_null_mask,
                                          concatenate_null_policy null_policy,
-                                         cuda::std::span<size_type const> row_null_counts,
+                                         device_span<size_type const> row_null_counts,
                                          cuda::stream_ref stream,
                                          rmm::device_async_resource_ref mr)
 {

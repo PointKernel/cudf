@@ -28,7 +28,6 @@
 #include <cuco/extent.cuh>
 #include <cuco/static_set.cuh>
 #include <cuda/iterator>
-#include <cuda/std/span>
 #include <cuda/stream>
 
 #include <optional>
@@ -99,7 +98,7 @@ using storage_ref_type = typename storage_type::ref_type;
  */
 template <SupportedDictionaryType T>
 struct insert_hash_functor {
-  cuda::std::span<T const> const decoded_data;
+  cudf::device_span<T const> const decoded_data;
   uint32_t const seed{DEFAULT_HASH_SEED};
   constexpr __device__ __forceinline__ typename hasher_type<T>::result_type operator()(
     key_type key) const noexcept
@@ -130,7 +129,7 @@ struct query_hash_functor {
  */
 template <SupportedDictionaryType T>
 struct insert_equality_functor {
-  cuda::std::span<T const> const decoded_data;
+  cudf::device_span<T const> const decoded_data;
   constexpr __device__ __forceinline__ bool operator()(key_type lhs_key,
                                                        key_type rhs_key) const noexcept
   {
@@ -145,7 +144,7 @@ struct insert_equality_functor {
  */
 template <SupportedDictionaryType T>
 struct query_equality_functor {
-  cuda::std::span<T const> const decoded_data;
+  cudf::device_span<T const> const decoded_data;
   constexpr __device__ __forceinline__ bool operator()(T const& value, key_type key) const noexcept
   {
     return value == decoded_data[key];
@@ -269,8 +268,8 @@ __device__ __forceinline__ void decode_int96timestamp(uint8_t const* int96_ptr,
  * @param physical_type Parquet physical type of the column
  */
 template <SupportedDictionaryType T>
-CUDF_KERNEL void query_dictionaries(cuda::std::span<T> decoded_data,
-                                    cuda::std::span<bool*> results,
+CUDF_KERNEL void query_dictionaries(cudf::device_span<T> decoded_data,
+                                    cudf::device_span<bool*> results,
                                     ast::generic_scalar_device_view const* scalars,
                                     ast::ast_operator const* operators,
                                     slot_type* set_storage,
@@ -583,7 +582,7 @@ __device__ cudf::string_view decode_string_value(uint8_t const* page_data,
  */
 CUDF_KERNEL void __launch_bounds__(DECODE_BLOCK_SIZE)
   build_string_dictionaries(PageInfo const* pages,
-                            cuda::std::span<cudf::string_view> decoded_data,
+                            cudf::device_span<cudf::string_view> decoded_data,
                             slot_type* set_storage,
                             cudf::size_type const* set_offsets,
                             cudf::size_type const* value_offsets,
@@ -679,7 +678,7 @@ template <SupportedFixedWidthType T>
 CUDF_KERNEL void __launch_bounds__(DECODE_BLOCK_SIZE)
   build_fixed_width_dictionaries(PageInfo const* pages,
                                  ColumnChunkDesc const* chunks,
-                                 cuda::std::span<T> decoded_data,
+                                 cudf::device_span<T> decoded_data,
                                  slot_type* set_storage,
                                  cudf::size_type const* set_offsets,
                                  cudf::size_type const* value_offsets,
@@ -756,7 +755,7 @@ CUDF_KERNEL void __launch_bounds__(DECODE_BLOCK_SIZE)
  */
 CUDF_KERNEL void __launch_bounds__(DECODE_BLOCK_SIZE)
   evaluate_few_string_literals(PageInfo const* pages,
-                               cuda::std::span<bool*> results,
+                               cudf::device_span<bool*> results,
                                ast::generic_scalar_device_view const* scalars,
                                ast::ast_operator const* operators,
                                cudf::size_type total_num_scalars,
@@ -872,7 +871,7 @@ template <SupportedFixedWidthType T>
 CUDF_KERNEL void __launch_bounds__(DECODE_BLOCK_SIZE)
   evaluate_few_fixed_width_literals(PageInfo const* pages,
                                     ColumnChunkDesc const* chunks,
-                                    cuda::std::span<bool*> results,
+                                    cudf::device_span<bool*> results,
                                     ast::generic_scalar_device_view const* scalars,
                                     ast::ast_operator const* operators,
                                     parquet::Type physical_type,

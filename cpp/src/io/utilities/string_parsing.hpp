@@ -12,7 +12,6 @@
 #include <cudf/utilities/span.hpp>
 
 #include <cuda/iterator>
-#include <cuda/std/span>
 #include <cuda/std/tuple>
 #include <cuda/stream>
 
@@ -118,7 +117,7 @@ namespace detail {
  */
 CUDF_EXPORT cudf::data_type infer_data_type(
   cudf::io::json_inference_options_view const& options,
-  cuda::std::span<char const> data,
+  device_span<char const> data,
   cuda::zip_iterator<size_type const*, size_type const*> offset_length_begin,
   std::size_t const size,
   cuda::stream_ref stream);

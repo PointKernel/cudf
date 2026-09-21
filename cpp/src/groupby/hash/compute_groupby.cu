@@ -23,7 +23,6 @@
 #include <cuco/static_set.cuh>
 #include <cuda/iterator>
 #include <cuda/std/iterator>
-#include <cuda/std/span>
 #include <cuda/stream>
 #include <thrust/tabulate.h>
 
@@ -124,7 +123,7 @@ std::unique_ptr<table> compute_groupby(table_view const& keys,
     rmm::device_uvector<size_type> unique_key_indices(
       num_keys, stream, cudf::get_current_device_resource_ref());
     auto const keys_end       = set.retrieve_all(unique_key_indices.begin(), stream.get());
-    auto const key_gather_map = cuda::std::span<size_type const>{
+    auto const key_gather_map = device_span<size_type const>{
       unique_key_indices.data(),
       static_cast<std::size_t>(cuda::std::distance(unique_key_indices.begin(), keys_end))};
     return gather_keys(key_gather_map);

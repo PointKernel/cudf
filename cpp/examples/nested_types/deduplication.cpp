@@ -1,5 +1,5 @@
 /*
- * SPDX-FileCopyrightText: Copyright (c) 2023-2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2023-2026, NVIDIA CORPORATION.
  * SPDX-License-Identifier: Apache-2.0
  */
 
@@ -21,7 +21,6 @@
 #include <rmm/resource_ref.hpp>
 
 #include <cuda/memory_resource>
-#include <cuda/std/span>
 
 #include <iostream>
 #include <string>
@@ -125,8 +124,8 @@ std::unique_ptr<cudf::table> join_count(cudf::table_view left, cudf::table_view 
 {
   auto [left_indices, right_indices] =
     cudf::inner_join(cudf::table_view{{left.column(0)}}, cudf::table_view{{right.column(0)}});
-  auto new_left  = cudf::gather(left, cuda::std::span<cudf::size_type const>{*left_indices});
-  auto new_right = cudf::gather(right, cuda::std::span<cudf::size_type const>{*right_indices});
+  auto new_left  = cudf::gather(left, cudf::device_span<cudf::size_type const>{*left_indices});
+  auto new_right = cudf::gather(right, cudf::device_span<cudf::size_type const>{*right_indices});
 
   auto left_cols  = new_left->release();
   auto right_cols = new_right->release();

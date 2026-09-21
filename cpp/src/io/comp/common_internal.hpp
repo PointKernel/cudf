@@ -9,8 +9,6 @@
 
 #include <cudf/io/types.hpp>
 
-#include <cuda/std/span>
-
 #include <optional>
 
 namespace cudf::io::detail {
@@ -54,8 +52,8 @@ constexpr double default_host_device_compression_cost_ratio = 64;
 }
 
 struct sorted_codec_parameters {
-  rmm::device_uvector<cuda::std::span<uint8_t const>> inputs;
-  rmm::device_uvector<cuda::std::span<uint8_t>> outputs;
+  rmm::device_uvector<device_span<uint8_t const>> inputs;
+  rmm::device_uvector<device_span<uint8_t>> outputs;
   rmm::device_uvector<std::size_t> order;  // mapping from sorted position to original position
 };
 
@@ -73,8 +71,8 @@ struct sorted_codec_parameters {
  * @return sorted_codec_parameters containing sorted inputs, outputs, and original ordering
  */
 [[nodiscard]] sorted_codec_parameters sort_decompression_tasks(
-  cuda::std::span<cuda::std::span<uint8_t const> const> inputs,
-  cuda::std::span<cuda::std::span<uint8_t> const> outputs,
+  device_span<device_span<uint8_t const> const> inputs,
+  device_span<device_span<uint8_t> const> outputs,
   cuda::stream_ref stream,
   rmm::device_async_resource_ref mr);
 
@@ -93,13 +91,12 @@ struct sorted_codec_parameters {
  *
  * @return The index at which the input data should be split for decompression.
  */
-[[nodiscard]] size_t split_decompression_tasks(
-  cuda::std::span<cuda::std::span<uint8_t const> const> inputs,
-  cuda::std::span<cuda::std::span<uint8_t> const> outputs,
-  host_engine_state host_state,
-  size_t auto_mode_threshold,
-  size_t hybrid_mode_cost_ratio,
-  cuda::stream_ref stream);
+[[nodiscard]] size_t split_decompression_tasks(device_span<device_span<uint8_t const> const> inputs,
+                                               device_span<device_span<uint8_t> const> outputs,
+                                               host_engine_state host_state,
+                                               size_t auto_mode_threshold,
+                                               size_t hybrid_mode_cost_ratio,
+                                               cuda::stream_ref stream);
 
 /**
  * @brief Sorts input and output spans for compression by output size in descending order
@@ -115,8 +112,8 @@ struct sorted_codec_parameters {
  * @return sorted_codec_parameters containing sorted inputs, outputs, and original ordering
  */
 [[nodiscard]] sorted_codec_parameters sort_compression_tasks(
-  cuda::std::span<cuda::std::span<uint8_t const> const> inputs,
-  cuda::std::span<cuda::std::span<uint8_t> const> outputs,
+  device_span<device_span<uint8_t const> const> inputs,
+  device_span<device_span<uint8_t> const> outputs,
   cuda::stream_ref stream,
   rmm::device_async_resource_ref mr);
 
@@ -135,13 +132,12 @@ struct sorted_codec_parameters {
  *
  * @return The index at which the input data should be split for compression.
  */
-[[nodiscard]] size_t split_compression_tasks(
-  cuda::std::span<cuda::std::span<uint8_t const> const> inputs,
-  cuda::std::span<cuda::std::span<uint8_t> const> outputs,
-  host_engine_state host_state,
-  size_t auto_mode_threshold,
-  size_t hybrid_mode_cost_ratio,
-  cuda::stream_ref stream);
+[[nodiscard]] size_t split_compression_tasks(device_span<device_span<uint8_t const> const> inputs,
+                                             device_span<device_span<uint8_t> const> outputs,
+                                             host_engine_state host_state,
+                                             size_t auto_mode_threshold,
+                                             size_t hybrid_mode_cost_ratio,
+                                             cuda::stream_ref stream);
 
 /**
  * @brief Copies results back to their original positions using the ordering map
@@ -154,9 +150,9 @@ struct sorted_codec_parameters {
  * @param order Mapping from sorted position to original position
  * @param stream CUDA stream for asynchronous execution
  */
-void copy_results_to_original_order(cuda::std::span<codec_exec_result const> sorted_results,
-                                    cuda::std::span<codec_exec_result> original_results,
-                                    cuda::std::span<std::size_t const> order,
+void copy_results_to_original_order(device_span<codec_exec_result const> sorted_results,
+                                    device_span<codec_exec_result> original_results,
+                                    device_span<std::size_t const> order,
                                     cuda::stream_ref stream);
 
 }  // namespace cudf::io::detail

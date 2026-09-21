@@ -17,7 +17,6 @@
 #include <cudf/utilities/span.hpp>
 
 #include <cuda/atomic>
-#include <cuda/std/span>
 #include <cuda/stream>
 
 namespace cudf::detail {
@@ -42,8 +41,8 @@ template <bool has_nulls, bool has_complex_type>
 CUDF_KERNEL __launch_bounds__(DEFAULT_JOIN_BLOCK_SIZE) void filter_join_indices_output_size_kernel(
   cudf::table_device_view left_table,
   cudf::table_device_view right_table,
-  cuda::std::span<cudf::size_type const> left_indices,
-  cuda::std::span<cudf::size_type const> right_indices,
+  cudf::device_span<cudf::size_type const> left_indices,
+  cudf::device_span<cudf::size_type const> right_indices,
   cudf::ast::detail::expression_device_view device_expression_data,
   cudf::join_kind join_kind,
   cudf::size_type* output_counts)
@@ -101,8 +100,8 @@ template <bool has_nulls, bool has_complex_type>
 void launch_filter_output_size_kernel(
   cudf::table_device_view const& left_table,
   cudf::table_device_view const& right_table,
-  cuda::std::span<cudf::size_type const> left_indices,
-  cuda::std::span<cudf::size_type const> right_indices,
+  cudf::device_span<cudf::size_type const> left_indices,
+  cudf::device_span<cudf::size_type const> right_indices,
   cudf::ast::detail::expression_device_view device_expression_data,
   cudf::detail::grid_1d const& config,
   std::size_t shmem_per_block,
