@@ -398,15 +398,6 @@ Use `cudf::host_span<T>` only when one of the following applies:
 2. The function must accept a libcudf-specific container that `std::span` cannot be constructed
    from directly.
 
-### Multidimensional views
-
-`cudf::detail::host_2dspan<T>` and `cudf::detail::device_2dspan<T>` alias a row-major
-`cuda::std::mdspan` with two dynamic extents. Use `extent(0)` and `extent(1)` for the row and column
-counts, `size()` for the total element count, and `view(row, column)` to access an element.
-The host and device aliases have the same type; use `hostdevice_2dvector::host_view()` or
-`device_view()` to select the appropriate pointer. Use `flat_host_view()` when copy helpers need
-host device-accessibility metadata.
-
 ## cudf::scalar
 
 A `cudf::scalar` is an object that can represent a singular, nullable value of any of the types
