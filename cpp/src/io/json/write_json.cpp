@@ -31,6 +31,7 @@
 #include <cudf/utilities/traits.hpp>
 
 #include <cuda/iterator>
+#include <cuda/std/span>
 #include <cuda/std/tuple>
 #include <thrust/tabulate.h>
 
@@ -346,7 +347,7 @@ void write_chunked(data_sink* out_sink,
     out_sink->device_write(ptr_all_bytes, total_num_bytes, stream);
   } else {
     auto const h_bytes = cudf::detail::make_host_vector(
-      device_span<char const>(ptr_all_bytes, total_num_bytes), stream);
+      cuda::std::span<char const>(ptr_all_bytes, total_num_bytes), stream);
     out_sink->host_write(h_bytes.data(), total_num_bytes);
   }
 }

@@ -27,6 +27,7 @@
 
 #include <cuda/functional>
 #include <cuda/iterator>
+#include <cuda/std/span>
 #include <cuda/stream>
 #include <thrust/copy.h>
 #include <thrust/execution_policy.h>
@@ -67,7 +68,7 @@ constexpr int block_size = 512;
  */
 template <typename MapRefType>
 struct bpe_unpairable_offsets_fn {
-  cudf::device_span<char const> d_chars;
+  cuda::std::span<char const> d_chars;
   int64_t offset;
   MapRefType const d_map;
   __device__ int64_t operator()(int64_t idx)
@@ -367,7 +368,7 @@ std::unique_ptr<cudf::column> byte_pair_encoding(cudf::strings_column_view const
     // boundaries; the boundary values are recorded as offsets in d_up_offsets
     auto const d_up_offsets = d_working.data();  // store unpairable offsets here
     auto const mp_map = get_bpe_merge_pairs_impl(merge_pairs)->get_mp_table_ref();  // lookup table
-    auto const d_chars_span = cudf::device_span<char const>(d_input_chars, chars_size);
+    auto const d_chars_span = cuda::std::span<char const>(d_input_chars, chars_size);
     auto up_fn = bpe_unpairable_offsets_fn<decltype(mp_map)>{d_chars_span, first_offset, mp_map};
     thrust::transform(rmm::exec_policy_nosync(stream, cudf::get_current_device_resource_ref()),
                       chars_begin,
@@ -401,7 +402,7 @@ std::unique_ptr<cudf::column> byte_pair_encoding(cudf::strings_column_view const
     tmp_offsets.resize(offsets_total, stream);
 
     // temp column created with the merged offsets and the original chars data
-    auto const col_offsets = cudf::column_view(cudf::device_span<int64_t const>(tmp_offsets));
+    auto const col_offsets = cudf::column_view(cuda::std::span<int64_t const>(tmp_offsets));
     auto const tmp_size    = offsets_total - 1;
     auto const tmp_input   = cudf::column_view(
       input.parent().type(), tmp_size, input.chars_begin(stream), nullptr, 0, 0, {col_offsets});

@@ -24,6 +24,7 @@
 
 #include <cuda/functional>
 #include <cuda/iterator>
+#include <cuda/std/span>
 #include <cuda/stream>
 #include <thrust/reduce.h>
 
@@ -54,7 +55,7 @@ namespace detail {
 template <typename InputType, typename ResultType, typename Op>
 std::unique_ptr<column> simple_segmented_reduction(
   column_view const& col,
-  device_span<size_type const> offsets,
+  cuda::std::span<size_type const> offsets,
   null_policy null_handling,
   std::optional<std::reference_wrapper<scalar const>> init,
   cuda::stream_ref stream,
@@ -141,7 +142,7 @@ template <typename InputType,
           CUDF_ENABLE_IF(std::is_same_v<Op, cudf::reduction::detail::op::min> ||
                          std::is_same_v<Op, cudf::reduction::detail::op::max>)>
 std::unique_ptr<column> string_segmented_reduction(column_view const& col,
-                                                   device_span<size_type const> offsets,
+                                                   cuda::std::span<size_type const> offsets,
                                                    null_policy null_handling,
                                                    cuda::stream_ref stream,
                                                    rmm::device_async_resource_ref mr)
@@ -185,7 +186,7 @@ template <typename InputType,
           CUDF_ENABLE_IF(!std::is_same_v<Op, cudf::reduction::detail::op::min>() &&
                          !std::is_same_v<Op, cudf::reduction::detail::op::max>())>
 std::unique_ptr<column> string_segmented_reduction(column_view const& col,
-                                                   device_span<size_type const> offsets,
+                                                   cuda::std::span<size_type const> offsets,
                                                    null_policy null_handling,
                                                    cuda::stream_ref stream,
                                                    rmm::device_async_resource_ref mr)
@@ -210,7 +211,7 @@ std::unique_ptr<column> string_segmented_reduction(column_view const& col,
 template <typename InputType, typename Op>
 std::unique_ptr<column> fixed_point_segmented_reduction(
   column_view const& col,
-  device_span<size_type const> offsets,
+  cuda::std::span<size_type const> offsets,
   null_policy null_handling,
   std::optional<std::reference_wrapper<scalar const>> init,
   cuda::stream_ref stream,
@@ -281,7 +282,7 @@ template <typename Op>
 struct bool_result_column_dispatcher {
   template <typename ElementType>
   std::unique_ptr<column> operator()(column_view const& col,
-                                     device_span<size_type const> offsets,
+                                     cuda::std::span<size_type const> offsets,
                                      null_policy null_handling,
                                      std::optional<std::reference_wrapper<scalar const>> init,
                                      cuda::stream_ref stream,
@@ -294,7 +295,7 @@ struct bool_result_column_dispatcher {
 
   template <typename ElementType>
   std::unique_ptr<column> operator()(column_view const&,
-                                     device_span<size_type const>,
+                                     cuda::std::span<size_type const>,
                                      null_policy,
                                      std::optional<std::reference_wrapper<scalar const>>,
                                      cuda::stream_ref,
@@ -328,7 +329,7 @@ struct same_column_type_dispatcher {
                            !std::is_same_v<ElementType, string_view> &&
                            !cudf::is_fixed_point<ElementType>())>
   std::unique_ptr<column> operator()(column_view const& col,
-                                     device_span<size_type const> offsets,
+                                     cuda::std::span<size_type const> offsets,
                                      null_policy null_handling,
                                      std::optional<std::reference_wrapper<scalar const>> init,
                                      cuda::stream_ref stream,
@@ -341,7 +342,7 @@ struct same_column_type_dispatcher {
   template <typename ElementType,
             CUDF_ENABLE_IF(is_supported<ElementType>() && std::is_same_v<ElementType, string_view>)>
   std::unique_ptr<column> operator()(column_view const& col,
-                                     device_span<size_type const> offsets,
+                                     cuda::std::span<size_type const> offsets,
                                      null_policy null_handling,
                                      std::optional<std::reference_wrapper<scalar const>> init,
                                      cuda::stream_ref stream,
@@ -355,7 +356,7 @@ struct same_column_type_dispatcher {
   template <typename ElementType,
             CUDF_ENABLE_IF(is_supported<ElementType>() && cudf::is_fixed_point<ElementType>())>
   std::unique_ptr<column> operator()(column_view const& col,
-                                     device_span<size_type const> offsets,
+                                     cuda::std::span<size_type const> offsets,
                                      null_policy null_handling,
                                      std::optional<std::reference_wrapper<scalar const>> init,
                                      cuda::stream_ref stream,
@@ -367,7 +368,7 @@ struct same_column_type_dispatcher {
 
   template <typename ElementType, CUDF_ENABLE_IF(!is_supported<ElementType>())>
   std::unique_ptr<column> operator()(column_view const&,
-                                     device_span<size_type const>,
+                                     cuda::std::span<size_type const>,
                                      null_policy,
                                      std::optional<std::reference_wrapper<scalar const>>,
                                      cuda::stream_ref,
@@ -397,7 +398,7 @@ struct column_type_dispatcher {
    */
   template <typename ElementType>
   std::unique_ptr<column> reduce_numeric(column_view const& col,
-                                         device_span<size_type const> offsets,
+                                         cuda::std::span<size_type const> offsets,
                                          data_type const output_type,
                                          null_policy null_handling,
                                          std::optional<std::reference_wrapper<scalar const>> init,
@@ -424,7 +425,7 @@ struct column_type_dispatcher {
    */
   template <typename ElementType>
   std::unique_ptr<column> reduce_numeric(column_view const& col,
-                                         device_span<size_type const> offsets,
+                                         cuda::std::span<size_type const> offsets,
                                          data_type const output_type,
                                          null_policy null_handling,
                                          std::optional<std::reference_wrapper<scalar const>> init,
@@ -453,7 +454,7 @@ struct column_type_dispatcher {
    */
   template <typename ElementType>
   std::unique_ptr<column> operator()(column_view const& col,
-                                     device_span<size_type const> offsets,
+                                     cuda::std::span<size_type const> offsets,
                                      data_type const output_type,
                                      null_policy null_handling,
                                      std::optional<std::reference_wrapper<scalar const>> init,
@@ -472,7 +473,7 @@ struct column_type_dispatcher {
 
   template <typename ElementType>
   std::unique_ptr<column> operator()(column_view const& col,
-                                     device_span<size_type const> offsets,
+                                     cuda::std::span<size_type const> offsets,
                                      data_type const output_type,
                                      null_policy null_handling,
                                      std::optional<std::reference_wrapper<scalar const>> init,
@@ -487,7 +488,7 @@ struct column_type_dispatcher {
 
   template <typename ElementType>
   std::unique_ptr<column> operator()(column_view const&,
-                                     device_span<size_type const>,
+                                     cuda::std::span<size_type const>,
                                      data_type const,
                                      null_policy,
                                      std::optional<std::reference_wrapper<scalar const>>,

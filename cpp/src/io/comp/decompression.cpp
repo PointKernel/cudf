@@ -20,6 +20,8 @@
 #include <cudf/utilities/error.hpp>
 #include <cudf/utilities/span.hpp>
 
+#include <cuda/std/span>
+
 #include <zlib.h>  // uncompress
 #include <zstd.h>
 
@@ -515,9 +517,9 @@ source_properties get_source_properties(compression_type compression, host_span<
 }
 
 void device_decompress(compression_type compression,
-                       device_span<device_span<uint8_t const> const> inputs,
-                       device_span<device_span<uint8_t> const> outputs,
-                       device_span<codec_exec_result> results,
+                       cuda::std::span<cuda::std::span<uint8_t const> const> inputs,
+                       cuda::std::span<cuda::std::span<uint8_t> const> outputs,
+                       cuda::std::span<codec_exec_result> results,
                        size_t max_uncomp_chunk_size,
                        size_t max_total_uncomp_size,
                        cuda::stream_ref stream)
@@ -546,9 +548,9 @@ void device_decompress(compression_type compression,
 }
 
 void host_decompress(compression_type compression,
-                     device_span<device_span<uint8_t const> const> inputs,
-                     device_span<device_span<uint8_t> const> outputs,
-                     device_span<codec_exec_result> results,
+                     cuda::std::span<cuda::std::span<uint8_t const> const> inputs,
+                     cuda::std::span<cuda::std::span<uint8_t> const> outputs,
+                     cuda::std::span<codec_exec_result> results,
                      cuda::stream_ref stream)
 {
   CUDF_FUNC_RANGE();
@@ -646,7 +648,7 @@ size_t get_uncompressed_size(compression_type compression, host_span<uint8_t con
 
 [[nodiscard]] size_t get_decompression_scratch_size_ex(
   compression_type compression,
-  device_span<device_span<uint8_t const> const> inputs,
+  cuda::std::span<cuda::std::span<uint8_t const> const> inputs,
   size_t max_uncomp_chunk_size,
   size_t max_total_uncomp_size,
   cuda::stream_ref stream)
@@ -764,9 +766,9 @@ std::vector<uint8_t> decompress(compression_type compression, host_span<uint8_t 
 }
 
 void decompress(compression_type compression,
-                device_span<device_span<uint8_t const> const> inputs,
-                device_span<device_span<uint8_t> const> outputs,
-                device_span<detail::codec_exec_result> results,
+                cuda::std::span<cuda::std::span<uint8_t const> const> inputs,
+                cuda::std::span<cuda::std::span<uint8_t> const> outputs,
+                cuda::std::span<detail::codec_exec_result> results,
                 size_t max_uncomp_chunk_size,
                 size_t max_total_uncomp_size,
                 cuda::stream_ref stream)
@@ -778,8 +780,8 @@ void decompress(compression_type compression,
   // sort inputs by size, largest first
   auto const [sorted_inputs, sorted_outputs, order] =
     sort_decompression_tasks(inputs, outputs, stream, cudf::get_current_device_resource_ref());
-  device_span<device_span<uint8_t const> const> inputs_view = sorted_inputs;
-  device_span<device_span<uint8_t> const> outputs_view      = sorted_outputs;
+  cuda::std::span<cuda::std::span<uint8_t const> const> inputs_view = sorted_inputs;
+  cuda::std::span<cuda::std::span<uint8_t> const> outputs_view      = sorted_outputs;
 
   auto const split_idx =
     split_decompression_tasks(inputs_view,
@@ -793,7 +795,7 @@ void decompress(compression_type compression,
 
   auto tmp_results = cudf::detail::make_device_uvector_async<detail::codec_exec_result>(
     results, stream, cudf::get_current_device_resource_ref());
-  device_span<codec_exec_result> results_view = tmp_results;
+  cuda::std::span<codec_exec_result> results_view = tmp_results;
 
   // Chunks [0, split_idx) go to the host engine, [split_idx, end) to the device engine.
   auto const has_host_work   = split_idx > 0;

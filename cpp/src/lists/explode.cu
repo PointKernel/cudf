@@ -20,6 +20,7 @@
 #include <cuda/iterator>
 #include <cuda/std/iterator>
 #include <cuda/std/optional>
+#include <cuda/std/span>
 #include <cuda/stream>
 #include <thrust/binary_search.h>
 #include <thrust/execution_policy.h>
@@ -43,8 +44,8 @@ std::unique_ptr<table> build_table(
   table_view const& input_table,
   size_type const explode_column_idx,
   column_view const& sliced_child,
-  cudf::device_span<size_type const> gather_map,
-  cuda::std::optional<cudf::device_span<size_type const>> explode_col_gather_map,
+  cuda::std::span<size_type const> gather_map,
+  cuda::std::optional<cuda::std::span<size_type const>> explode_col_gather_map,
   cuda::std::optional<rmm::device_uvector<size_type>> position_array,
   cuda::stream_ref stream,
   rmm::device_async_resource_ref mr)

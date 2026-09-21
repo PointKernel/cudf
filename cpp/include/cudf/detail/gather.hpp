@@ -13,6 +13,7 @@
 #include <cudf/utilities/memory_resource.hpp>
 #include <cudf/utilities/span.hpp>
 
+#include <cuda/std/span>
 #include <cuda/stream>
 
 #include <memory>
@@ -38,7 +39,7 @@ std::unique_ptr<table> gather(table_view const& source_table,
  * @throws cudf::logic_error if `gather_map` span size is larger than max of `size_type`.
  */
 std::unique_ptr<table> gather(table_view const& source_table,
-                              device_span<size_type const> const gather_map,
+                              cuda::std::span<size_type const> const gather_map,
                               out_of_bounds_policy bounds_policy,
                               negative_index_policy neg_indices,
                               cuda::stream_ref stream,

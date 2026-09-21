@@ -15,6 +15,7 @@
 
 #include <rmm/device_uvector.hpp>
 
+#include <cuda/std/span>
 #include <cuda/stream>
 
 #include <optional>
@@ -39,7 +40,8 @@ namespace CUDF_EXPORT cudf {
  * - The exact output size of the join operation
  * - A device span of per-row match counts for each row in the larger input table
  */
-using output_size_data_type = std::optional<std::pair<std::size_t, device_span<size_type const>>>;
+using output_size_data_type =
+  std::optional<std::pair<std::size_t, cuda::std::span<size_type const>>>;
 
 /**
  * @brief Returns a pair of row index vectors corresponding to all pairs of

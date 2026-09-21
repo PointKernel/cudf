@@ -14,6 +14,8 @@
 
 #include <rmm/exec_policy.hpp>
 
+#include <cuda/std/span>
+
 namespace cudf {
 namespace groupby {
 namespace detail {
@@ -28,7 +30,7 @@ namespace detail {
  * @param mr Device memory resource used to allocate device memory of the returned column.
  */
 std::unique_ptr<column> group_replace_nulls(cudf::column_view const& grouped_value,
-                                            device_span<size_type const> group_labels,
+                                            cuda::std::span<size_type const> group_labels,
                                             cudf::replace_policy replace_policy,
                                             cuda::stream_ref stream,
                                             rmm::device_async_resource_ref mr);

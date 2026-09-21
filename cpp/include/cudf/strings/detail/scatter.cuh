@@ -17,6 +17,7 @@
 #include <cuda/functional>
 #include <cuda/iterator>
 #include <cuda/std/iterator>
+#include <cuda/std/span>
 #include <cuda/stream>
 #include <thrust/scatter.h>
 
@@ -77,7 +78,7 @@ std::unique_ptr<column> scatter(SourceIterator begin,
                   target_vector.begin());
 
   // build the output column
-  auto sv_span = cudf::device_span<string_view const>(target_vector);
+  auto sv_span = cuda::std::span<string_view const>(target_vector);
   return make_strings_column(sv_span, string_view{nullptr, 0}, stream, mr);
 }
 

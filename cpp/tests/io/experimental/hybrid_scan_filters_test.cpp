@@ -20,6 +20,7 @@
 #include <cudf/utilities/span.hpp>
 
 #include <cuda/iterator>
+#include <cuda/std/span>
 
 #include <src/io/parquet/parquet_gpu.hpp>
 
@@ -761,8 +762,8 @@ TYPED_TEST(PageFilteringWithPageIndexStats, FilterPages)
 
     // Copy the row mask to the host and count the number of surviving rows
     auto const host_row_mask = cudf::detail::make_host_vector<bool>(
-      cudf::device_span<bool const>(row_mask->view().data<bool>(),
-                                    static_cast<size_t>(row_mask->view().size())),
+      cuda::std::span<bool const>(row_mask->view().data<bool>(),
+                                  static_cast<size_t>(row_mask->view().size())),
       stream);
     EXPECT_EQ(std::count(host_row_mask.begin(), host_row_mask.end(), true),
               expected_surviving_rows);
@@ -1118,8 +1119,8 @@ TYPED_TEST(TimestampPageFiltering, MismatchedPrecisions)
       reader->build_row_mask_with_page_index_stats(input_row_group_indices, options, stream, mr);
 
     auto const host_row_mask = cudf::detail::make_host_vector<bool>(
-      cudf::device_span<bool const>(row_mask->view().data<bool>(),
-                                    static_cast<size_t>(row_mask->view().size())),
+      cuda::std::span<bool const>(row_mask->view().data<bool>(),
+                                  static_cast<size_t>(row_mask->view().size())),
       stream);
     EXPECT_EQ(std::count(host_row_mask.begin(), host_row_mask.end(), true),
               expected_surviving_rows);

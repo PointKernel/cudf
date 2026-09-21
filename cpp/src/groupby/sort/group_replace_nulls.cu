@@ -14,6 +14,7 @@
 
 #include <cuda/iterator>
 #include <cuda/std/functional>
+#include <cuda/std/span>
 #include <cuda/std/tuple>
 #include <thrust/scan.h>
 
@@ -24,7 +25,7 @@ namespace groupby {
 namespace detail {
 
 std::unique_ptr<column> group_replace_nulls(cudf::column_view const& grouped_value,
-                                            device_span<size_type const> group_labels,
+                                            cuda::std::span<size_type const> group_labels,
                                             cudf::replace_policy replace_policy,
                                             cuda::stream_ref stream,
                                             rmm::device_async_resource_ref mr)

@@ -18,6 +18,7 @@
 #include <cuda/barrier>
 #include <cuda/std/iterator>
 #include <cuda/std/limits>
+#include <cuda/std/span>
 
 namespace cudf::io::parquet::detail {
 
@@ -242,8 +243,8 @@ __device__ void compute_page_sizes_for_pruned_pages(PageInfo* page,
 template <typename level_t>
 CUDF_KERNEL void __launch_bounds__(preprocess_block_size)
   compute_page_sizes_kernel(PageInfo* pages,
-                            device_span<ColumnChunkDesc const> chunks,
-                            device_span<bool const> page_mask,
+                            cuda::std::span<ColumnChunkDesc const> chunks,
+                            cuda::std::span<bool const> page_mask,
                             size_t min_row,
                             size_t num_rows,
                             bool is_base_pass)
@@ -386,8 +387,8 @@ CUDF_KERNEL void __launch_bounds__(preprocess_block_size)
 template <typename level_t, int level_decode_block_size>
 CUDF_KERNEL void __launch_bounds__(level_decode_block_size)
   preprocess_levels_kernel(PageInfo* pages,
-                           device_span<ColumnChunkDesc const> chunks,
-                           cudf::device_span<bool const> page_mask,
+                           cuda::std::span<ColumnChunkDesc const> chunks,
+                           cuda::std::span<bool const> page_mask,
                            size_t min_row,
                            size_t num_rows)
 {
@@ -465,7 +466,7 @@ CUDF_KERNEL void __launch_bounds__(level_decode_block_size)
  */
 void compute_page_sizes(cudf::detail::hostdevice_span<PageInfo> pages,
                         cudf::detail::hostdevice_span<ColumnChunkDesc const> chunks,
-                        cudf::device_span<bool const> page_mask,
+                        cuda::std::span<bool const> page_mask,
                         size_t min_row,
                         size_t num_rows,
                         bool compute_num_rows,
@@ -500,7 +501,7 @@ void compute_page_sizes(cudf::detail::hostdevice_span<PageInfo> pages,
  */
 void preprocess_levels(cudf::detail::hostdevice_span<PageInfo> pages,
                        cudf::detail::hostdevice_span<ColumnChunkDesc const> chunks,
-                       cudf::device_span<bool const> page_mask,
+                       cuda::std::span<bool const> page_mask,
                        size_t min_row,
                        size_t num_rows,
                        int level_type_size,

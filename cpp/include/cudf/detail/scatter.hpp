@@ -12,6 +12,7 @@
 #include <cudf/utilities/memory_resource.hpp>
 #include <cudf/utilities/span.hpp>
 
+#include <cuda/std/span>
 #include <cuda/stream>
 
 #include <memory>
@@ -63,7 +64,7 @@ std::unique_ptr<table> scatter(table_view const& source,
  * @throws cudf::logic_error if `scatter_map` span size is larger than max of `size_type`.
  */
 std::unique_ptr<table> scatter(table_view const& source,
-                               device_span<size_type const> const scatter_map,
+                               cuda::std::span<size_type const> const scatter_map,
                                table_view const& target,
                                cuda::stream_ref stream,
                                rmm::device_async_resource_ref mr);

@@ -10,6 +10,7 @@
 
 #include <rmm/exec_policy.hpp>
 
+#include <cuda/std/span>
 #include <cuda/stream>
 #include <thrust/gather.h>
 
@@ -17,7 +18,7 @@ namespace cudf {
 namespace groupby {
 namespace detail {
 std::unique_ptr<column> group_merge_lists(column_view const& values,
-                                          cudf::device_span<size_type const> group_offsets,
+                                          cuda::std::span<size_type const> group_offsets,
                                           size_type num_groups,
                                           cuda::stream_ref stream,
                                           rmm::device_async_resource_ref mr)

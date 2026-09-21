@@ -9,6 +9,7 @@
 #include <cudf/strings/strings_column_view.hpp>
 #include <cudf/utilities/span.hpp>
 
+#include <cuda/std/span>
 #include <cuda/stream>
 
 namespace cudf::strings::detail {
@@ -25,9 +26,10 @@ namespace cudf::strings::detail {
  * @param mr Device memory resource used to allocate the returned objects' device memory
  * @return Offsets of the position values for each string in input
  */
-std::unique_ptr<column> create_offsets_from_positions(strings_column_view const& input,
-                                                      device_span<int64_t const> const& positions,
-                                                      cuda::stream_ref stream,
-                                                      rmm::device_async_resource_ref mr);
+std::unique_ptr<column> create_offsets_from_positions(
+  strings_column_view const& input,
+  cuda::std::span<int64_t const> const& positions,
+  cuda::stream_ref stream,
+  rmm::device_async_resource_ref mr);
 
 }  // namespace cudf::strings::detail

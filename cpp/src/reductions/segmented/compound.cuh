@@ -16,6 +16,7 @@
 #include <cudf/utilities/type_dispatcher.hpp>
 
 #include <cuda/iterator>
+#include <cuda/std/span>
 #include <thrust/adjacent_difference.h>
 
 namespace cudf {
@@ -40,7 +41,7 @@ namespace detail {
  */
 template <typename InputType, typename ResultType, typename Op>
 std::unique_ptr<column> compound_segmented_reduction(column_view const& col,
-                                                     device_span<size_type const> offsets,
+                                                     cuda::std::span<size_type const> offsets,
                                                      null_policy null_handling,
                                                      size_type ddof,
                                                      cuda::stream_ref stream,
@@ -95,7 +96,7 @@ struct compound_float_output_dispatcher {
  public:
   template <typename ResultType>
   std::unique_ptr<column> operator()(column_view const& col,
-                                     device_span<size_type const> offsets,
+                                     cuda::std::span<size_type const> offsets,
                                      null_policy null_handling,
                                      size_type ddof,
                                      cuda::stream_ref stream,
@@ -108,7 +109,7 @@ struct compound_float_output_dispatcher {
 
   template <typename ResultType>
   std::unique_ptr<column> operator()(column_view const&,
-                                     device_span<size_type const>,
+                                     cuda::std::span<size_type const>,
                                      null_policy,
                                      size_type,
                                      cuda::stream_ref,
@@ -131,7 +132,7 @@ struct compound_segmented_dispatcher {
  public:
   template <typename ElementType>
   std::unique_ptr<column> operator()(column_view const& col,
-                                     device_span<size_type const> offsets,
+                                     cuda::std::span<size_type const> offsets,
                                      cudf::data_type const output_dtype,
                                      null_policy null_handling,
                                      size_type ddof,
@@ -151,7 +152,7 @@ struct compound_segmented_dispatcher {
 
   template <typename ElementType>
   std::unique_ptr<column> operator()(column_view const&,
-                                     device_span<size_type const>,
+                                     cuda::std::span<size_type const>,
                                      cudf::data_type const,
                                      null_policy,
                                      size_type,

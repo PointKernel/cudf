@@ -19,6 +19,7 @@
 
 #include <cuda/functional>
 #include <cuda/iterator>
+#include <cuda/std/span>
 #include <cuda/std/utility>
 #include <cuda/stream>
 #include <thrust/scan.h>
@@ -30,7 +31,7 @@ namespace strings::detail {
 
 namespace {
 
-using column_string_pairs = cudf::device_span<string_index_pair const>;
+using column_string_pairs = cuda::std::span<string_index_pair const>;
 
 template <typename OutputType>
 std::pair<std::vector<std::unique_ptr<column>>, rmm::device_uvector<int64_t>>
@@ -69,7 +70,9 @@ make_offsets_child_column_batch_async(std::vector<column_string_pairs> const& in
 }  // namespace
 
 CUDF_EXPORT std::pair<std::unique_ptr<column>, int64_t> make_offsets_child_column(
-  device_span<size_type const> sizes, cuda::stream_ref stream, rmm::device_async_resource_ref mr)
+  cuda::std::span<size_type const> sizes,
+  cuda::stream_ref stream,
+  rmm::device_async_resource_ref mr)
 {
   return make_offsets_child_column(sizes.begin(), sizes.end(), stream, mr);
 }
@@ -183,7 +186,7 @@ std::vector<std::unique_ptr<column>> make_strings_column_batch(
 
 // Create a strings-type column from vector of pointer/size pairs
 std::unique_ptr<column> make_strings_column(
-  device_span<cuda::std::pair<char const*, size_type> const> strings,
+  cuda::std::span<cuda::std::pair<char const*, size_type> const> strings,
   cuda::stream_ref stream,
   rmm::device_async_resource_ref mr)
 {
@@ -192,7 +195,7 @@ std::unique_ptr<column> make_strings_column(
 }
 
 std::vector<std::unique_ptr<column>> make_strings_column_batch(
-  std::vector<cudf::device_span<cuda::std::pair<char const*, size_type> const>> const& input,
+  std::vector<cuda::std::span<cuda::std::pair<char const*, size_type> const>> const& input,
   cuda::stream_ref stream,
   rmm::device_async_resource_ref mr)
 {
@@ -214,7 +217,7 @@ struct string_view_to_pair {
 
 }  // namespace
 
-std::unique_ptr<column> make_strings_column(device_span<string_view const> string_views,
+std::unique_ptr<column> make_strings_column(cuda::std::span<string_view const> string_views,
                                             string_view null_placeholder,
                                             cuda::stream_ref stream,
                                             rmm::device_async_resource_ref mr)

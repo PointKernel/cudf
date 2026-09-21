@@ -19,6 +19,7 @@
 #include <cub/cub.cuh>
 #include <cuda/iterator>
 #include <cuda/std/functional>
+#include <cuda/std/span>
 #include <thrust/device_ptr.h>
 #include <thrust/execution_policy.h>
 #include <thrust/fill.h>
@@ -300,7 +301,7 @@ template <stack_op_support SupportResetOperation,
           typename TopOfStackOutItT,
           typename StackSymbolT>
 void sparse_stack_op_to_top_of_stack(StackSymbolItT d_symbols,
-                                     device_span<SymbolPositionT> d_symbol_positions,
+                                     cuda::std::span<SymbolPositionT> d_symbol_positions,
                                      StackSymbolToStackOpTypeT symbol_to_stack_op,
                                      TopOfStackOutItT d_top_of_stack,
                                      StackSymbolT const empty_stack_symbol,

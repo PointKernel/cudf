@@ -13,6 +13,7 @@
 #include <cudf/utilities/error.hpp>
 #include <cudf/utilities/type_checks.hpp>
 
+#include <cuda/std/span>
 #include <cuda/stream>
 
 namespace cudf {
@@ -22,7 +23,7 @@ namespace {
 
 struct segmented_reduce_dispatch_functor {
   column_view const& col;
-  device_span<size_type const> offsets;
+  cuda::std::span<size_type const> offsets;
   data_type output_dtype;
   null_policy null_handling;
   std::optional<std::reference_wrapper<scalar const>> init;
@@ -30,7 +31,7 @@ struct segmented_reduce_dispatch_functor {
   rmm::device_async_resource_ref mr;
 
   segmented_reduce_dispatch_functor(column_view const& segmented_values,
-                                    device_span<size_type const> offsets,
+                                    cuda::std::span<size_type const> offsets,
                                     data_type output_dtype,
                                     null_policy null_handling,
                                     std::optional<std::reference_wrapper<scalar const>> init,
@@ -47,7 +48,7 @@ struct segmented_reduce_dispatch_functor {
   }
 
   segmented_reduce_dispatch_functor(column_view const& segmented_values,
-                                    device_span<size_type const> offsets,
+                                    cuda::std::span<size_type const> offsets,
                                     data_type output_dtype,
                                     null_policy null_handling,
                                     cuda::stream_ref stream,
@@ -102,7 +103,7 @@ struct segmented_reduce_dispatch_functor {
 };
 
 std::unique_ptr<column> segmented_reduce(column_view const& segmented_values,
-                                         device_span<size_type const> offsets,
+                                         cuda::std::span<size_type const> offsets,
                                          segmented_reduce_aggregation const& agg,
                                          data_type output_dtype,
                                          null_policy null_handling,
@@ -139,7 +140,7 @@ std::unique_ptr<column> segmented_reduce(column_view const& segmented_values,
 }  // namespace reduction
 
 std::unique_ptr<column> segmented_reduce(column_view const& segmented_values,
-                                         device_span<size_type const> offsets,
+                                         cuda::std::span<size_type const> offsets,
                                          segmented_reduce_aggregation const& agg,
                                          data_type output_dtype,
                                          null_policy null_handling,
@@ -152,7 +153,7 @@ std::unique_ptr<column> segmented_reduce(column_view const& segmented_values,
 }
 
 std::unique_ptr<column> segmented_reduce(column_view const& segmented_values,
-                                         device_span<size_type const> offsets,
+                                         cuda::std::span<size_type const> offsets,
                                          segmented_reduce_aggregation const& agg,
                                          data_type output_dtype,
                                          null_policy null_handling,

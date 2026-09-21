@@ -23,6 +23,7 @@
 #include <cub/device/device_transform.cuh>
 #include <cuda/functional>
 #include <cuda/iterator>
+#include <cuda/std/span>
 #include <cuda/stream>
 #include <thrust/sequence.h>
 
@@ -47,7 +48,7 @@ using parquet::detail::PageInfo;
 void decode_dictionary_page_headers(
   cudf::detail::hostdevice_span<ColumnChunkDesc> chunks,
   cudf::detail::hostdevice_span<PageInfo> pages,
-  cudf::host_span<cudf::device_span<uint8_t const> const> dict_page_data,
+  cudf::host_span<cuda::std::span<uint8_t const> const> dict_page_data,
   cuda::stream_ref stream)
 {
   CUDF_FUNC_RANGE();
@@ -66,8 +67,8 @@ void decode_dictionary_page_headers(
 
   // Decode dictionary page headers, one thread per page
   parquet::detail::decode_page_headers_from_page_data(
-    cudf::device_span<ColumnChunkDesc const>{chunks.device_ptr(), chunks.size()},
-    cudf::device_span<PageInfo>{pages.device_ptr(), pages.size()},
+    cuda::std::span<ColumnChunkDesc const>{chunks.device_ptr(), chunks.size()},
+    cuda::std::span<PageInfo>{pages.device_ptr(), pages.size()},
     page_data,
     chunk_page_offsets,
     error_code.data(),
@@ -150,7 +151,7 @@ void hybrid_scan_reader_impl::prepare_row_groups(
 }
 
 bool hybrid_scan_reader_impl::setup_column_chunks(
-  std::span<cudf::device_span<uint8_t const> const> column_chunk_data)
+  std::span<cuda::std::span<uint8_t const> const> column_chunk_data)
 {
   auto const& row_groups_info = _pass_itm_data->row_groups;
   auto& chunks                = _pass_itm_data->chunks;
@@ -187,7 +188,7 @@ bool hybrid_scan_reader_impl::setup_column_chunks(
 }
 
 void hybrid_scan_reader_impl::setup_compressed_data(
-  std::span<cudf::device_span<uint8_t const> const> column_chunk_data)
+  std::span<cuda::std::span<uint8_t const> const> column_chunk_data)
 {
   auto& pass = *_pass_itm_data;
 
@@ -212,7 +213,7 @@ void hybrid_scan_reader_impl::setup_compressed_data(
 }
 
 void hybrid_scan_reader_impl::setup_sparse_compressed_data(
-  std::span<cudf::device_span<uint8_t const> const> page_data)
+  std::span<cuda::std::span<uint8_t const> const> page_data)
 {
   auto& pass = *_pass_itm_data;
 
@@ -252,7 +253,7 @@ std::tuple<bool,
            cudf::detail::hostdevice_vector<PageInfo>>
 hybrid_scan_reader_impl::prepare_dictionaries(
   std::span<std::vector<size_type> const> row_group_indices,
-  std::span<cudf::device_span<uint8_t const> const> dictionary_page_data,
+  std::span<cuda::std::span<uint8_t const> const> dictionary_page_data,
   std::span<int const> dictionary_col_schemas,
   parquet_reader_options const& options,
   cuda::stream_ref stream)

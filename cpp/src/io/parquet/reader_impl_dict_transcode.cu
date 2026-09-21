@@ -22,6 +22,7 @@
 #include <rmm/exec_policy.hpp>
 
 #include <cuda/iterator>
+#include <cuda/std/span>
 #include <thrust/binary_search.h>
 #include <thrust/execution_policy.h>
 #include <thrust/for_each.h>
@@ -163,8 +164,8 @@ void update_from_chunk(column_eligibility& e, ColumnChunkDesc const& chunk)
  */
 struct stacked_key_gather_fn {
   string_index_pair const* str_dict_index;
-  cudf::device_span<size_type const> key_counts_prefix;  ///< size num_chunks + 1
-  cudf::device_span<size_type const> key_base_offsets;   ///< size num_chunks
+  cuda::std::span<size_type const> key_counts_prefix;  ///< size num_chunks + 1
+  cuda::std::span<size_type const> key_base_offsets;   ///< size num_chunks
 
   __device__ string_index_pair operator()(size_type stacked_pos) const
   {
@@ -190,10 +191,10 @@ struct stacked_key_gather_fn {
  * @param stacked_to_unique Map from stacked-key position to compact unique-key index
  * @param stream CUDA stream used for the kernel launch
  */
-void remap_dict_indices_by_chunk(cudf::device_span<int32_t> indices,
-                                 cudf::device_span<size_type const> row_offsets,
-                                 cudf::device_span<size_type const> key_counts_prefix,
-                                 cudf::device_span<int32_t const> stacked_to_unique,
+void remap_dict_indices_by_chunk(cuda::std::span<int32_t> indices,
+                                 cuda::std::span<size_type const> row_offsets,
+                                 cuda::std::span<size_type const> key_counts_prefix,
+                                 cuda::std::span<int32_t const> stacked_to_unique,
                                  cuda::stream_ref stream)
 {
   thrust::for_each(
@@ -477,10 +478,10 @@ void reader_impl::assemble_dict_transcoded_columns(
         auto const keys_begin = cudf::detail::make_counting_transform_iterator(
           size_type{0},
           stacked_key_gather_fn{pass.str_dict_index.data(),
-                                cudf::device_span<size_type const>{d_key_counts_prefix.data(),
-                                                                   d_key_counts_prefix.size()},
-                                cudf::device_span<size_type const>{d_key_base_offsets.data(),
-                                                                   d_key_base_offsets.size()}});
+                                cuda::std::span<size_type const>{d_key_counts_prefix.data(),
+                                                                 d_key_counts_prefix.size()},
+                                cuda::std::span<size_type const>{d_key_base_offsets.data(),
+                                                                 d_key_base_offsets.size()}});
         stacked_keys_owner = cudf::strings::detail::make_strings_column(
           keys_begin, keys_begin + total_keys, _stream, get_current_device_resource_ref());
       }
@@ -501,12 +502,12 @@ void reader_impl::assemble_dict_transcoded_columns(
       // (fill_pruned_offsets); the shift keeps them in range and the null mask (carried by
       // `indices_owner`) still nullifies them in `decode`.
       remap_dict_indices_by_chunk(
-        cudf::device_span<int32_t>{indices_owner->mutable_view().data<int32_t>(),
-                                   static_cast<std::size_t>(num_row_vals)},
-        cudf::device_span<size_type const>{d_row_offsets.data(), d_row_offsets.size()},
-        cudf::device_span<size_type const>{d_key_counts_prefix.data(), d_key_counts_prefix.size()},
-        cudf::device_span<int32_t const>{stacked_to_unique->view().data<int32_t>(),
-                                         static_cast<std::size_t>(stacked_to_unique->size())},
+        cuda::std::span<int32_t>{indices_owner->mutable_view().data<int32_t>(),
+                                 static_cast<std::size_t>(num_row_vals)},
+        cuda::std::span<size_type const>{d_row_offsets.data(), d_row_offsets.size()},
+        cuda::std::span<size_type const>{d_key_counts_prefix.data(), d_key_counts_prefix.size()},
+        cuda::std::span<int32_t const>{stacked_to_unique->view().data<int32_t>(),
+                                       static_cast<std::size_t>(stacked_to_unique->size())},
         _stream);
 
       _stream.sync();

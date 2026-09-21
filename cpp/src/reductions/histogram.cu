@@ -22,6 +22,7 @@
 #include <cuda/atomic>
 #include <cuda/functional>
 #include <cuda/iterator>
+#include <cuda/std/span>
 #include <cuda/std/tuple>
 #include <thrust/uninitialized_fill.h>
 
@@ -60,7 +61,7 @@ struct is_not_zero {
  * @return A list_scalar storing the output histogram
  */
 auto gather_histogram(table_view const& input,
-                      device_span<size_type const> distinct_indices,
+                      cuda::std::span<size_type const> distinct_indices,
                       std::unique_ptr<column>&& distinct_counts,
                       cuda::stream_ref stream,
                       rmm::device_async_resource_ref mr)

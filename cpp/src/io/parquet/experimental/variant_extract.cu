@@ -39,6 +39,7 @@
 #include <cuda/std/cstring>
 #include <cuda/std/limits>
 #include <cuda/std/optional>
+#include <cuda/std/span>
 #include <cuda/std/type_traits>
 #include <cuda/std/utility>
 #include <cuda/stream>
@@ -67,7 +68,7 @@ using primitive_type = variant_primitive_type;
 // The status of a VARIANT operation.
 using op_status = variant_operation_status;
 
-__device__ cuda::std::optional<uint64_t> read_uint64(device_span<uint8_t const> data,
+__device__ cuda::std::optional<uint64_t> read_uint64(cuda::std::span<uint8_t const> data,
                                                      size_type pos,
                                                      int width)
 {
@@ -146,7 +147,7 @@ __device__ object_array_header decode_object_array_header(uint8_t value_header, 
  * @return The total length in bytes of the value, or nullopt if `enc` is empty/malformed or the
  *         type id is unrecognized
  */
-__device__ cuda::std::optional<uint64_t> variant_value_length(device_span<uint8_t const> enc)
+__device__ cuda::std::optional<uint64_t> variant_value_length(cuda::std::span<uint8_t const> enc)
 {
   if (enc.size() < 1) { return cuda::std::nullopt; }
   auto const value_metadata = enc[0];
@@ -232,7 +233,7 @@ struct metadata_dictionary {
  * @return The parsed offset table, or a failure status if `meta` is malformed
  */
 __device__ cuda::std::pair<metadata_dictionary, op_status> parse_metadata_dictionary(
-  device_span<uint8_t const> meta)
+  cuda::std::span<uint8_t const> meta)
 {
   auto const meta_len = static_cast<size_type>(meta.size());
   if (meta_len < 1) { return {{}, op_status::MALFORMED_VARIANT}; }
@@ -285,7 +286,7 @@ __device__ cuda::std::pair<metadata_dictionary, op_status> parse_metadata_dictio
 // the metadata dictionary size before use, and the offset positions are computed in 64-bit
 // arithmetic to avoid overflowing `size_type` for large ids.
 __device__ cuda::std::optional<cudf::string_view> name_for_id(metadata_dictionary const& dict,
-                                                              device_span<uint8_t const> meta,
+                                                              cuda::std::span<uint8_t const> meta,
                                                               size_type field_id)
 {
   if (field_id < 0 || cuda::std::cmp_greater_equal(field_id, dict.num_entries)) {
@@ -344,10 +345,10 @@ __device__ cuda::std::optional<cudf::string_view> name_for_id(metadata_dictionar
  * @return The encoded bytes of the field value, or an empty span if `val` is not an object, the
  *         field is absent, or either blob is malformed
  */
-__device__ cuda::std::pair<device_span<uint8_t const>, op_status> locate_object_field(
+__device__ cuda::std::pair<cuda::std::span<uint8_t const>, op_status> locate_object_field(
   metadata_dictionary const& dict,
-  device_span<uint8_t const> meta,
-  device_span<uint8_t const> val,
+  cuda::std::span<uint8_t const> meta,
+  cuda::std::span<uint8_t const> val,
   cudf::string_view key)
 {
   auto const val_len = static_cast<size_type>(val.size());
@@ -442,8 +443,8 @@ __device__ cuda::std::pair<device_span<uint8_t const>, op_status> locate_object_
 //
 // Array element offsets are monotonically increasing, so the element length is taken directly from
 // the offset delta (o1 - o0) rather than from the element's own header.
-__device__ cuda::std::pair<device_span<uint8_t const>, op_status> locate_array_element(
-  device_span<uint8_t const> value, size_type index)
+__device__ cuda::std::pair<cuda::std::span<uint8_t const>, op_status> locate_array_element(
+  cuda::std::span<uint8_t const> value, size_type index)
 {
   if (index < 0) { return {{}, op_status::MISSING_PATH}; }
 
@@ -508,7 +509,7 @@ __device__ cuda::std::pair<device_span<uint8_t const>, op_status> locate_array_e
           op_status::SUCCESS};
 }
 
-__device__ bool is_variant_null(device_span<uint8_t const> enc)
+__device__ bool is_variant_null(cuda::std::span<uint8_t const> enc)
 {
   if (enc.empty()) { return false; }
   auto const vm = enc[0];
@@ -562,7 +563,7 @@ __device__ constexpr primitive_type primitive_type_for()
  * Requires `basic_type == primitive` and a value header whose physical type id matches `T` exactly.
  */
 template <typename T>
-__device__ inline cuda::std::optional<T> decode_primitive(device_span<uint8_t const> enc)
+__device__ inline cuda::std::optional<T> decode_primitive(cuda::std::span<uint8_t const> enc)
 {
   if (cuda::std::cmp_less(enc.size(), 1 + sizeof(T))) { return cuda::std::nullopt; }
 
@@ -580,7 +581,7 @@ __device__ inline cuda::std::optional<T> decode_primitive(device_span<uint8_t co
  * Boolean values carry no payload: the distinction between true and false is encoded entirely in
  * the primitive type header (`boolean_true` vs `boolean_false`).
  */
-__device__ inline cuda::std::optional<bool> decode_bool(device_span<uint8_t const> enc)
+__device__ inline cuda::std::optional<bool> decode_bool(cuda::std::span<uint8_t const> enc)
 {
   if (enc.empty()) { return cuda::std::nullopt; }
   uint8_t const value_metadata = enc[0];
@@ -624,10 +625,10 @@ __device__ cuda::std::optional<size_type> parse_index_step(cudf::string_view ste
 //   - "<name>"  -> descend into an object by dictionary key, or
 //   - "[<N>]"   -> descend into an array by zero-based integer index.
 // The step kind is inferred from the first byte (`'['` means index).
-__device__ cuda::std::pair<device_span<uint8_t const>, op_status> resolve_path(
-  device_span<uint8_t const> meta, device_span<uint8_t const> val, column_device_view path)
+__device__ cuda::std::pair<cuda::std::span<uint8_t const>, op_status> resolve_path(
+  cuda::std::span<uint8_t const> meta, cuda::std::span<uint8_t const> val, column_device_view path)
 {
-  device_span<uint8_t const> sub_val = val;
+  cuda::std::span<uint8_t const> sub_val = val;
   // The metadata dictionary is a per-row property shared by every object-key step of the path, so
   // it is parsed and validated at most once per row (lazily, on the first object-key step) rather
   // than being re-parsed on each step -- a path with only array-index steps never touches it.
@@ -662,8 +663,8 @@ __device__ cuda::std::pair<device_span<uint8_t const>, op_status> resolve_path(
   return {sub_val, op_status::SUCCESS};
 }
 
-__device__ cuda::std::optional<device_span<uint8_t const>> decode_string(
-  device_span<uint8_t const> enc)
+__device__ cuda::std::optional<cuda::std::span<uint8_t const>> decode_string(
+  cuda::std::span<uint8_t const> enc)
 {
   auto const len = enc.size();
   if (len < 1) { return cuda::std::nullopt; }
@@ -690,15 +691,15 @@ __device__ cuda::std::optional<device_span<uint8_t const>> decode_string(
   return cuda::std::nullopt;
 }
 
-__device__ device_span<uint8_t const> list_row_span(cudf::lists_column_device_view const& col,
-                                                    size_type row)
+__device__ cuda::std::span<uint8_t const> list_row_span(cudf::lists_column_device_view const& col,
+                                                        size_type row)
 {
   auto const begin = col.offset_at(row);
   auto const end   = col.offset_at(row + 1);
   return {col.child().data<uint8_t>() + begin, static_cast<std::size_t>(end - begin)};
 }
 
-__device__ cuda::std::pair<device_span<uint8_t const>, device_span<uint8_t const>>
+__device__ cuda::std::pair<cuda::std::span<uint8_t const>, cuda::std::span<uint8_t const>>
 metadata_and_value_at(cudf::lists_column_device_view const& metadata,
                       cudf::lists_column_device_view const& values,
                       size_type row)
@@ -719,10 +720,10 @@ CUDF_KERNEL __launch_bounds__(block_size) void locate_variant_fields_kernel(
   cudf::lists_column_device_view metadata,
   cudf::lists_column_device_view values,
   column_device_view path,
-  device_span<size_type> d_sizes,
-  device_span<size_type> d_src_offsets,
+  cuda::std::span<size_type> d_sizes,
+  cuda::std::span<size_type> d_src_offsets,
   bitmask_type* d_null_mask,
-  device_span<op_status> d_status)  // empty when no status was requested
+  cuda::std::span<op_status> d_status)  // empty when no status was requested
 {
   auto const num_rows = static_cast<size_type>(d_sizes.size());
   auto const tid      = cudf::detail::grid_1d::global_thread_id<block_size>();
@@ -788,7 +789,7 @@ __device__ bool is_recognized_primitive_type(primitive_type ptype)
  */
 template <typename T>
   requires(is_variant_numerical<T>)
-__device__ op_status cast_status_for_primitive(device_span<uint8_t const> val)
+__device__ op_status cast_status_for_primitive(cuda::std::span<uint8_t const> val)
 {
   if (val.empty()) { return op_status::MALFORMED_VARIANT; }
   if (is_variant_null(val)) { return op_status::VARIANT_NULL; }
@@ -862,7 +863,7 @@ __device__ int constexpr variant_decimal_unscaled_width(primitive_type ptype)
  * @return The rescaled representation, valid only when the returned status is `SUCCESS`
  */
 template <typename Rep>
-__device__ cuda::std::pair<Rep, op_status> decode_decimal(device_span<uint8_t const> enc,
+__device__ cuda::std::pair<Rep, op_status> decode_decimal(cuda::std::span<uint8_t const> enc,
                                                           int desired_scale)
 {
   auto const fail = [](op_status status) { return cuda::std::pair<Rep, op_status>{Rep{}, status}; };
@@ -957,7 +958,7 @@ __device__ bool should_decode_row(size_type row, bitmask_type* d_null_mask, op_s
 template <typename T>
 CUDF_KERNEL __launch_bounds__(block_size) void cast_variant_primitive_kernel(
   cudf::lists_column_device_view values,
-  device_span<T> d_output,
+  cuda::std::span<T> d_output,
   bitmask_type* d_null_mask,
   op_status* d_status)  // nullptr when no status was requested
 {
@@ -992,7 +993,7 @@ CUDF_KERNEL __launch_bounds__(block_size) void cast_variant_primitive_kernel(
 template <typename Rep>
 CUDF_KERNEL __launch_bounds__(block_size) void cast_variant_decimal_kernel(
   cudf::lists_column_device_view values,
-  device_span<Rep> d_output,
+  cuda::std::span<Rep> d_output,
   int desired_scale,
   bitmask_type* d_null_mask,
   op_status* d_status)  // nullptr when no status was requested
@@ -1018,7 +1019,7 @@ CUDF_KERNEL __launch_bounds__(block_size) void cast_variant_decimal_kernel(
   }
 }
 
-__device__ op_status cast_status_for_bool(device_span<uint8_t const> val)
+__device__ op_status cast_status_for_bool(cuda::std::span<uint8_t const> val)
 {
   if (val.empty()) { return op_status::MALFORMED_VARIANT; }
   if (is_variant_null(val)) { return op_status::VARIANT_NULL; }
@@ -1032,7 +1033,7 @@ __device__ op_status cast_status_for_bool(device_span<uint8_t const> val)
                                              : op_status::MALFORMED_VARIANT;
 }
 
-__device__ op_status cast_status_for_string(device_span<uint8_t const> val)
+__device__ op_status cast_status_for_string(cuda::std::span<uint8_t const> val)
 {
   if (val.empty()) { return op_status::MALFORMED_VARIANT; }
   if (is_variant_null(val)) { return op_status::VARIANT_NULL; }
@@ -1145,7 +1146,7 @@ struct cast_variant_fn {
     rmm::device_buffer data{num_rows * sizeof(T), stream, mr};
     auto const grid = cudf::detail::grid_1d{num_rows, block_size};
     auto const d_out =
-      device_span<T>{static_cast<T*>(data.data()), static_cast<std::size_t>(num_rows)};
+      cuda::std::span<T>{static_cast<T*>(data.data()), static_cast<std::size_t>(num_rows)};
     cast_variant_primitive_kernel<T>
       <<<grid.num_blocks, block_size, 0, stream.get()>>>(values, d_out, d_null_mask, d_status);
     CUDF_CUDA_TRY(cudaGetLastError());
@@ -1167,7 +1168,7 @@ struct cast_variant_fn {
     rmm::device_buffer data{num_rows * sizeof(Rep), stream, mr};
     auto const grid = cudf::detail::grid_1d{num_rows, block_size};
     auto const d_out =
-      device_span<Rep>{static_cast<Rep*>(data.data()), static_cast<std::size_t>(num_rows)};
+      cuda::std::span<Rep>{static_cast<Rep*>(data.data()), static_cast<std::size_t>(num_rows)};
     cast_variant_decimal_kernel<Rep><<<grid.num_blocks, block_size, 0, stream.get()>>>(
       values, d_out, desired_type.scale(), d_null_mask, d_status);
     CUDF_CUDA_TRY(cudaGetLastError());
@@ -1252,7 +1253,8 @@ struct cast_variant_fn {
  * payload. A recognized header returns its logical type even when the payload is truncated. Returns
  * nullopt for an empty blob or an unrecognized primitive type ID.
  */
-__device__ cuda::std::optional<variant_logical_type> logical_type_of(device_span<uint8_t const> enc)
+__device__ cuda::std::optional<variant_logical_type> logical_type_of(
+  cuda::std::span<uint8_t const> enc)
 {
   if (enc.empty()) { return cuda::std::nullopt; }
   auto const value_metadata = enc[0];
@@ -1383,9 +1385,9 @@ std::unique_ptr<column> get_variant_field(column_view const& variant_column,
 
   auto const d_status =
     status.has_value()
-      ? device_span<op_status>{reinterpret_cast<op_status*>(status->data<uint8_t>()),
-                               static_cast<std::size_t>(num_rows)}
-      : device_span<op_status>{};
+      ? cuda::std::span<op_status>{reinterpret_cast<op_status*>(status->data<uint8_t>()),
+                                   static_cast<std::size_t>(num_rows)}
+      : cuda::std::span<op_status>{};
   locate_variant_fields_kernel<<<grid.num_blocks, block_size, 0, stream.get()>>>(
     meta_lists_device_view,
     val_lists_device_view,
@@ -1401,8 +1403,8 @@ std::unique_ptr<column> get_variant_field(column_view const& variant_column,
   CUDF_EXPECTS(total_bytes <= std::numeric_limits<size_type>::max(),
                "VARIANT extracted bytes exceed cudf size_type limit",
                std::overflow_error);
-  device_span<size_type const> d_offsets{offsets_column->view().data<size_type>(),
-                                         static_cast<std::size_t>(num_rows + 1)};
+  cuda::std::span<size_type const> d_offsets{offsets_column->view().data<size_type>(),
+                                             static_cast<std::size_t>(num_rows + 1)};
 
   auto val_child = make_numeric_column(
     data_type{type_id::UINT8}, total_bytes, mask_state::UNALLOCATED, stream, mr);

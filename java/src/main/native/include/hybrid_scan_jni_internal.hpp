@@ -13,6 +13,8 @@
 #include <cudf/types.hpp>
 #include <cudf/utilities/span.hpp>
 
+#include <cuda/std/span>
+
 #include <jni.h>
 
 #include <cstdint>
@@ -86,9 +88,9 @@ jlongArray ranges_to_jlong_array(JNIEnv* env, std::vector<byte_range_info> const
 
 jintArray sizes_to_jint_array(JNIEnv* env, std::vector<cudf::size_type> const& vals);
 
-std::vector<cudf::device_span<uint8_t const>> make_device_spans(JNIEnv* env,
-                                                                jlongArray j_addrs,
-                                                                jlongArray j_lens);
+std::vector<cuda::std::span<uint8_t const>> make_device_spans(JNIEnv* env,
+                                                              jlongArray j_addrs,
+                                                              jlongArray j_lens);
 
 /** @brief Convert a jlong to size_t; throws Java IllegalArgumentException if @p value is negative
  * (@p name is embedded in the message). */

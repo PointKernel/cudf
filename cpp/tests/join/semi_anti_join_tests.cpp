@@ -25,6 +25,7 @@
 #include <rmm/resource_ref.hpp>
 
 #include <cuda/iterator>
+#include <cuda/std/span>
 #include <cuda/stream>
 
 #include <limits>
@@ -70,7 +71,7 @@ std::unique_ptr<cudf::table> left_semi_join(
     cudf::filtered_join obj(right_selected, compare_nulls, cudf::get_default_stream());
     auto const join_indices = obj.semi_join(
       left_selected, cudf::get_default_stream(), cudf::get_current_device_resource_ref());
-    auto indices_span = cudf::device_span<cudf::size_type const>{*join_indices};
+    auto indices_span = cuda::std::span<cudf::size_type const>{*join_indices};
     auto indices_col  = cudf::column_view{indices_span};
     return cudf::gather(left_input, indices_col);
   } else {
@@ -78,7 +79,7 @@ std::unique_ptr<cudf::table> left_semi_join(
       left_selected, compare_nulls, prefilter_mode(implementation), cudf::get_default_stream());
     auto const join_indices = obj.semi_join(
       right_selected, cudf::get_default_stream(), cudf::get_current_device_resource_ref());
-    auto indices_span = cudf::device_span<cudf::size_type const>{*join_indices};
+    auto indices_span = cuda::std::span<cudf::size_type const>{*join_indices};
     auto indices_col  = cudf::column_view{indices_span};
     return cudf::gather(left_input, indices_col);
   }
@@ -99,7 +100,7 @@ std::unique_ptr<cudf::table> left_anti_join(
     cudf::filtered_join obj(right_selected, compare_nulls, cudf::get_default_stream());
     auto const join_indices = obj.anti_join(
       left_selected, cudf::get_default_stream(), cudf::get_current_device_resource_ref());
-    auto indices_span = cudf::device_span<cudf::size_type const>{*join_indices};
+    auto indices_span = cuda::std::span<cudf::size_type const>{*join_indices};
     auto indices_col  = cudf::column_view{indices_span};
     return cudf::gather(left_input, indices_col);
   } else {
@@ -107,7 +108,7 @@ std::unique_ptr<cudf::table> left_anti_join(
       left_selected, compare_nulls, prefilter_mode(implementation), cudf::get_default_stream());
     auto const join_indices = obj.anti_join(
       right_selected, cudf::get_default_stream(), cudf::get_current_device_resource_ref());
-    auto indices_span = cudf::device_span<cudf::size_type const>{*join_indices};
+    auto indices_span = cuda::std::span<cudf::size_type const>{*join_indices};
     auto indices_col  = cudf::column_view{indices_span};
     return cudf::gather(left_input, indices_col);
   }
@@ -502,7 +503,7 @@ TEST_F(SemiAntiJoinTest, MarkJoinPrefilterLoadFactorOverload)
 
   auto const join_indices = obj.semi_join(
     right_selected, cudf::get_default_stream(), cudf::get_current_device_resource_ref());
-  auto indices_span = cudf::device_span<cudf::size_type const>{*join_indices};
+  auto indices_span = cuda::std::span<cudf::size_type const>{*join_indices};
   auto indices_col  = cudf::column_view{indices_span};
   auto result       = cudf::gather(left_selected, indices_col);
 
@@ -547,7 +548,7 @@ TEST_F(SemiAntiJoinTest, FilteredJoinMemoryResource)
 
   auto const join_indices =
     obj.semi_join(left, cudf::get_default_stream(), cudf::get_current_device_resource_ref());
-  auto indices_span = cudf::device_span<cudf::size_type const>{*join_indices};
+  auto indices_span = cuda::std::span<cudf::size_type const>{*join_indices};
   auto indices_col  = cudf::column_view{indices_span};
   auto result       = cudf::gather(left, indices_col);
 

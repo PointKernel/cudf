@@ -17,6 +17,7 @@
 
 #include <cuco/detail/open_addressing/kernels.cuh>
 #include <cuda/iterator>
+#include <cuda/std/span>
 #include <cuda/stream>
 #include <cuda_runtime_api.h>
 
@@ -86,7 +87,7 @@ template <int32_t CGSize, typename Iterator, typename Ref>
 void filtered_join::query_right_table(cudf::table_view const& left,
                                       Iterator left_iter,
                                       Ref query_ref,
-                                      cudf::device_span<bool> contains_map,
+                                      cuda::std::span<bool> contains_map,
                                       cuda::stream_ref stream)
 {
   cudf::scoped_range range{"filtered_join::query_right_table"};

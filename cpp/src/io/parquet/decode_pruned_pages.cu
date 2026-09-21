@@ -10,6 +10,7 @@
 #include <cooperative_groups.h>
 #include <cuda/atomic>
 #include <cuda/std/algorithm>
+#include <cuda/std/span>
 
 namespace cudf::io::parquet::detail {
 
@@ -25,10 +26,10 @@ auto constexpr block_size = 4 * cudf::detail::warp_size;
  * writes avoid zero-initializing entire output buffers.
  */
 CUDF_KERNEL void __launch_bounds__(block_size)
-  fill_pruned_offsets_kernel(device_span<PageInfo> pages,
-                             device_span<ColumnChunkDesc const> chunks,
-                             device_span<bool const> page_mask,
-                             device_span<size_t> initial_str_offsets,
+  fill_pruned_offsets_kernel(cuda::std::span<PageInfo> pages,
+                             cuda::std::span<ColumnChunkDesc const> chunks,
+                             cuda::std::span<bool const> page_mask,
+                             cuda::std::span<size_t> initial_str_offsets,
                              size_t skip_rows,
                              size_t num_rows)
 {
@@ -99,10 +100,10 @@ CUDF_KERNEL void __launch_bounds__(block_size)
 
 }  // namespace
 
-void fill_pruned_offsets(cudf::device_span<PageInfo> pages,
-                         cudf::device_span<ColumnChunkDesc const> chunks,
-                         cudf::device_span<bool const> page_mask,
-                         cudf::device_span<size_t> initial_str_offsets,
+void fill_pruned_offsets(cuda::std::span<PageInfo> pages,
+                         cuda::std::span<ColumnChunkDesc const> chunks,
+                         cuda::std::span<bool const> page_mask,
+                         cuda::std::span<size_t> initial_str_offsets,
                          size_t skip_rows,
                          size_t num_rows,
                          cuda::stream_ref stream)

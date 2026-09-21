@@ -18,6 +18,7 @@
 
 #include <cuda/iterator>
 #include <cuda/std/limits>
+#include <cuda/std/span>
 #include <cuda/std/tuple>
 #include <thrust/transform.h>
 
@@ -123,8 +124,8 @@ struct host_udf_groupby_example : cudf::groupby_host_udf {
 
     struct transform_fn {
       cudf::column_device_view values;
-      cudf::device_span<cudf::size_type const> offsets;
-      cudf::device_span<cudf::size_type const> group_indices;
+      cuda::std::span<cudf::size_type const> offsets;
+      cuda::std::span<cudf::size_type const> group_indices;
       InputType const* group_max;
       InputType const* group_sum;
 

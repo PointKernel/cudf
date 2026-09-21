@@ -26,6 +26,7 @@
 
 #include <cub/device/device_transform.cuh>
 #include <cuda/iterator>
+#include <cuda/std/span>
 #include <thrust/binary_search.h>
 #include <thrust/execution_policy.h>
 #include <thrust/fill.h>
@@ -52,8 +53,8 @@ inline bool is_treat_fixed_length_as_string(cuda::std::optional<LogicalType> con
 }
 
 struct set_str_bytes_all {
-  device_span<PageInfo> pages;
-  device_span<bool const> page_mask;
+  cuda::std::span<PageInfo> pages;
+  cuda::std::span<bool const> page_mask;
 
   __device__ void operator()(size_type index) const
   {
@@ -363,8 +364,8 @@ namespace {
  * on row counts.
  */
 struct compute_page_offset_count {
-  device_span<PageInfo const> pages;
-  device_span<ColumnChunkDesc const> chunks;
+  cuda::std::span<PageInfo const> pages;
+  cuda::std::span<ColumnChunkDesc const> chunks;
   size_t skip_rows;
   size_t num_rows;
 
@@ -960,7 +961,7 @@ void reader_impl::allocate_columns(read_mode mode, size_t skip_rows, size_t num_
   // if we have any list columns that need further processing.
   bool has_lists = false;
   // Validity Buffer is a uint32_t pointer
-  std::vector<cudf::device_span<cudf::bitmask_type>> nullmask_bufs;
+  std::vector<cuda::std::span<cudf::bitmask_type>> nullmask_bufs;
 
   // An optional ancestor leaves unwritten output slots until the next repeated level. So, for a
   // non-nullable STRING (FIELD) with a nullable ancestor, the column is nullable and not all rows
@@ -973,7 +974,7 @@ void reader_impl::allocate_columns(read_mode mode, size_t skip_rows, size_t num_
     return has_nullable_ancestor and out_buf.type.id() == type_id::STRING and
            not out_buf.is_nullable;
   };
-  auto unwritten_bufs = cudf::detail::make_empty_pinned_vector<cudf::device_span<cuda::std::byte>>(
+  auto unwritten_bufs = cudf::detail::make_empty_pinned_vector<cuda::std::span<cuda::std::byte>>(
     _input_columns.size(), _stream);
 
   for (auto const& input_col : _input_columns) {
@@ -1152,14 +1153,14 @@ void reader_impl::allocate_columns(read_mode mode, size_t skip_rows, size_t num_
 
   // Need to set null mask bufs to all high bits
   auto pinned_nullmask_bufs = cudf::detail::make_pinned_vector(
-    cudf::host_span<cudf::device_span<cudf::bitmask_type> const>{nullmask_bufs}, _stream);
+    cudf::host_span<cuda::std::span<cudf::bitmask_type> const>{nullmask_bufs}, _stream);
   cudf::detail::batched_memset<cudf::bitmask_type>(
     pinned_nullmask_bufs, std::numeric_limits<cudf::bitmask_type>::max(), _stream);
 
   // Need to zero non-nullable string lengths with nullable ancestors
   if (not unwritten_bufs.empty()) {
     cudf::detail::batched_memset<cuda::std::byte>(
-      cudf::host_span<cudf::device_span<cuda::std::byte> const>{unwritten_bufs},
+      cudf::host_span<cuda::std::span<cuda::std::byte> const>{unwritten_bufs},
       static_cast<cuda::std::byte>(0),
       _stream);
   }
@@ -1167,7 +1168,7 @@ void reader_impl::allocate_columns(read_mode mode, size_t skip_rows, size_t num_
 
 void reader_impl::fill_pruned_offsets(size_t skip_rows,
                                       size_t num_rows,
-                                      cudf::device_span<size_t> initial_str_offsets)
+                                      cuda::std::span<size_t> initial_str_offsets)
 {
   // Return early if there are no pruned pages
   auto const page_mask = subpass_page_mask_span();
@@ -1178,10 +1179,10 @@ void reader_impl::fill_pruned_offsets(size_t skip_rows,
 
   auto const& pass    = *_pass_itm_data;
   auto const& subpass = *pass.subpass;
-  auto const pages    = device_span<PageInfo>{subpass.pages.device_ptr(), subpass.pages.size()};
+  auto const pages    = cuda::std::span<PageInfo>{subpass.pages.device_ptr(), subpass.pages.size()};
   auto const chunks =
-    device_span<ColumnChunkDesc const>{pass.chunks.device_ptr(), pass.chunks.size()};
-  auto const device_page_mask = static_cast<device_span<bool const>>(page_mask);
+    cuda::std::span<ColumnChunkDesc const>{pass.chunks.device_ptr(), pass.chunks.size()};
+  auto const device_page_mask = static_cast<cuda::std::span<bool const>>(page_mask);
 
   // Set offsets for pruned string and list pages.
   parquet::detail::fill_pruned_offsets(

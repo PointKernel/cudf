@@ -8,6 +8,7 @@
 #include <cudf/reduction/detail/segmented_reduction_functions.hpp>
 #include <cudf/utilities/memory_resource.hpp>
 
+#include <cuda/std/span>
 #include <cuda/stream>
 
 namespace cudf {
@@ -15,7 +16,7 @@ namespace reduction {
 namespace detail {
 
 std::unique_ptr<cudf::column> segmented_mean(column_view const& col,
-                                             device_span<size_type const> offsets,
+                                             cuda::std::span<size_type const> offsets,
                                              cudf::data_type const output_dtype,
                                              null_policy null_handling,
                                              cuda::stream_ref stream,

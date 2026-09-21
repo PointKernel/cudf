@@ -22,6 +22,7 @@
 
 #include <cuda/iterator>
 #include <cuda/std/functional>
+#include <cuda/std/span>
 #include <cuda/std/tuple>
 #include <cuda/stream>
 #include <thrust/reduce.h>
@@ -48,7 +49,7 @@ struct group_sum_overflow_fn {
   template <cudf::detail::sum_overflow_supported Source>
   std::unique_ptr<column> operator()(column_view const& values,
                                      size_type num_groups,
-                                     cudf::device_span<size_type const> group_labels,
+                                     cuda::std::span<size_type const> group_labels,
                                      cuda::stream_ref stream,
                                      rmm::device_async_resource_ref mr) const
   {
@@ -116,7 +117,7 @@ struct group_sum_overflow_fn {
 
 std::unique_ptr<column> group_sum_overflow(column_view const& values,
                                            size_type num_groups,
-                                           cudf::device_span<size_type const> group_labels,
+                                           cuda::std::span<size_type const> group_labels,
                                            cuda::stream_ref stream,
                                            rmm::device_async_resource_ref mr)
 {

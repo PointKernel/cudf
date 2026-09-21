@@ -24,6 +24,7 @@
 #include <cub/device/device_memcpy.cuh>
 #include <cuda/functional>
 #include <cuda/iterator>
+#include <cuda/std/span>
 #include <cuda/stream>
 #include <thrust/for_each.h>
 
@@ -46,7 +47,9 @@ namespace detail {
  * @throw std::overflow_error if the output exceeds the column size limit
  */
 CUDF_EXPORT std::pair<std::unique_ptr<column>, int64_t> make_offsets_child_column(
-  device_span<size_type const> sizes, cuda::stream_ref stream, rmm::device_async_resource_ref mr);
+  cuda::std::span<size_type const> sizes,
+  cuda::stream_ref stream,
+  rmm::device_async_resource_ref mr);
 
 template <typename Iter>
 struct string_offsets_fn {

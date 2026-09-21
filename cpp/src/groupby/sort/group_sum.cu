@@ -9,6 +9,7 @@
 #include <cudf/utilities/memory_resource.hpp>
 #include <cudf/utilities/span.hpp>
 
+#include <cuda/std/span>
 #include <cuda/stream>
 
 namespace cudf {
@@ -16,7 +17,7 @@ namespace groupby {
 namespace detail {
 std::unique_ptr<column> group_sum(column_view const& values,
                                   size_type num_groups,
-                                  cudf::device_span<size_type const> group_labels,
+                                  cuda::std::span<size_type const> group_labels,
                                   cuda::stream_ref stream,
                                   rmm::device_async_resource_ref mr)
 {

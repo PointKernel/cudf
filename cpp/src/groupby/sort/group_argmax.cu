@@ -9,6 +9,7 @@
 #include <cudf/utilities/memory_resource.hpp>
 #include <cudf/utilities/span.hpp>
 
+#include <cuda/std/span>
 #include <cuda/stream>
 #include <thrust/gather.h>
 
@@ -17,7 +18,7 @@ namespace groupby {
 namespace detail {
 std::unique_ptr<column> group_argmax(column_view const& values,
                                      size_type num_groups,
-                                     cudf::device_span<size_type const> group_labels,
+                                     cuda::std::span<size_type const> group_labels,
                                      column_view const& key_sort_order,
                                      cuda::stream_ref stream,
                                      rmm::device_async_resource_ref mr)

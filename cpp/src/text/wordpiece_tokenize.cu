@@ -36,6 +36,7 @@
 #include <cuda/std/functional>
 #include <cuda/std/iterator>
 #include <cuda/std/limits>
+#include <cuda/std/span>
 #include <cuda/stream>
 #include <thrust/execution_policy.h>
 #include <thrust/find.h>
@@ -424,7 +425,7 @@ __device__ cudf::size_type wp_tokenize_fn(cudf::string_view word,
  * @param d_tokens Output tokens are written here
  */
 template <typename MapRefType, typename SubMapRefType>
-CUDF_KERNEL void tokenize_all_kernel(cudf::device_span<int64_t const> d_edges,
+CUDF_KERNEL void tokenize_all_kernel(cuda::std::span<int64_t const> d_edges,
                                      char const* d_chars,
                                      MapRefType const d_map,
                                      SubMapRefType const d_sub_map,
@@ -720,8 +721,8 @@ CUDF_KERNEL void find_words_kernel(cudf::column_device_view const d_strings,
  * @param d_tokens Output tokens are written here
  */
 template <typename MapRefType, typename SubMapRefType>
-CUDF_KERNEL void tokenize_kernel(cudf::device_span<int64_t const> d_starts,
-                                 cudf::device_span<cudf::size_type const> d_sizes,
+CUDF_KERNEL void tokenize_kernel(cuda::std::span<int64_t const> d_starts,
+                                 cuda::std::span<cudf::size_type const> d_sizes,
                                  char const* d_chars,
                                  MapRefType const d_map,
                                  SubMapRefType const d_sub_map,

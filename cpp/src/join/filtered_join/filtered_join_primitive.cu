@@ -18,6 +18,7 @@
 #include <cuco/operator.hpp>
 #include <cuco/static_set_ref.cuh>
 #include <cuco/utility/cuda_thread_scope.cuh>
+#include <cuda/std/span>
 #include <cuda/stream>
 
 #include <memory>
@@ -51,7 +52,7 @@ void filtered_join::insert_right_table_primitive(cuda::stream_ref stream)
 void filtered_join::query_right_table_primitive(
   cudf::table_view const& left,
   std::shared_ptr<cudf::detail::row::equality::preprocessed_table> const& preprocessed_left,
-  cudf::device_span<bool> contains_map,
+  cuda::std::span<bool> contains_map,
   cuda::stream_ref stream)
 {
   auto const comparator = primitive_row_comparator{

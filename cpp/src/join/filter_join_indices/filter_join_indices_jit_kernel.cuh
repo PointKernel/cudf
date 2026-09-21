@@ -12,6 +12,7 @@
 
 #include <rmm/device_uvector.hpp>
 
+#include <cuda/std/span>
 #include <cuda/stream>
 
 #include <memory>
@@ -43,8 +44,8 @@ std::pair<std::unique_ptr<rmm::device_uvector<size_type>>,
           std::unique_ptr<rmm::device_uvector<size_type>>>
 filter_join_indices_jit(cudf::table_view const& left,
                         cudf::table_view const& right,
-                        cudf::device_span<size_type const> left_indices,
-                        cudf::device_span<size_type const> right_indices,
+                        cuda::std::span<size_type const> left_indices,
+                        cuda::std::span<size_type const> right_indices,
                         std::string const& predicate_code,
                         join_kind join_kind,
                         bool is_ptx,
@@ -53,7 +54,7 @@ filter_join_indices_jit(cudf::table_view const& left,
 
 /**
  * @copydoc cudf::filter_join_indices_jit(table_view const&, table_view const&,
- *   device_span<size_type const>, device_span<size_type const>,
+ *   cuda::std::span<size_type const>, cuda::std::span<size_type const>,
  *   ast::expression const&, join_kind, cuda::stream_ref,
  *   rmm::device_async_resource_ref)
  */
@@ -61,8 +62,8 @@ std::pair<std::unique_ptr<rmm::device_uvector<size_type>>,
           std::unique_ptr<rmm::device_uvector<size_type>>>
 filter_join_indices_jit(cudf::table_view const& left,
                         cudf::table_view const& right,
-                        cudf::device_span<size_type const> left_indices,
-                        cudf::device_span<size_type const> right_indices,
+                        cuda::std::span<size_type const> left_indices,
+                        cuda::std::span<size_type const> right_indices,
                         ast::expression const& predicate,
                         join_kind join_kind,
                         cuda::stream_ref stream,

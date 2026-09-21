@@ -14,6 +14,7 @@
 #include <rmm/exec_policy.hpp>
 
 #include <cuda/iterator>
+#include <cuda/std/span>
 #include <cuda/stream>
 
 namespace cudf {
@@ -61,9 +62,9 @@ struct is_unique_iterator_fn {
 }  // namespace
 
 std::unique_ptr<column> group_nunique(column_view const& values,
-                                      cudf::device_span<size_type const> group_labels,
+                                      cuda::std::span<size_type const> group_labels,
                                       size_type const num_groups,
-                                      cudf::device_span<size_type const> group_offsets,
+                                      cuda::std::span<size_type const> group_offsets,
                                       null_policy null_handling,
                                       cuda::stream_ref stream,
                                       rmm::device_async_resource_ref mr)

@@ -34,6 +34,7 @@
 #include <cuda/functional>
 #include <cuda/iterator>
 #include <cuda/std/iterator>
+#include <cuda/std/span>
 #include <cuda/stream>
 #include <thrust/binary_search.h>
 #include <thrust/for_each.h>
@@ -97,7 +98,7 @@ struct dispatch_to_arrow_host {
   }
 
   template <typename T>
-  int populate_data_buffer(device_span<T const> input, ArrowBuffer* buffer) const
+  int populate_data_buffer(cuda::std::span<T const> input, ArrowBuffer* buffer) const
   {
     NANOARROW_RETURN_NOT_OK(ArrowBufferResize(buffer, input.size_bytes(), 1));
     enable_hugepage(buffer);
@@ -124,7 +125,7 @@ struct dispatch_to_arrow_host {
     NANOARROW_RETURN_NOT_OK(populate_validity_bitmap(ArrowArrayValidityBitmap(tmp.get())));
     using DataType = device_storage_type_t<T>;
     NANOARROW_RETURN_NOT_OK(
-      populate_data_buffer(device_span<DataType const>(column.data<DataType>(), column.size()),
+      populate_data_buffer(cuda::std::span<DataType const>(column.data<DataType>(), column.size()),
                            ArrowArrayBuffer(tmp.get(), fixed_width_data_buffer_idx)));
 
     ArrowArrayMove(tmp.get(), out);
@@ -146,8 +147,8 @@ int dispatch_to_arrow_host::operator()<bool>(ArrowArray* out) const
   NANOARROW_RETURN_NOT_OK(populate_validity_bitmap(ArrowArrayValidityBitmap(tmp.get())));
   auto bitmask = detail::bools_to_mask(column, stream, mr);
   NANOARROW_RETURN_NOT_OK(populate_data_buffer(
-    device_span<uint8_t const>(reinterpret_cast<uint8_t const*>(bitmask.first->data()),
-                               bitmask.first->size()),
+    cuda::std::span<uint8_t const>(reinterpret_cast<uint8_t const*>(bitmask.first->data()),
+                                   bitmask.first->size()),
     ArrowArrayBuffer(tmp.get(), fixed_width_data_buffer_idx)));
 
   ArrowArrayMove(tmp.get(), out);
@@ -187,17 +188,17 @@ int dispatch_to_arrow_host::operator()<cudf::string_view>(ArrowArray* out) const
   auto const offsets = scv.offsets();
   if (offsets.type().id() == cudf::type_id::INT64) {
     NANOARROW_RETURN_NOT_OK(populate_data_buffer(
-      device_span<int64_t const>(offsets.data<int64_t>() + scv.offset(), scv.size() + 1),
+      cuda::std::span<int64_t const>(offsets.data<int64_t>() + scv.offset(), scv.size() + 1),
       ArrowArrayBuffer(tmp.get(), fixed_width_data_buffer_idx)));
   } else {
     NANOARROW_RETURN_NOT_OK(populate_data_buffer(
-      device_span<int32_t const>(offsets.data<int32_t>() + scv.offset(), scv.size() + 1),
+      cuda::std::span<int32_t const>(offsets.data<int32_t>() + scv.offset(), scv.size() + 1),
       ArrowArrayBuffer(tmp.get(), fixed_width_data_buffer_idx)));
   }
 
-  NANOARROW_RETURN_NOT_OK(
-    populate_data_buffer(device_span<char const>(scv.chars_begin(stream), scv.chars_size(stream)),
-                         ArrowArrayBuffer(tmp.get(), 2)));
+  NANOARROW_RETURN_NOT_OK(populate_data_buffer(
+    cuda::std::span<char const>(scv.chars_begin(stream), scv.chars_size(stream)),
+    ArrowArrayBuffer(tmp.get(), 2)));
 
   ArrowArrayMove(tmp.get(), out);
   return NANOARROW_OK;
@@ -219,7 +220,7 @@ int dispatch_to_arrow_host::operator()<cudf::list_view>(ArrowArray* out) const
       ArrowBufferAppendInt32(ArrowArrayBuffer(tmp.get(), fixed_width_data_buffer_idx), 0));
   } else {
     NANOARROW_RETURN_NOT_OK(
-      populate_data_buffer(device_span<int32_t const>(lcv.offsets_begin(), (column.size() + 1)),
+      populate_data_buffer(cuda::std::span<int32_t const>(lcv.offsets_begin(), (column.size() + 1)),
                            ArrowArrayBuffer(tmp.get(), fixed_width_data_buffer_idx)));
   }
 
@@ -249,25 +250,25 @@ int dispatch_to_arrow_host::operator()<cudf::dictionary32>(ArrowArray* out) cons
     case type_id::INT8:
     case type_id::UINT8:
       NANOARROW_RETURN_NOT_OK(populate_data_buffer(
-        device_span<int8_t const>(dict_indices.data<int8_t>(), dict_indices.size()),
+        cuda::std::span<int8_t const>(dict_indices.data<int8_t>(), dict_indices.size()),
         ArrowArrayBuffer(tmp.get(), fixed_width_data_buffer_idx)));
       break;
     case type_id::INT16:
     case type_id::UINT16:
       NANOARROW_RETURN_NOT_OK(populate_data_buffer(
-        device_span<int16_t const>(dict_indices.data<int16_t>(), dict_indices.size()),
+        cuda::std::span<int16_t const>(dict_indices.data<int16_t>(), dict_indices.size()),
         ArrowArrayBuffer(tmp.get(), fixed_width_data_buffer_idx)));
       break;
     case type_id::INT32:
     case type_id::UINT32:
       NANOARROW_RETURN_NOT_OK(populate_data_buffer(
-        device_span<int32_t const>(dict_indices.data<int32_t>(), dict_indices.size()),
+        cuda::std::span<int32_t const>(dict_indices.data<int32_t>(), dict_indices.size()),
         ArrowArrayBuffer(tmp.get(), fixed_width_data_buffer_idx)));
       break;
     case type_id::INT64:
     case type_id::UINT64:
       NANOARROW_RETURN_NOT_OK(populate_data_buffer(
-        device_span<int64_t const>(dict_indices.data<int64_t>(), dict_indices.size()),
+        cuda::std::span<int64_t const>(dict_indices.data<int64_t>(), dict_indices.size()),
         ArrowArrayBuffer(tmp.get(), fixed_width_data_buffer_idx)));
       break;
     default: CUDF_FAIL("unsupported type for dictionary indices");
@@ -383,8 +384,8 @@ unique_device_array_t to_arrow_host(cudf::column_view const& col,
  */
 struct strings_to_binary_view {
   cudf::column_device_view d_strings;
-  input_offsetalator d_offsets;               // offsets of longer strings in d_strings
-  device_span<int64_t const> buffer_offsets;  // output buffers' offsets
+  input_offsetalator d_offsets;                   // offsets of longer strings in d_strings
+  cuda::std::span<int64_t const> buffer_offsets;  // output buffers' offsets
   ArrowBinaryView* d_items;
 
   __device__ void operator()(cudf::size_type idx) const

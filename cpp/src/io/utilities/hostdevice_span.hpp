@@ -9,6 +9,7 @@
 #include <cudf/utilities/error.hpp>
 #include <cudf/utilities/span.hpp>
 
+#include <cuda/std/span>
 #include <cuda/stream>
 
 namespace cudf::detail {
@@ -54,9 +55,9 @@ class hostdevice_span {
   template <typename U,
             std::enable_if_t<std::is_convertible_v<T (*)[], U (*)[]>,  // NOLINT
                              void>* = nullptr>
-  [[nodiscard]] operator cudf::device_span<U>() const noexcept
+  [[nodiscard]] operator cuda::std::span<U>() const noexcept
   {
-    return cudf::device_span<U>(_device_data, size());
+    return cuda::std::span<U>(_device_data, size());
   }
 
   /**
@@ -155,7 +156,8 @@ class hostdevice_span {
   void host_to_device_async(cuda::stream_ref stream) const
   {
     static_assert(not std::is_const_v<T>, "Cannot copy to const device memory");
-    cudf::detail::cuda_memcpy_async<T>(device_span<T>{device_ptr(), size()}, _host_data, stream);
+    cudf::detail::cuda_memcpy_async<T>(
+      cuda::std::span<T>{device_ptr(), size()}, _host_data, stream);
   }
 
   [[deprecated("Use host_to_device_async instead")]] void host_to_device(
@@ -169,7 +171,7 @@ class hostdevice_span {
   {
     static_assert(not std::is_const_v<T>, "Cannot copy to const host memory");
     cudf::detail::cuda_memcpy_async<T>(
-      _host_data, device_span<T const>{device_ptr(), size()}, stream);
+      _host_data, cuda::std::span<T const>{device_ptr(), size()}, stream);
   }
 
   void device_to_host(cuda::stream_ref stream) const

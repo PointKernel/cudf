@@ -1,5 +1,5 @@
 /*
- * SPDX-FileCopyrightText: Copyright (c) 2023-2026, NVIDIA CORPORATION.
+ * SPDX-FileCopyrightText: Copyright (c) 2023-2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
 #pragma once
@@ -9,6 +9,7 @@
 #include <cudf/types.hpp>
 #include <cudf/utilities/span.hpp>
 
+#include <cuda/std/span>
 #include <thrust/binary_search.h>
 #include <thrust/execution_policy.h>
 
@@ -26,8 +27,8 @@ inline __device__ duration_s get_ut_offset(table_device_view tz_table, timestamp
 {
   if (tz_table.num_rows() == 0) { return duration_s{0}; }
 
-  cudf::device_span<timestamp_s const> transition_times(tz_table.column(0).head<timestamp_s>(),
-                                                        static_cast<size_t>(tz_table.num_rows()));
+  cuda::std::span<timestamp_s const> transition_times(tz_table.column(0).head<timestamp_s>(),
+                                                      static_cast<size_t>(tz_table.num_rows()));
 
   auto const ts_ttime_it = [&]() {
     auto last_less_equal = [](auto begin, auto end, auto value) {

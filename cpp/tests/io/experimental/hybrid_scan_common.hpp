@@ -21,6 +21,7 @@
 #include <rmm/device_buffer.hpp>
 #include <rmm/resource_ref.hpp>
 
+#include <cuda/std/span>
 #include <cuda/stream>
 
 #include <algorithm>
@@ -65,8 +66,8 @@ struct multifile_inputs {
  */
 struct multisource_device_data {
   std::vector<rmm::device_buffer> buffers;
-  std::vector<std::vector<cudf::device_span<uint8_t const>>> per_source_spans;
-  std::vector<cudf::device_span<uint8_t const>> flat_spans;
+  std::vector<std::vector<cuda::std::span<uint8_t const>>> per_source_spans;
+  std::vector<cuda::std::span<uint8_t const>> flat_spans;
 };
 
 /**

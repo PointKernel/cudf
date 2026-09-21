@@ -16,6 +16,7 @@
 #include <rmm/device_uvector.hpp>
 
 #include <cuda/iterator>
+#include <cuda/std/span>
 #include <cuda/std/tuple>
 
 #include <type_traits>
@@ -59,14 +60,14 @@ TEST(MultiBufferTestIntegral, BasicTest1)
 
   // Initialize device buffers for memset
   auto buffers =
-    cudf::detail::make_host_vector<cudf::device_span<uint64_t>>(device_buffers.size(), stream);
+    cudf::detail::make_host_vector<cuda::std::span<uint64_t>>(device_buffers.size(), stream);
   std::transform(
     cuda::make_zip_iterator(cuda::std::make_tuple(device_buffers.begin(), buffer_sizes.begin())),
     cuda::make_zip_iterator(cuda::std::make_tuple(device_buffers.end(), buffer_sizes.end())),
     buffers.begin(),
     [](auto const& elem) {
-      return cudf::device_span<uint64_t>(cuda::std::get<0>(elem).data() + 1000,
-                                         cuda::std::get<1>(elem));
+      return cuda::std::span<uint64_t>(cuda::std::get<0>(elem).data() + 1000,
+                                       cuda::std::get<1>(elem));
     });
 
   // Function call

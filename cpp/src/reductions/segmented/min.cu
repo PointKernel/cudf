@@ -8,13 +8,15 @@
 #include <cudf/reduction/detail/segmented_reduction_functions.hpp>
 #include <cudf/utilities/memory_resource.hpp>
 
+#include <cuda/std/span>
+
 namespace cudf {
 namespace reduction {
 namespace detail {
 
 std::unique_ptr<cudf::column> segmented_min(
   column_view const& col,
-  device_span<size_type const> offsets,
+  cuda::std::span<size_type const> offsets,
   data_type const output_dtype,
   null_policy null_handling,
   std::optional<std::reference_wrapper<scalar const>> init,

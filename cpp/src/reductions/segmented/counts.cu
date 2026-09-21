@@ -8,6 +8,7 @@
 #include <cudf/detail/null_mask.cuh>
 #include <cudf/utilities/memory_resource.hpp>
 
+#include <cuda/std/span>
 #include <thrust/adjacent_difference.h>
 
 namespace cudf {
@@ -16,7 +17,7 @@ namespace detail {
 
 rmm::device_uvector<size_type> segmented_counts(bitmask_type const* null_mask,
                                                 bool has_nulls,
-                                                device_span<size_type const> offsets,
+                                                cuda::std::span<size_type const> offsets,
                                                 null_policy null_handling,
                                                 cuda::stream_ref stream,
                                                 rmm::device_async_resource_ref mr)

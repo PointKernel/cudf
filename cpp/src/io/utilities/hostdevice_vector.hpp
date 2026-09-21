@@ -18,7 +18,11 @@
 
 #include <rmm/device_uvector.hpp>
 
+#include <cuda/std/mdspan>
+#include <cuda/std/span>
 #include <cuda/stream>
+
+#include <utility>
 
 namespace cudf::detail {
 
@@ -86,10 +90,10 @@ class hostdevice_vector {
   operator cudf::host_span<T>() { return host_span<T>(host_ptr(), size(), true); }
   operator cudf::host_span<T const>() const { return host_span<T const>(host_ptr(), size(), true); }
 
-  operator cudf::device_span<T>() { return cudf::device_span<T>(device_ptr(), size()); }
-  operator cudf::device_span<T const>() const
+  operator cuda::std::span<T>() { return cuda::std::span<T>(device_ptr(), size()); }
+  operator cuda::std::span<T const>() const
   {
-    return cudf::device_span<T const>(device_ptr(), size());
+    return cuda::std::span<T const>(device_ptr(), size());
   }
 
   void host_to_device_async(cuda::stream_ref stream)
@@ -147,37 +151,32 @@ class hostdevice_2dvector {
   {
   }
 
-  operator device_2dspan<T>()
+  [[nodiscard]] auto device_view()
   {
-    return device_2dspan<T>(device_span<T>(_data.device_ptr(), _data.size()), _size.second);
+    return cuda::std::mdspan<T, cuda::std::dextents<size_t, 2>>(
+      _data.device_ptr(), _size.first, _size.second);
   }
-  operator device_2dspan<T const>() const
+  [[nodiscard]] auto device_view() const
   {
-    return device_2dspan<T const>(device_span<T const>(_data.device_ptr(), _data.size()),
-                                  _size.second);
-  }
-
-  device_2dspan<T> device_view() { return static_cast<device_2dspan<T>>(*this); }
-  [[nodiscard]] device_2dspan<T const> device_view() const
-  {
-    return static_cast<device_2dspan<T const>>(*this);
+    return cuda::std::mdspan<T const, cuda::std::dextents<size_t, 2>>(
+      _data.device_ptr(), _size.first, _size.second);
   }
 
-  operator host_2dspan<T>()
+  [[nodiscard]] auto host_view()
   {
-    return host_2dspan<T>(host_span<T>(_data.host_ptr(), _data.size(), true), _size.second);
+    return cuda::std::mdspan<T, cuda::std::dextents<size_t, 2>>(
+      _data.host_ptr(), _size.first, _size.second);
   }
-  operator host_2dspan<T const>() const
+  [[nodiscard]] auto host_view() const
   {
-    return host_2dspan<T const>(host_span<T const>(_data.host_ptr(), _data.size(), true),
-                                _size.second);
+    return cuda::std::mdspan<T const, cuda::std::dextents<size_t, 2>>(
+      _data.host_ptr(), _size.first, _size.second);
   }
 
-  host_2dspan<T> host_view() { return static_cast<host_2dspan<T>>(*this); }
-  [[nodiscard]] host_2dspan<T const> host_view() const
-  {
-    return static_cast<host_2dspan<T const>>(*this);
-  }
+  [[nodiscard]] host_span<T> flat_host_view() { return _data; }
+  [[nodiscard]] host_span<T const> flat_host_view() const { return _data; }
+  [[nodiscard]] cuda::std::span<T> flat_device_view() { return _data; }
+  [[nodiscard]] cuda::std::span<T const> flat_device_view() const { return _data; }
 
   host_span<T> operator[](size_t row)
   {
@@ -189,6 +188,16 @@ class hostdevice_2dvector {
   {
     return host_span<T const>(_data.host_ptr(), _data.size(), true)
       .subspan(row * _size.second, _size.second);
+  }
+
+  [[nodiscard]] T& operator()(size_t row, size_t column) { return host_view()(row, column); }
+  [[nodiscard]] T const& operator()(size_t row, size_t column) const
+  {
+    return host_view()(row, column);
+  }
+  [[nodiscard]] size_t extent(size_t dimension) const noexcept
+  {
+    return host_view().extent(dimension);
   }
 
   [[nodiscard]] auto size() const noexcept { return _size; }
@@ -218,7 +227,7 @@ class hostdevice_2dvector {
 
  private:
   hostdevice_vector<T> _data;
-  typename host_2dspan<T>::size_type _size;
+  std::pair<size_t, size_t> _size;
 };
 
 }  // namespace cudf::detail

@@ -15,6 +15,7 @@
 #include <rmm/exec_policy.hpp>
 
 #include <cuda/iterator>
+#include <cuda/std/span>
 #include <cuda/stream>
 #include <thrust/copy.h>
 
@@ -66,8 +67,8 @@ size_type streaming_groupby::impl::probe_and_insert_first_batch(
   auto* const d_batch_self_eq_ptr = static_cast<decltype(batch_self_eq)*>(d_batch_self_eq.data());
   cudf::host_span<std::byte const> const h_batch_self_eq_span = h_batch_self_eq;
   cudf::detail::cuda_memcpy_async(
-    cudf::device_span<std::byte>{static_cast<std::byte*>(d_batch_self_eq.data()),
-                                 sizeof(batch_self_eq)},
+    cuda::std::span<std::byte>{static_cast<std::byte*>(d_batch_self_eq.data()),
+                               sizeof(batch_self_eq)},
     h_batch_self_eq_span,
     stream);
   auto const hasher       = offset_cache_hasher{batch_hash_cache, _max_distinct_keys};

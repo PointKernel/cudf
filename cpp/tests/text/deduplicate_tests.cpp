@@ -1,5 +1,5 @@
 /*
- * SPDX-FileCopyrightText: Copyright (c) 2025, NVIDIA CORPORATION.
+ * SPDX-FileCopyrightText: Copyright (c) 2025-2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
 
@@ -11,6 +11,8 @@
 #include <cudf/strings/strings_column_view.hpp>
 
 #include <nvtext/deduplicate.hpp>
+
+#include <cuda/std/span>
 
 #include <vector>
 
@@ -61,7 +63,7 @@ TEST_F(TextDeduplicateTest, SuffixArray)
 
   auto const results = nvtext::build_suffix_array(sv, 8);
   auto const col_view =
-    cudf::column_view(cudf::device_span<cudf::size_type const>(results->data(), results->size()));
+    cudf::column_view(cuda::std::span<cudf::size_type const>(results->data(), results->size()));
   CUDF_TEST_EXPECT_COLUMNS_EQUAL(expected, col_view);
 }
 

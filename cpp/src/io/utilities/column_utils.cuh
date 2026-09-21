@@ -16,6 +16,7 @@
 #include <rmm/exec_policy.hpp>
 
 #include <cuda/iterator>
+#include <cuda/std/span>
 #include <cuda/stream>
 #include <thrust/for_each.h>
 
@@ -39,13 +40,13 @@ namespace io {
  */
 template <typename ColumnDescriptor>
 rmm::device_uvector<column_device_view> create_leaf_column_device_views(
-  typename cudf::device_span<ColumnDescriptor> col_desc,
+  typename cuda::std::span<ColumnDescriptor> col_desc,
   table_device_view const& parent_table_device_view,
   cuda::stream_ref stream)
 {
   rmm::device_uvector<column_device_view> leaf_column_views(parent_table_device_view.num_columns(),
                                                             stream);
-  auto leaf_columns = cudf::device_span<column_device_view>{leaf_column_views};
+  auto leaf_columns = cuda::std::span<column_device_view>{leaf_column_views};
 
   auto iter = cuda::counting_iterator<size_type>{0};
   thrust::for_each(

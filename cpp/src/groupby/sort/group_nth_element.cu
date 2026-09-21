@@ -19,6 +19,7 @@
 
 #include <cuda/functional>
 #include <cuda/iterator>
+#include <cuda/std/span>
 #include <cuda/stream>
 #include <thrust/scan.h>
 #include <thrust/scatter.h>
@@ -30,8 +31,8 @@ namespace groupby {
 namespace detail {
 std::unique_ptr<column> group_nth_element(column_view const& values,
                                           column_view const& group_sizes,
-                                          cudf::device_span<size_type const> group_labels,
-                                          cudf::device_span<size_type const> group_offsets,
+                                          cuda::std::span<size_type const> group_labels,
+                                          cuda::std::span<size_type const> group_offsets,
                                           size_type num_groups,
                                           size_type n,
                                           null_policy null_handling,

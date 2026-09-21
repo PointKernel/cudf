@@ -27,6 +27,8 @@
 #include <cuda/std/functional>
 #include <cuda/std/iterator>
 #include <cuda/std/limits>
+#include <cuda/std/mdspan>
+#include <cuda/std/span>
 #include <cuda/std/tuple>
 #include <cuda/std/utility>
 #include <cuda/stream>
@@ -41,8 +43,6 @@
 namespace cudf::io::parquet::detail {
 
 namespace {
-
-using ::cudf::detail::device_2dspan;
 
 using cudf::io::detail::codec_exec_result;
 using cudf::io::detail::codec_status;
@@ -382,17 +382,17 @@ inline void __device__ set_page_data_start(state_type* s)
 // blockDim {512,1,1}
 template <int block_size>
 CUDF_KERNEL void __launch_bounds__(block_size)
-  gpuInitRowGroupFragments(device_2dspan<PageFragment> frag,
-                           device_span<parquet_column_device_view const> col_desc,
-                           device_span<partition_info const> partitions,
-                           device_span<int const> part_frag_offset,
+  gpuInitRowGroupFragments(cuda::std::mdspan<PageFragment, cuda::std::dextents<size_t, 2>> frag,
+                           cuda::std::span<parquet_column_device_view const> col_desc,
+                           cuda::std::span<partition_info const> partitions,
+                           cuda::std::span<int const> part_frag_offset,
                            uint32_t fragment_size)
 {
   __shared__ __align__(16) frag_init_state_s state_g;
 
   frag_init_state_s* const s          = &state_g;
   auto const t                        = threadIdx.x;
-  auto const num_fragments_per_column = frag.size().second;
+  auto const num_fragments_per_column = frag.extent(1);
 
   if (t == 0) { s->col = col_desc[blockIdx.x]; }
   __syncthreads();
@@ -405,22 +405,22 @@ CUDF_KERNEL void __launch_bounds__(block_size)
       int const p            = it - part_frag_offset.begin() - 1;
       int const part_end_row = partitions[p].start_row + partitions[p].num_rows;
       s->frag.start_row = (frag_y - part_frag_offset[p]) * fragment_size + partitions[p].start_row;
-      s->frag.chunk     = frag[blockIdx.x][frag_y].chunk;
+      s->frag.chunk     = frag(blockIdx.x, frag_y).chunk;
       init_frag_state(s, fragment_size, part_end_row);
     }
     __syncthreads();
 
     calculate_frag_size<block_size>(s, t);
     __syncthreads();
-    if (t == 0) { frag[blockIdx.x][frag_y] = s->frag; }
+    if (t == 0) { frag(blockIdx.x, frag_y) = s->frag; }
   }
 }
 
 // blockDim {512,1,1}
 template <int block_size>
 CUDF_KERNEL void __launch_bounds__(block_size)
-  gpuCalculatePageFragments(device_span<PageFragment> frag,
-                            device_span<size_type const> column_frag_sizes)
+  gpuCalculatePageFragments(cuda::std::span<PageFragment> frag,
+                            cuda::std::span<size_type const> column_frag_sizes)
 {
   __shared__ __align__(16) frag_init_state_s state_g;
 
@@ -446,8 +446,8 @@ CUDF_KERNEL void __launch_bounds__(block_size)
 
 // blockDim {128,1,1}
 CUDF_KERNEL void __launch_bounds__(128)
-  gpuInitFragmentStats(device_span<statistics_group> groups,
-                       device_span<PageFragment const> fragments)
+  gpuInitFragmentStats(cuda::std::span<statistics_group> groups,
+                       cuda::std::span<PageFragment const> fragments)
 {
   uint32_t const lane_id = threadIdx.x & WARP_MASK;
   uint32_t const frag_id = blockIdx.x * 4 + (threadIdx.x / cudf::detail::warp_size);
@@ -553,11 +553,11 @@ __device__ size_t delta_data_len(Type physical_type,
 
 // blockDim {128,1,1}
 CUDF_KERNEL void __launch_bounds__(128)
-  gpuInitPages(device_2dspan<EncColumnChunk> chunks,
-               device_span<EncPage> pages,
-               device_span<size_type> page_sizes,
-               device_span<size_type const> comp_page_sizes,
-               device_span<parquet_column_device_view const> col_desc,
+  gpuInitPages(cuda::std::mdspan<EncColumnChunk, cuda::std::dextents<size_t, 2>> chunks,
+               cuda::std::span<EncPage> pages,
+               cuda::std::span<size_type> page_sizes,
+               cuda::std::span<size_type const> comp_page_sizes,
+               cuda::std::span<parquet_column_device_view const> col_desc,
                statistics_merge_group* page_grstats,
                statistics_merge_group* chunk_grstats,
                int32_t num_columns,
@@ -583,7 +583,7 @@ CUDF_KERNEL void __launch_bounds__(128)
 
   if (t == 0) {
     col_g  = col_desc[blockIdx.x];
-    ck_g   = chunks[blockIdx.y][blockIdx.x];
+    ck_g   = chunks(blockIdx.y, blockIdx.x);
     page_g = {};
   }
   __syncthreads();
@@ -630,7 +630,7 @@ CUDF_KERNEL void __launch_bounds__(128)
         page_g.compressed_data = ck_g.compressed_bfr + comp_page_offset;
         page_g.num_fragments   = 0;
         page_g.page_type       = PageType::DICTIONARY_PAGE;
-        page_g.chunk           = &chunks[blockIdx.y][blockIdx.x];
+        page_g.chunk           = &chunks(blockIdx.y, blockIdx.x);
         page_g.chunk_id        = blockIdx.y * num_columns + blockIdx.x;
         page_g.hdr_size        = 0;
         page_g.def_lvl_bytes   = 0;
@@ -732,7 +732,7 @@ CUDF_KERNEL void __launch_bounds__(128)
         }
         if (!t) {
           page_g.num_fragments  = fragments_in_chunk - page_start;
-          page_g.chunk          = &chunks[blockIdx.y][blockIdx.x];
+          page_g.chunk          = &chunks(blockIdx.y, blockIdx.x);
           page_g.chunk_id       = blockIdx.y * num_columns + blockIdx.x;
           page_g.page_type      = data_page_type;
           page_g.hdr_size       = 0;
@@ -895,7 +895,7 @@ CUDF_KERNEL void __launch_bounds__(128)
   __syncthreads();
   if (t == 0) {
     if (not pages.empty()) ck_g.pages = &pages[ck_g.first_page];
-    chunks[blockIdx.y][blockIdx.x] = ck_g;
+    chunks(blockIdx.y, blockIdx.x) = ck_g;
     if (chunk_grstats) chunk_grstats[blockIdx.y * num_columns + blockIdx.x] = pagestats_g;
   }
 }
@@ -1328,7 +1328,7 @@ __device__ auto julian_days_with_time(int64_t v)
 // blockDim(128, 1, 1)
 template <int block_size>
 CUDF_KERNEL void __launch_bounds__(block_size, 8)
-  gpuEncodePageLevels(device_span<EncPage> pages,
+  gpuEncodePageLevels(cuda::std::span<EncPage> pages,
                       bool write_v2_headers,
                       encode_kernel_mask kernel_mask)
 {
@@ -1487,10 +1487,10 @@ CUDF_KERNEL void __launch_bounds__(block_size, 8)
 template <int block_size, typename state_buf>
 __device__ void finish_page_encode(state_buf* s,
                                    uint8_t const* end_ptr,
-                                   device_span<EncPage> pages,
-                                   device_span<device_span<uint8_t const>> comp_in,
-                                   device_span<device_span<uint8_t>> comp_out,
-                                   device_span<codec_exec_result> comp_results,
+                                   cuda::std::span<EncPage> pages,
+                                   cuda::std::span<cuda::std::span<uint8_t const>> comp_in,
+                                   cuda::std::span<cuda::std::span<uint8_t>> comp_out,
+                                   cuda::std::span<codec_exec_result> comp_results,
                                    bool write_v2_headers)
 {
   auto const t = threadIdx.x;
@@ -1606,10 +1606,10 @@ __device__ inline void encode_value(uint8_t* dst, T src, size_type stride)
 // blockDim(128, 1, 1)
 template <int block_size>
 CUDF_KERNEL void __launch_bounds__(block_size, 8)
-  gpuEncodePages(device_span<EncPage> pages,
-                 device_span<device_span<uint8_t const>> comp_in,
-                 device_span<device_span<uint8_t>> comp_out,
-                 device_span<codec_exec_result> comp_results,
+  gpuEncodePages(cuda::std::span<EncPage> pages,
+                 cuda::std::span<cuda::std::span<uint8_t const>> comp_in,
+                 cuda::std::span<cuda::std::span<uint8_t>> comp_out,
+                 cuda::std::span<codec_exec_result> comp_results,
                  bool write_v2_headers,
                  bool is_split_stream)
 {
@@ -1846,10 +1846,10 @@ CUDF_KERNEL void __launch_bounds__(block_size, 8)
 // blockDim(128, 1, 1)
 template <int block_size>
 CUDF_KERNEL void __launch_bounds__(block_size, 8)
-  gpuEncodeDictPages(device_span<EncPage> pages,
-                     device_span<device_span<uint8_t const>> comp_in,
-                     device_span<device_span<uint8_t>> comp_out,
-                     device_span<codec_exec_result> comp_results,
+  gpuEncodeDictPages(cuda::std::span<EncPage> pages,
+                     cuda::std::span<cuda::std::span<uint8_t const>> comp_in,
+                     cuda::std::span<cuda::std::span<uint8_t>> comp_out,
+                     cuda::std::span<codec_exec_result> comp_results,
                      bool write_v2_headers)
 {
   __shared__ __align__(8) rle_page_enc_state_s state_g;
@@ -1973,10 +1973,10 @@ CUDF_KERNEL void __launch_bounds__(block_size, 8)
 // blockDim(128, 1, 1)
 template <int block_size>
 CUDF_KERNEL void __launch_bounds__(block_size, 8)
-  gpuEncodeDeltaBinaryPages(device_span<EncPage> pages,
-                            device_span<device_span<uint8_t const>> comp_in,
-                            device_span<device_span<uint8_t>> comp_out,
-                            device_span<codec_exec_result> comp_results)
+  gpuEncodeDeltaBinaryPages(cuda::std::span<EncPage> pages,
+                            cuda::std::span<cuda::std::span<uint8_t const>> comp_in,
+                            cuda::std::span<cuda::std::span<uint8_t>> comp_out,
+                            cuda::std::span<codec_exec_result> comp_results)
 {
   // block of shared memory for value storage and bit packing
   __shared__ uleb128_t delta_shared[delta::buffer_size + delta::block_size];
@@ -2076,10 +2076,10 @@ CUDF_KERNEL void __launch_bounds__(block_size, 8)
 // blockDim(128, 1, 1)
 template <int block_size>
 CUDF_KERNEL void __launch_bounds__(block_size, 8)
-  gpuEncodeDeltaLengthByteArrayPages(device_span<EncPage> pages,
-                                     device_span<device_span<uint8_t const>> comp_in,
-                                     device_span<device_span<uint8_t>> comp_out,
-                                     device_span<codec_exec_result> comp_results)
+  gpuEncodeDeltaLengthByteArrayPages(cuda::std::span<EncPage> pages,
+                                     cuda::std::span<cuda::std::span<uint8_t const>> comp_in,
+                                     cuda::std::span<cuda::std::span<uint8_t>> comp_out,
+                                     cuda::std::span<codec_exec_result> comp_results)
 {
   // block of shared memory for value storage and bit packing
   __shared__ uleb128_t delta_shared[delta::buffer_size + delta::block_size];
@@ -2220,10 +2220,10 @@ struct byte_array {
 // blockDim(128, 1, 1)
 template <int block_size>
 CUDF_KERNEL void __launch_bounds__(block_size, 8)
-  gpuEncodeDeltaByteArrayPages(device_span<EncPage> pages,
-                               device_span<device_span<uint8_t const>> comp_in,
-                               device_span<device_span<uint8_t>> comp_out,
-                               device_span<codec_exec_result> comp_results)
+  gpuEncodeDeltaByteArrayPages(cuda::std::span<EncPage> pages,
+                               cuda::std::span<cuda::std::span<uint8_t const>> comp_in,
+                               cuda::std::span<cuda::std::span<uint8_t>> comp_out,
+                               cuda::std::span<codec_exec_result> comp_results)
 {
   using cudf::detail::warp_size;
   // block of shared memory for value storage and bit packing
@@ -2473,7 +2473,7 @@ constexpr int decide_compression_block_size =
 
 // blockDim(decide_compression_block_size, 1, 1)
 CUDF_KERNEL void __launch_bounds__(decide_compression_block_size)
-  decide_compression_kernel(device_span<EncColumnChunk> chunks, bool page_level_compression)
+  decide_compression_kernel(cuda::std::span<EncColumnChunk> chunks, bool page_level_compression)
 {
   namespace cg = cooperative_groups;
 
@@ -2768,7 +2768,7 @@ __device__ void byte_reverse128(__int128_t v, void* dst)
  * @param span device_span to test.
  * @return true if the span contains all valid UTF-8 characters.
  */
-__device__ bool is_valid_utf8(device_span<unsigned char const> span)
+__device__ bool is_valid_utf8(cuda::std::span<unsigned char const> span)
 {
   auto idx = 0;
   while (idx < span.size_bytes()) {
@@ -2835,7 +2835,7 @@ __device__ bool increment_utf8_at(unsigned char* ptr)
  * @return Pair object containing a pointer to the truncated data and its length.
  */
 __device__ cuda::std::pair<void const*, uint32_t> truncate_utf8(
-  device_span<unsigned char const> span, bool is_min, void* scratch, int32_t truncate_length)
+  cuda::std::span<unsigned char const> span, bool is_min, void* scratch, int32_t truncate_length)
 {
   // we know at this point that truncate_length < size_bytes, so
   // there is data at [len]. work backwards until we find
@@ -2872,10 +2872,8 @@ __device__ cuda::std::pair<void const*, uint32_t> truncate_utf8(
  *
  * @return Pair object containing a pointer to the truncated data and its length.
  */
-__device__ cuda::std::pair<void const*, uint32_t> truncate_binary(device_span<uint8_t const> arr,
-                                                                  bool is_min,
-                                                                  void* scratch,
-                                                                  int32_t truncate_length)
+__device__ cuda::std::pair<void const*, uint32_t> truncate_binary(
+  cuda::std::span<uint8_t const> arr, bool is_min, void* scratch, int32_t truncate_length)
 {
   if (is_min) { return {arr.data(), truncate_length}; }
   memcpy(scratch, arr.data(), truncate_length);
@@ -2910,7 +2908,7 @@ __device__ cuda::std::pair<void const*, uint32_t> truncate_string(string_view co
 
   // convert char to unsigned since UTF-8 is just bytes, not chars.  can't use std::byte because
   // that can't be incremented.
-  auto const span = device_span<unsigned char const>(
+  auto const span = cuda::std::span<unsigned char const>(
     reinterpret_cast<unsigned char const*>(str.data()), str.size_bytes());
 
   // if str is all 8-bit chars, or is actually not UTF-8, then we can just use truncate_binary()
@@ -2931,8 +2929,8 @@ __device__ cuda::std::pair<void const*, uint32_t> truncate_byte_array(
   }
 
   // convert std::byte to uint8_t since bytes can't be incremented
-  device_span<uint8_t const> const span{reinterpret_cast<uint8_t const*>(arr.data()),
-                                        arr.size_bytes()};
+  cuda::std::span<uint8_t const> const span{reinterpret_cast<uint8_t const*>(arr.data()),
+                                            arr.size_bytes()};
   return truncate_binary(span, is_min, scratch, truncate_length);
 }
 
@@ -3002,9 +3000,9 @@ __device__ uint8_t* EncodeStatistics(uint8_t* start,
 
 // blockDim(encode_block_size, 1, 1)
 CUDF_KERNEL void __launch_bounds__(encode_block_size)
-  gpuEncodePageHeaders(device_span<EncPage> pages,
-                       device_span<codec_exec_result const> comp_results,
-                       device_span<statistics_chunk const> page_stats,
+  gpuEncodePageHeaders(cuda::std::span<EncPage> pages,
+                       cuda::std::span<codec_exec_result const> comp_results,
+                       cuda::std::span<statistics_chunk const> page_stats,
                        statistics_chunk const* chunk_stats)
 {
   __align__(8) unsigned char scratch[MIN_STATS_SCRATCH_SIZE];
@@ -3093,7 +3091,7 @@ CUDF_KERNEL void __launch_bounds__(encode_block_size)
 }
 
 // blockDim(1024, 1, 1)
-CUDF_KERNEL void __launch_bounds__(1024) gpuGatherPages(device_span<EncColumnChunk> chunks)
+CUDF_KERNEL void __launch_bounds__(1024) gpuGatherPages(cuda::std::span<EncColumnChunk> chunks)
 {
   namespace cg = cooperative_groups;
 
@@ -3282,8 +3280,8 @@ struct mask_tform {
 
 // blockDim(1, 1, 1)
 CUDF_KERNEL void __launch_bounds__(1)
-  gpuEncodeColumnIndexes(device_span<EncColumnChunk> chunks,
-                         device_span<statistics_chunk const> column_stats,
+  gpuEncodeColumnIndexes(cuda::std::span<EncColumnChunk> chunks,
+                         cuda::std::span<statistics_chunk const> column_stats,
                          int32_t column_index_truncate_length)
 {
   __align__(8) unsigned char s_scratch[MIN_STATS_SCRATCH_SIZE];
@@ -3395,15 +3393,15 @@ CUDF_KERNEL void __launch_bounds__(1)
   ck_g->var_bytes_size    = var_bytes;
 }
 
-void InitRowGroupFragments(device_2dspan<PageFragment> frag,
-                           device_span<parquet_column_device_view const> col_desc,
-                           device_span<partition_info const> partitions,
-                           device_span<int const> part_frag_offset,
+void InitRowGroupFragments(cuda::std::mdspan<PageFragment, cuda::std::dextents<size_t, 2>> frag,
+                           cuda::std::span<parquet_column_device_view const> col_desc,
+                           cuda::std::span<partition_info const> partitions,
+                           cuda::std::span<int const> part_frag_offset,
                            uint32_t fragment_size,
                            cuda::stream_ref stream)
 {
-  auto const num_columns              = frag.size().first;
-  auto const num_fragments_per_column = frag.size().second;
+  auto const num_columns              = frag.extent(0);
+  auto const num_fragments_per_column = frag.extent(1);
   auto const grid_y = std::min(static_cast<uint32_t>(num_fragments_per_column), MAX_GRID_Y_SIZE);
   dim3 const dim_grid(num_columns, grid_y);  // 1 threadblock per fragment
   gpuInitRowGroupFragments<512><<<dim_grid, 512, 0, stream.get()>>>(
@@ -3411,16 +3409,16 @@ void InitRowGroupFragments(device_2dspan<PageFragment> frag,
   CUDF_CUDA_TRY(cudaGetLastError());
 }
 
-void CalculatePageFragments(device_span<PageFragment> frag,
-                            device_span<size_type const> column_frag_sizes,
+void CalculatePageFragments(cuda::std::span<PageFragment> frag,
+                            cuda::std::span<size_type const> column_frag_sizes,
                             cuda::stream_ref stream)
 {
   gpuCalculatePageFragments<512><<<frag.size(), 512, 0, stream.get()>>>(frag, column_frag_sizes);
   CUDF_CUDA_TRY(cudaGetLastError());
 }
 
-void InitFragmentStatistics(device_span<statistics_group> groups,
-                            device_span<PageFragment const> fragments,
+void InitFragmentStatistics(cuda::std::span<statistics_group> groups,
+                            cuda::std::span<PageFragment const> fragments,
                             cuda::stream_ref stream)
 {
   int const num_fragments = fragments.size();
@@ -3430,11 +3428,11 @@ void InitFragmentStatistics(device_span<statistics_group> groups,
   CUDF_CUDA_TRY(cudaGetLastError());
 }
 
-void InitEncoderPages(device_2dspan<EncColumnChunk> chunks,
-                      device_span<EncPage> pages,
-                      device_span<size_type> page_sizes,
-                      device_span<size_type const> comp_page_sizes,
-                      device_span<parquet_column_device_view const> col_desc,
+void InitEncoderPages(cuda::std::mdspan<EncColumnChunk, cuda::std::dextents<size_t, 2>> chunks,
+                      cuda::std::span<EncPage> pages,
+                      cuda::std::span<size_type> page_sizes,
+                      cuda::std::span<size_type const> comp_page_sizes,
+                      cuda::std::span<parquet_column_device_view const> col_desc,
                       int32_t num_columns,
                       size_t max_page_size_bytes,
                       size_type max_page_size_rows,
@@ -3446,7 +3444,7 @@ void InitEncoderPages(device_2dspan<EncColumnChunk> chunks,
                       kernel_error::pointer error_code,
                       cuda::stream_ref stream)
 {
-  auto num_rowgroups = chunks.size().first;
+  auto num_rowgroups = chunks.extent(0);
   dim3 dim_grid(num_columns, num_rowgroups);  // 1 threadblock per rowgroup
   gpuInitPages<<<dim_grid, encode_block_size, 0, stream.get()>>>(chunks,
                                                                  pages,
@@ -3465,11 +3463,11 @@ void InitEncoderPages(device_2dspan<EncColumnChunk> chunks,
   CUDF_CUDA_TRY(cudaGetLastError());
 }
 
-void EncodePages(device_span<EncPage> pages,
+void EncodePages(cuda::std::span<EncPage> pages,
                  bool write_v2_headers,
-                 device_span<device_span<uint8_t const>> comp_in,
-                 device_span<device_span<uint8_t>> comp_out,
-                 device_span<codec_exec_result> comp_results,
+                 cuda::std::span<cuda::std::span<uint8_t const>> comp_in,
+                 cuda::std::span<cuda::std::span<uint8_t>> comp_out,
+                 cuda::std::span<codec_exec_result> comp_results,
                  cuda::stream_ref stream)
 {
   auto num_pages = pages.size();
@@ -3544,7 +3542,7 @@ void EncodePages(device_span<EncPage> pages,
   cudf::detail::join_streams(streams, stream);
 }
 
-void decide_compression(device_span<EncColumnChunk> chunks,
+void decide_compression(cuda::std::span<EncColumnChunk> chunks,
                         bool page_level_compression,
                         cuda::stream_ref stream)
 {
@@ -3555,9 +3553,9 @@ void decide_compression(device_span<EncColumnChunk> chunks,
   CUDF_CUDA_TRY(cudaGetLastError());
 }
 
-void EncodePageHeaders(device_span<EncPage> pages,
-                       device_span<codec_exec_result const> comp_results,
-                       device_span<statistics_chunk const> page_stats,
+void EncodePageHeaders(cuda::std::span<EncPage> pages,
+                       cuda::std::span<codec_exec_result const> comp_results,
+                       cuda::std::span<statistics_chunk const> page_stats,
                        statistics_chunk const* chunk_stats,
                        cuda::stream_ref stream)
 {
@@ -3567,14 +3565,14 @@ void EncodePageHeaders(device_span<EncPage> pages,
   CUDF_CUDA_TRY(cudaGetLastError());
 }
 
-void GatherPages(device_span<EncColumnChunk> chunks, cuda::stream_ref stream)
+void GatherPages(cuda::std::span<EncColumnChunk> chunks, cuda::stream_ref stream)
 {
   gpuGatherPages<<<chunks.size(), 1024, 0, stream.get()>>>(chunks);
   CUDF_CUDA_TRY(cudaGetLastError());
 }
 
-void EncodeColumnIndexes(device_span<EncColumnChunk> chunks,
-                         device_span<statistics_chunk const> column_stats,
+void EncodeColumnIndexes(cuda::std::span<EncColumnChunk> chunks,
+                         cuda::std::span<statistics_chunk const> column_stats,
                          int32_t column_index_truncate_length,
                          cuda::stream_ref stream)
 {

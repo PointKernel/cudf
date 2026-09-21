@@ -28,6 +28,7 @@
 #include <rmm/cuda_stream.hpp>
 #include <rmm/mr/statistics_resource_adaptor.hpp>
 
+#include <cuda/std/span>
 #include <cuda/stream>
 
 #include <algorithm>
@@ -48,9 +49,9 @@ using column_wrapper = cudf::test::fixed_width_column_wrapper<T>;
 
 using join_match = std::tuple<size_type, size_type, size_type>;
 
-std::vector<join_match> to_sorted_host_matches(cudf::device_span<size_type const> left_indices,
-                                               cudf::device_span<size_type const> batch_indices,
-                                               cudf::device_span<size_type const> row_indices,
+std::vector<join_match> to_sorted_host_matches(cuda::std::span<size_type const> left_indices,
+                                               cuda::std::span<size_type const> batch_indices,
+                                               cuda::std::span<size_type const> row_indices,
                                                cuda::stream_ref stream)
 {
   auto const h_left  = cudf::detail::make_host_vector(left_indices, stream);

@@ -25,6 +25,7 @@
 #include <cudf/utilities/memory_resource.hpp>
 
 #include <cuda/iterator>
+#include <cuda/std/span>
 
 #include <algorithm>
 #include <memory>
@@ -415,7 +416,7 @@ TEST_F(HybridScanMultifileTest, SparsePayloadEmptyAndAllPrunedPageData)
       inputs.footer_byte_spans, options);
     auto const row_groups =
       std::vector<std::vector<cudf::size_type>>(inputs.footer_byte_spans.size());
-    auto const empty_page_data = std::vector<cudf::device_span<uint8_t const>>{};
+    auto const empty_page_data = std::vector<cuda::std::span<uint8_t const>>{};
     auto false_scalar          = cudf::numeric_scalar<bool>{false};
     auto row_mask              = cudf::make_column_from_scalar(false_scalar, 0);
 
@@ -436,7 +437,7 @@ TEST_F(HybridScanMultifileTest, SparsePayloadEmptyAndAllPrunedPageData)
 
     auto const row_groups      = reader->all_row_groups(options);
     auto const row_mask        = reader->build_all_true_row_mask(row_groups, stream, mr);
-    auto const empty_page_data = std::vector<cudf::device_span<uint8_t const>>{};
+    auto const empty_page_data = std::vector<cuda::std::span<uint8_t const>>{};
 
     EXPECT_THROW(reader->setup_chunking_for_payload_columns(
                    0, 0, row_groups, row_mask->view(), empty_page_data, options, stream, mr),
@@ -461,7 +462,7 @@ TEST_F(HybridScanMultifileTest, SparsePayloadEmptyAndAllPrunedPageData)
                             page_ranges.first.end(),
                             [](auto const& range) { return range.is_empty(); }));
     auto const all_pruned_page_data =
-      std::vector<cudf::device_span<uint8_t const>>(page_ranges.first.size());
+      std::vector<cuda::std::span<uint8_t const>>(page_ranges.first.size());
     reader->setup_chunking_for_payload_columns(
       0, 0, row_groups, row_mask->view(), all_pruned_page_data, options, stream, mr);
     ASSERT_TRUE(reader->has_next_table_chunk());

@@ -18,6 +18,7 @@
 #include <rmm/exec_policy.hpp>
 
 #include <cuda/iterator>
+#include <cuda/std/span>
 #include <cuda/stream>
 #include <thrust/for_each.h>
 
@@ -59,7 +60,7 @@ std::unique_ptr<column> reverse(lists_column_view const& input,
 
   auto child_segmented_reversed =
     cudf::detail::gather(table_view{{child}},
-                         device_span<size_type const>{gather_map.data(), gather_map.size()},
+                         cuda::std::span<size_type const>{gather_map.data(), gather_map.size()},
                          out_of_bounds_policy::DONT_CHECK,
                          cudf::negative_index_policy::NOT_ALLOWED,
                          stream,

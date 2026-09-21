@@ -6,6 +6,7 @@
 #include "gpuinflate.hpp"
 #include "io/utilities/block_utils.cuh"
 
+#include <cuda/std/span>
 #include <cuda/stream>
 
 namespace cudf::io::detail {
@@ -224,9 +225,9 @@ static __device__ uint32_t Match60(uint8_t const* src1,
  * @param[in] count Number of blocks to compress
  */
 CUDF_KERNEL void __launch_bounds__(128)
-  snap_kernel_no_racecheck(device_span<device_span<uint8_t const> const> inputs,
-                           device_span<device_span<uint8_t> const> outputs,
-                           device_span<codec_exec_result> results)
+  snap_kernel_no_racecheck(cuda::std::span<cuda::std::span<uint8_t const> const> inputs,
+                           cuda::std::span<cuda::std::span<uint8_t> const> outputs,
+                           cuda::std::span<codec_exec_result> results)
 {
   __shared__ __align__(16) snap_state_s state_g;
 
@@ -310,9 +311,9 @@ CUDF_KERNEL void __launch_bounds__(128)
   }
 }
 
-void gpu_snap(device_span<device_span<uint8_t const> const> inputs,
-              device_span<device_span<uint8_t> const> outputs,
-              device_span<codec_exec_result> results,
+void gpu_snap(cuda::std::span<cuda::std::span<uint8_t const> const> inputs,
+              cuda::std::span<cuda::std::span<uint8_t> const> outputs,
+              cuda::std::span<codec_exec_result> results,
               cuda::stream_ref stream)
 {
   dim3 dim_block(128, 1);  // 4 warps per stream, 1 stream per block

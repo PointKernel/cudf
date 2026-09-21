@@ -11,6 +11,7 @@
 #include <cudf/utilities/memory_resource.hpp>
 #include <cudf/utilities/span.hpp>
 
+#include <cuda/std/span>
 #include <cuda/stream>
 
 namespace CUDF_EXPORT cudf {
@@ -57,9 +58,9 @@ extern bool is_cpu_cluster_computation_disabled;
  * @returns tdigest column, with 1 tdigest per row
  */
 std::unique_ptr<column> group_tdigest(column_view const& values,
-                                      cudf::device_span<size_type const> group_offsets,
-                                      cudf::device_span<size_type const> group_labels,
-                                      cudf::device_span<size_type const> group_valid_counts,
+                                      cuda::std::span<size_type const> group_offsets,
+                                      cuda::std::span<size_type const> group_labels,
+                                      cuda::std::span<size_type const> group_valid_counts,
                                       size_type num_groups,
                                       int max_centroids,
                                       cuda::stream_ref stream,
@@ -101,8 +102,8 @@ std::unique_ptr<column> group_tdigest(column_view const& values,
  * @returns tdigest column, with 1 tdigest per row
  */
 std::unique_ptr<column> group_merge_tdigest(column_view const& values,
-                                            cudf::device_span<size_type const> group_offsets,
-                                            cudf::device_span<size_type const> group_labels,
+                                            cuda::std::span<size_type const> group_offsets,
+                                            cuda::std::span<size_type const> group_labels,
                                             size_type num_groups,
                                             int max_centroids,
                                             cuda::stream_ref stream,

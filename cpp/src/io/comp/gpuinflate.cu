@@ -46,6 +46,7 @@ Mark Adler    madler@alumni.caltech.edu
 #include <cuda/iterator>
 #include <cuda/std/algorithm>
 #include <cuda/std/cmath>
+#include <cuda/std/span>
 #include <cuda/std/tuple>
 #include <cuda/stream>
 #include <thrust/gather.h>
@@ -1027,9 +1028,9 @@ __device__ int parse_gzip_header(uint8_t const* src, size_t src_size)
  */
 template <int block_size>
 CUDF_KERNEL void __launch_bounds__(block_size)
-  inflate_kernel_no_racecheck(device_span<device_span<uint8_t const> const> inputs,
-                              device_span<device_span<uint8_t> const> outputs,
-                              device_span<codec_exec_result> results,
+  inflate_kernel_no_racecheck(cuda::std::span<cuda::std::span<uint8_t const> const> inputs,
+                              cuda::std::span<cuda::std::span<uint8_t> const> outputs,
+                              cuda::std::span<codec_exec_result> results,
                               gzip_header_included parse_hdr)
 {
   __shared__ __align__(16) inflate_state_s state_g;
@@ -1197,8 +1198,8 @@ class cost_model {
   }
 };
 
-sorted_codec_parameters sort_tasks(device_span<device_span<uint8_t const> const> inputs,
-                                   device_span<device_span<uint8_t> const> outputs,
+sorted_codec_parameters sort_tasks(cuda::std::span<cuda::std::span<uint8_t const> const> inputs,
+                                   cuda::std::span<cuda::std::span<uint8_t> const> outputs,
                                    task_type task_type,
                                    cuda::stream_ref stream,
                                    rmm::device_async_resource_ref mr)
@@ -1228,14 +1229,15 @@ sorted_codec_parameters sort_tasks(device_span<device_span<uint8_t const> const>
                  return costs[a] > costs[b];
                });
 
-  auto sorted_inputs = rmm::device_uvector<device_span<uint8_t const>>(inputs.size(), stream, mr);
+  auto sorted_inputs =
+    rmm::device_uvector<cuda::std::span<uint8_t const>>(inputs.size(), stream, mr);
   thrust::gather(rmm::exec_policy_nosync(stream, cudf::get_current_device_resource_ref()),
                  order.begin(),
                  order.end(),
                  inputs.begin(),
                  sorted_inputs.begin());
 
-  auto sorted_outputs = rmm::device_uvector<device_span<uint8_t>>(outputs.size(), stream, mr);
+  auto sorted_outputs = rmm::device_uvector<cuda::std::span<uint8_t>>(outputs.size(), stream, mr);
   thrust::gather(rmm::exec_policy_nosync(stream, cudf::get_current_device_resource_ref()),
                  order.begin(),
                  order.end(),
@@ -1245,8 +1247,8 @@ sorted_codec_parameters sort_tasks(device_span<device_span<uint8_t const> const>
   return {std::move(sorted_inputs), std::move(sorted_outputs), std::move(order)};
 }
 
-[[nodiscard]] size_t split_tasks(device_span<device_span<uint8_t const> const> inputs,
-                                 device_span<device_span<uint8_t> const> outputs,
+[[nodiscard]] size_t split_tasks(cuda::std::span<cuda::std::span<uint8_t const> const> inputs,
+                                 cuda::std::span<cuda::std::span<uint8_t> const> outputs,
                                  host_engine_state host_state,
                                  size_t auto_mode_threshold,
                                  size_t hybrid_mode_cost_ratio,
@@ -1302,9 +1304,9 @@ sorted_codec_parameters sort_tasks(device_span<device_span<uint8_t const> const>
 
 }  // namespace
 
-void gpuinflate(device_span<device_span<uint8_t const> const> inputs,
-                device_span<device_span<uint8_t> const> outputs,
-                device_span<codec_exec_result> results,
+void gpuinflate(cuda::std::span<cuda::std::span<uint8_t const> const> inputs,
+                cuda::std::span<cuda::std::span<uint8_t> const> outputs,
+                cuda::std::span<codec_exec_result> results,
                 gzip_header_included parse_hdr,
                 cuda::stream_ref stream)
 {
@@ -1317,25 +1319,26 @@ void gpuinflate(device_span<device_span<uint8_t const> const> inputs,
 }
 
 sorted_codec_parameters sort_decompression_tasks(
-  device_span<device_span<uint8_t const> const> inputs,
-  device_span<device_span<uint8_t> const> outputs,
+  cuda::std::span<cuda::std::span<uint8_t const> const> inputs,
+  cuda::std::span<cuda::std::span<uint8_t> const> outputs,
   cuda::stream_ref stream,
   rmm::device_async_resource_ref mr)
 {
   return sort_tasks(inputs, outputs, task_type::DECOMPRESSION, stream, mr);
 }
 
-sorted_codec_parameters sort_compression_tasks(device_span<device_span<uint8_t const> const> inputs,
-                                               device_span<device_span<uint8_t> const> outputs,
-                                               cuda::stream_ref stream,
-                                               rmm::device_async_resource_ref mr)
+sorted_codec_parameters sort_compression_tasks(
+  cuda::std::span<cuda::std::span<uint8_t const> const> inputs,
+  cuda::std::span<cuda::std::span<uint8_t> const> outputs,
+  cuda::stream_ref stream,
+  rmm::device_async_resource_ref mr)
 {
   return sort_tasks(inputs, outputs, task_type::COMPRESSION, stream, mr);
 }
 
-void copy_results_to_original_order(device_span<codec_exec_result const> sorted_results,
-                                    device_span<codec_exec_result> original_results,
-                                    device_span<std::size_t const> order,
+void copy_results_to_original_order(cuda::std::span<codec_exec_result const> sorted_results,
+                                    cuda::std::span<codec_exec_result> original_results,
+                                    cuda::std::span<std::size_t const> order,
                                     cuda::stream_ref stream)
 {
   thrust::scatter(rmm::exec_policy_nosync(stream, cudf::get_current_device_resource_ref()),
@@ -1345,8 +1348,8 @@ void copy_results_to_original_order(device_span<codec_exec_result const> sorted_
                   original_results.begin());
 }
 
-size_t split_compression_tasks(device_span<device_span<uint8_t const> const> inputs,
-                               device_span<device_span<uint8_t> const> outputs,
+size_t split_compression_tasks(cuda::std::span<cuda::std::span<uint8_t const> const> inputs,
+                               cuda::std::span<cuda::std::span<uint8_t> const> outputs,
                                host_engine_state host_state,
                                size_t auto_mode_threshold,
                                size_t hybrid_mode_cost_ratio,
@@ -1361,8 +1364,8 @@ size_t split_compression_tasks(device_span<device_span<uint8_t const> const> inp
                      stream);
 }
 
-size_t split_decompression_tasks(device_span<device_span<uint8_t const> const> inputs,
-                                 device_span<device_span<uint8_t> const> outputs,
+size_t split_decompression_tasks(cuda::std::span<cuda::std::span<uint8_t const> const> inputs,
+                                 cuda::std::span<cuda::std::span<uint8_t> const> outputs,
                                  host_engine_state host_state,
                                  size_t auto_mode_threshold,
                                  size_t hybrid_mode_cost_ratio,

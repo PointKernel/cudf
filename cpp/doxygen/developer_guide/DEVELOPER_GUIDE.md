@@ -360,13 +360,18 @@ for `LIST` columns that only support `int32_t` offsets.
 
 ## Spans
 
-libcudf provides `span` classes that mimic C++20 `std::span`, which is a lightweight
-view of a contiguous sequence of objects. libcudf provides two classes, `host_span` and
-`device_span`, which can be constructed from multiple container types, or from a pointer
-(host or device, respectively) and size, or from iterators. `span` types are useful for defining
-generic (internal) interfaces which work with multiple input container types. `device_span` can be
-constructed from `thrust::device_vector`, `rmm::device_vector`, or `rmm::device_uvector`.
-`host_span` can be constructed from `thrust::host_vector`, `std::vector`, or `std::basic_string`.
+Spans are lightweight, non-owning views of contiguous sequences of objects. Use `std::span`
+for host-only views and `cuda::std::span` for views accessed in device code. Include `<span>`
+or `<cuda/std/span>` directly, respectively. Neither type owns the memory or determines whether
+the referenced memory is accessible from the host or device.
+
+Construct spans from compatible containers or from a pointer and element count. For containers
+with fancy pointers, use `thrust::raw_pointer_cast(container.data())` and `container.size()`.
+`cudf::host_span` adds device-accessibility metadata and constructors for supported host containers
+to a standard span; use it when those extensions are required, as described below.
+
+`cudf::device_span` and `cudf::dynamic_extent` remain available as names for
+`cuda::std::span` and `cuda::std::dynamic_extent`.
 
 If you are defining internal (detail) functions that operate on vectors, use spans for the input
 vector parameters rather than a specific vector type, to make your functions more widely applicable.
@@ -379,7 +384,7 @@ following function that copies device data to a host `std::vector`.
 
 ```c++
 template <typename T>
-std::vector<T> make_std_vector_async(device_span<T const> v, cuda::stream_ref stream)
+std::vector<T> make_std_vector_async(cuda::std::span<T const> v, cuda::stream_ref stream)
 ```
 
 ### When to use `host_span` vs `std::span`
@@ -397,6 +402,15 @@ Use `cudf::host_span<T>` only when one of the following applies:
    skip an explicit host-to-device copy).
 2. The function must accept a libcudf-specific container that `std::span` cannot be constructed
    from directly.
+
+### Multidimensional views
+
+Use `cuda::std::mdspan` from `<cuda/std/mdspan>` for multidimensional views. A contiguous row-major
+matrix can be represented by `cuda::std::mdspan<T, cuda::std::dextents<std::size_t, 2>>`.
+Use `extent(0)` and `extent(1)` for its row and column counts, `size()` for the total element count,
+and `view(row, column)` to access an element. Host and device views have the same type; select the
+appropriate data pointer explicitly. Preserve host device-accessibility metadata separately when
+constructing views used by copy helpers.
 
 ## cudf::scalar
 
@@ -819,8 +833,8 @@ direct calls to `cudaMemcpyAsync`. These cudf utilities try to use `cudaMemcpyBa
 For host-to-device or device-to-host copies, prefer the typed span-based wrappers:
 
 ```c++
-cudf::detail::cuda_memcpy_async<T>(device_span<T>{dst}, host_span<T const>{src}, stream);
-cudf::detail::cuda_memcpy_async<T>(host_span<T>{dst}, device_span<T const>{src}, stream);
+cudf::detail::cuda_memcpy_async<T>(cuda::std::span<T>{dst}, host_span<T const>{src}, stream);
+cudf::detail::cuda_memcpy_async<T>(host_span<T>{dst}, cuda::std::span<T const>{src}, stream);
 ```
 
 For device-to-device copies, or when a raw `void*` interface is required, use

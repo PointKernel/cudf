@@ -15,6 +15,7 @@
 #include <rmm/mr/cuda_async_memory_resource.hpp>
 #include <rmm/mr/pool_memory_resource.hpp>
 
+#include <cuda/std/span>
 #include <cuda/stream>
 
 #include <benchmark/benchmark.h>
@@ -138,7 +139,7 @@ void run_chunked_pack(benchmark::State& state,
 
     std::size_t offset = 0;
     while (packer.has_next()) {
-      auto const bytes_copied = packer.next(cudf::device_span<std::uint8_t>(
+      auto const bytes_copied = packer.next(cuda::std::span<std::uint8_t>(
         static_cast<std::uint8_t*>(bounce_buffer.data()), bounce_buffer_size));
       RAPIDSMPF_CUDA_TRY(
         rapidsmpf::cuda_memcpy_async(static_cast<std::uint8_t*>(destination.data()) + offset,

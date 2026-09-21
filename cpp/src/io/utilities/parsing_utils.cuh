@@ -1,5 +1,5 @@
 /*
- * SPDX-FileCopyrightText: Copyright (c) 2020-2026, NVIDIA CORPORATION.
+ * SPDX-FileCopyrightText: Copyright (c) 2020-2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
 
@@ -23,12 +23,11 @@
 #include <cuda/std/iterator>
 #include <cuda/std/limits>
 #include <cuda/std/optional>
+#include <cuda/std/span>
 #include <cuda/std/type_traits>
 #include <cuda/std/utility>
 #include <thrust/execution_policy.h>
 #include <thrust/mismatch.h>
-
-using cudf::device_span;
 
 namespace cudf {
 namespace io {

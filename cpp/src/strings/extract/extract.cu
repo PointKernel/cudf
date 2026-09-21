@@ -20,6 +20,8 @@
 
 #include <cuda/functional>
 #include <cuda/iterator>
+#include <cuda/std/mdspan>
+#include <cuda/std/span>
 #include <cuda/stream>
 #include <thrust/execution_policy.h>
 #include <thrust/fill.h>
@@ -36,14 +38,15 @@ namespace {
  */
 struct extract_fn {
   column_device_view const d_strings;
-  cudf::detail::device_2dspan<string_index_pair> d_indices;
+  cuda::std::mdspan<string_index_pair, cuda::std::dextents<size_t, 2>> d_indices;
 
   __device__ void operator()(size_type const idx,
                              reprog_device const d_prog,
                              int32_t const prog_idx) const
   {
     auto const groups = d_prog.group_counts();
-    auto d_output     = d_indices[idx];
+    auto d_output =
+      cuda::std::span{d_indices.data_handle() + idx * d_indices.extent(1), d_indices.extent(1)};
 
     if (d_strings.is_valid(idx)) {
       auto const d_str = d_strings.element<string_view>(idx);
@@ -84,7 +87,8 @@ std::unique_ptr<table> extract(strings_column_view const& input,
   CUDF_EXPECTS(groups > 0, "Group indicators not found in regex pattern");
 
   auto indices   = rmm::device_uvector<string_index_pair>(input.size() * groups, stream);
-  auto d_indices = cudf::detail::device_2dspan<string_index_pair>(indices, groups);
+  auto d_indices = cuda::std::mdspan<string_index_pair, cuda::std::dextents<size_t, 2>>(
+    indices.data(), input.size(), groups);
 
   auto const d_strings = column_device_view::create(input.parent(), stream);
 

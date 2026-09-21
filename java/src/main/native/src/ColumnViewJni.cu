@@ -24,6 +24,7 @@
 
 #include <cuda/iterator>
 #include <cuda/std/functional>
+#include <cuda/std/span>
 #include <thrust/logical.h>
 #include <thrust/scan.h>
 #include <thrust/tabulate.h>
@@ -119,7 +120,7 @@ void post_process_list_overlap(cudf::column_view const& lhs,
 
   // Create a new nullmask from the validity data.
   auto [new_null_mask, new_null_count] =
-    cudf::bools_to_mask(cudf::device_span<bool const>(validity),
+    cudf::bools_to_mask(cuda::std::span<bool const>(validity),
                         cudf::get_default_stream(),
                         cudf::get_current_device_resource_ref());
 
@@ -158,7 +159,7 @@ std::unique_ptr<cudf::column> lists_distinct_by_key(cudf::lists_column_view cons
   // being called in `create_map` in spark-rapids.
   // Other options comparing nulls and NaNs are set as all-equal.
   auto out_columns =
-    cudf::stable_distinct(table_view{{column_view{cudf::device_span<cudf::size_type const>{labels}},
+    cudf::stable_distinct(table_view{{column_view{cuda::std::span<cudf::size_type const>{labels}},
                                       child.child(0),
                                       child.child(1)}},  // input table
                           std::vector<size_type>{0, 1},  // key columns

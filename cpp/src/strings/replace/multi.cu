@@ -29,6 +29,7 @@
 #include <cuda/functional>
 #include <cuda/iterator>
 #include <cuda/std/iterator>
+#include <cuda/std/span>
 #include <cuda/std/tuple>
 #include <cuda/stream>
 #include <thrust/binary_search.h>
@@ -236,8 +237,8 @@ struct replace_multi_parallel_fn {
 
   replace_multi_parallel_fn(column_device_view const& d_strings,
                             cudf::detail::input_offsetalator d_strings_offsets,
-                            device_span<string_view const> d_targets,
-                            device_span<string_view const> d_replacements)
+                            cuda::std::span<string_view const> d_targets,
+                            cuda::std::span<string_view const> d_replacements)
     : d_strings(d_strings),
       d_strings_offsets(d_strings_offsets),
       d_targets{d_targets},
@@ -248,8 +249,8 @@ struct replace_multi_parallel_fn {
  protected:
   column_device_view d_strings;
   cudf::detail::input_offsetalator d_strings_offsets;
-  device_span<string_view const> d_targets;
-  device_span<string_view const> d_replacements;
+  cuda::std::span<string_view const> d_targets;
+  cuda::std::span<string_view const> d_replacements;
 };
 
 constexpr int64_t block_size         = 512;  // number of threads per block

@@ -12,6 +12,7 @@
 #include <cudf/detail/iterator.cuh>
 #include <cudf/utilities/roaring_bitmap.hpp>
 
+#include <cuda/std/span>
 #include <cuda/stream>
 
 #include <vector>
@@ -61,7 +62,7 @@ TYPED_TEST(RoaringBitmapTest, Basics)
   {
     auto result_col = bitmap.contains_async(keys_col, stream, mr);
     auto results    = cudf::detail::make_host_vector_async(
-      cudf::device_span<bool const>(result_col->view().template data<bool>(), num_keys), stream);
+      cuda::std::span<bool const>(result_col->view().template data<bool>(), num_keys), stream);
     stream.sync();
     EXPECT_TRUE(std::equal(results.begin(), results.end(), is_even));
   }
@@ -72,7 +73,7 @@ TYPED_TEST(RoaringBitmapTest, Basics)
       cudf::test::fixed_width_column_wrapper<bool>(result_iter, result_iter + num_keys).release();
     bitmap.contains_async(keys_col, result_col->mutable_view(), stream);
     auto results = cudf::detail::make_host_vector_async(
-      cudf::device_span<bool const>(result_col->view().template data<bool>(), num_keys), stream);
+      cuda::std::span<bool const>(result_col->view().template data<bool>(), num_keys), stream);
     stream.sync();
     EXPECT_TRUE(std::equal(results.begin(), results.end(), is_even));
   }

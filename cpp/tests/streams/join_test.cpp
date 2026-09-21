@@ -21,6 +21,8 @@
 #include <cudf/table/table.hpp>
 #include <cudf/types.hpp>
 
+#include <cuda/std/span>
+
 #include <cstdint>
 #include <memory>
 #include <optional>
@@ -180,8 +182,8 @@ TEST_F(JoinTest, LeftJoinWithPostFilter)
   auto hash_filter_result =
     cudf::filter_join_indices(conditional0,
                               conditional1,
-                              cudf::device_span<cudf::size_type const>(*hash_join_result.first),
-                              cudf::device_span<cudf::size_type const>(*hash_join_result.second),
+                              cuda::std::span<cudf::size_type const>(*hash_join_result.first),
+                              cuda::std::span<cudf::size_type const>(*hash_join_result.second),
                               left_zero_eq_right_zero,
                               cudf::join_kind::LEFT_JOIN,
                               std::nullopt,

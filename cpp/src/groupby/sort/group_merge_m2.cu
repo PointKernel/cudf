@@ -11,6 +11,7 @@
 #include <rmm/exec_policy.hpp>
 
 #include <cuda/iterator>
+#include <cuda/std/span>
 #include <cuda/std/tuple>
 #include <cuda/stream>
 #include <thrust/transform.h>
@@ -73,7 +74,7 @@ struct merge_fn {
 
 template <typename count_type>
 std::unique_ptr<column> merge_m2(column_view const& values,
-                                 device_span<size_type const> group_offsets,
+                                 cuda::std::span<size_type const> group_offsets,
                                  size_type num_groups,
                                  cuda::stream_ref stream,
                                  rmm::device_async_resource_ref mr)
@@ -117,7 +118,7 @@ std::unique_ptr<column> merge_m2(column_view const& values,
 }  // namespace
 
 std::unique_ptr<column> group_merge_m2(column_view const& values,
-                                       device_span<size_type const> group_offsets,
+                                       cuda::std::span<size_type const> group_offsets,
                                        size_type num_groups,
                                        cuda::stream_ref stream,
                                        rmm::device_async_resource_ref mr)

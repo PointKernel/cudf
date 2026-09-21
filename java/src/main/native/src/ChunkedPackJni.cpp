@@ -1,9 +1,11 @@
 /*
- * SPDX-FileCopyrightText: Copyright (c) 2023-2025, NVIDIA CORPORATION.
+ * SPDX-FileCopyrightText: Copyright (c) 2023-2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
 
 #include "cudf_jni_apis.hpp"
+
+#include <cuda/std/span>
 
 extern "C" {
 JNIEXPORT void JNICALL Java_ai_rapids_cudf_ChunkedPack_chunkedPackDelete(JNIEnv* env,
@@ -51,8 +53,8 @@ JNIEXPORT jlong JNICALL Java_ai_rapids_cudf_ChunkedPack_chunkedPackNext(
   {
     cudf::jni::auto_set_device(env);
     auto cs               = reinterpret_cast<cudf::chunked_pack*>(chunked_pack);
-    auto user_buffer_span = cudf::device_span<uint8_t>(reinterpret_cast<uint8_t*>(user_ptr),
-                                                       static_cast<std::size_t>(user_ptr_size));
+    auto user_buffer_span = cuda::std::span<uint8_t>(reinterpret_cast<uint8_t*>(user_ptr),
+                                                     static_cast<std::size_t>(user_ptr_size));
     return cs->next(user_buffer_span);
   }
   JNI_CATCH(env, 0);

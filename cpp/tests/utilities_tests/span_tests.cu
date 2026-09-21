@@ -18,6 +18,7 @@
 #include <rmm/device_buffer.hpp>
 #include <rmm/device_vector.hpp>
 
+#include <cuda/std/mdspan>
 #include <cuda/std/span>
 #include <cuda/stream>
 #include <thrust/device_vector.h>
@@ -27,11 +28,9 @@
 #include <cstring>
 #include <span>
 #include <string>
+#include <utility>
 
-using cudf::device_span;
 using cudf::host_span;
-using cudf::detail::device_2dspan;
-using cudf::detail::host_2dspan;
 using cudf::detail::hostdevice_2dvector;
 
 template <typename T>
@@ -229,14 +228,14 @@ TEST(SpanTest, CanUseStdSpan)
   EXPECT_EQ(std_span.size(), message_span.size());
 }
 
-CUDF_KERNEL void simple_device_kernel(device_span<bool> result) { result[0] = true; }
+CUDF_KERNEL void simple_device_kernel(cuda::std::span<bool> result) { result[0] = true; }
 
 TEST(SpanTest, CanUseDeviceSpan)
 {
   auto d_message = cudf::detail::make_zeroed_device_uvector_async<bool>(
     1, cudf::get_default_stream(), cudf::get_current_device_resource_ref());
 
-  auto d_span = device_span<bool>(d_message.data(), d_message.size());
+  auto d_span = cuda::std::span<bool>(d_message.data(), d_message.size());
 
   simple_device_kernel<<<1, 1, 0, cudf::get_default_stream().get()>>>(d_span);
 
@@ -248,7 +247,7 @@ TEST(SpanTest, CanUseCudaStdSpan)
   auto d_message = cudf::detail::make_zeroed_device_uvector_async<int>(
     1, cudf::get_default_stream(), cudf::get_current_device_resource_ref());
 
-  auto const d_span = device_span<int const>(d_message.data(), d_message.size());
+  auto const d_span = cuda::std::span<int const>(d_message.data(), d_message.size());
 
   cuda::std::span std_span = d_span;
   EXPECT_EQ(std_span.data(), d_span.data());
@@ -257,63 +256,64 @@ TEST(SpanTest, CanUseCudaStdSpan)
 
 class MdSpanTest : public cudf::test::BaseFixture {};
 
-TEST(MdSpanTest, CanDetermineEmptiness)
+TEST(MdSpanTest, EmptyShapes)
 {
-  auto const vector            = hostdevice_2dvector<int>(1, 2, cudf::get_default_stream());
-  auto const no_rows_vector    = hostdevice_2dvector<int>(0, 2, cudf::get_default_stream());
-  auto const no_columns_vector = hostdevice_2dvector<int>(1, 0, cudf::get_default_stream());
-
-  EXPECT_FALSE(host_2dspan<int const>{vector}.is_empty());
-  EXPECT_FALSE(device_2dspan<int const>{vector}.is_empty());
-  EXPECT_TRUE(host_2dspan<int const>{no_rows_vector}.is_empty());
-  EXPECT_TRUE(device_2dspan<int const>{no_rows_vector}.is_empty());
-  EXPECT_TRUE(host_2dspan<int const>{no_columns_vector}.is_empty());
-  EXPECT_TRUE(device_2dspan<int const>{no_columns_vector}.is_empty());
+  for (auto const [rows, columns] : {std::pair{0ul, 0ul}, {0ul, 2ul}, {1ul, 0ul}}) {
+    auto const vector = hostdevice_2dvector<int>(rows, columns, cudf::get_default_stream());
+    auto const host   = vector.host_view();
+    auto const device = vector.device_view();
+    EXPECT_TRUE(host.empty());
+    EXPECT_TRUE(device.empty());
+    EXPECT_EQ(host.extent(0), rows);
+    EXPECT_EQ(device.extent(0), rows);
+    EXPECT_EQ(host.extent(1), columns);
+    EXPECT_EQ(device.extent(1), columns);
+    EXPECT_TRUE(vector.flat_host_view().empty());
+    EXPECT_TRUE(vector.flat_device_view().empty());
+  }
 }
 
-CUDF_KERNEL void readwrite_kernel(device_2dspan<int> result)
+CUDF_KERNEL void readwrite_kernel(cuda::std::mdspan<int, cuda::std::dextents<size_t, 2>> result)
 {
-  if (result[5][6] == 5) {
-    result[5][6] *= 6;
-  } else {
-    result[5][6] = 5;
-  }
+  result(5, 6) *= 6;
 }
 
 TEST(MdSpanTest, DeviceReadWrite)
 {
-  auto vector = hostdevice_2dvector<int>(11, 23, cudf::get_default_stream());
-
-  readwrite_kernel<<<1, 1, 0, cudf::get_default_stream().get()>>>(vector);
-  readwrite_kernel<<<1, 1, 0, cudf::get_default_stream().get()>>>(vector);
+  auto vector  = hostdevice_2dvector<int>(11, 23, cudf::get_default_stream());
+  vector(5, 6) = 5;
+  vector.host_to_device_async(cudf::get_default_stream());
+  readwrite_kernel<<<1, 1, 0, cudf::get_default_stream().get()>>>(vector.device_view());
   vector.device_to_host(cudf::get_default_stream());
-  EXPECT_EQ(vector[5][6], 30);
+  EXPECT_EQ(vector(5, 6), 30);
 }
 
 TEST(MdSpanTest, HostReadWrite)
 {
   auto vector = hostdevice_2dvector<int>(11, 23, cudf::get_default_stream());
-  auto span   = host_2dspan<int>{vector};
-  span[5][6]  = 5;
-  if (span[5][6] == 5) { span[5][6] *= 6; }
+  auto span   = vector.host_view();
+  span(5, 6)  = 5;
+  span(5, 6) *= 6;
 
-  EXPECT_EQ(vector[5][6], 30);
+  EXPECT_EQ(vector(5, 6), 30);
+  EXPECT_EQ(&span(5, 6), vector.base_host_ptr(5 * 23 + 6));
 }
 
-TEST(MdSpanTest, CanGetSize)
+TEST(MdSpanTest, ShapeAndConstConversion)
 {
-  auto const vector = hostdevice_2dvector<int>(1, 2, cudf::get_default_stream());
-
-  EXPECT_EQ(host_2dspan<int const>{vector}.size(), vector.size());
-  EXPECT_EQ(device_2dspan<int const>{vector}.size(), vector.size());
-}
-
-TEST(MdSpanTest, CanGetCount)
-{
-  auto const vector = hostdevice_2dvector<int>(11, 23, cudf::get_default_stream());
-
-  EXPECT_EQ(host_2dspan<int const>{vector}.count(), 11ul * 23);
-  EXPECT_EQ(device_2dspan<int const>{vector}.count(), 11ul * 23);
+  auto vector = hostdevice_2dvector<int>(11, 23, cudf::get_default_stream());
+  cuda::std::mdspan<int const, cuda::std::dextents<size_t, 2>> const host   = vector.host_view();
+  cuda::std::mdspan<int const, cuda::std::dextents<size_t, 2>> const device = vector.device_view();
+  EXPECT_FALSE(host.empty());
+  EXPECT_FALSE(device.empty());
+  EXPECT_EQ(host.extent(0), 11ul);
+  EXPECT_EQ(device.extent(0), 11ul);
+  EXPECT_EQ(host.extent(1), 23ul);
+  EXPECT_EQ(device.extent(1), 23ul);
+  EXPECT_EQ(host.size(), vector.count());
+  EXPECT_EQ(device.size(), vector.count());
+  EXPECT_EQ(host.data_handle(), vector.base_host_ptr());
+  EXPECT_EQ(device.data_handle(), vector.base_device_ptr());
 }
 
 auto get_test_hostdevice_vector()
@@ -424,7 +424,7 @@ TEST(HostDeviceSpanTest, CanSendToDevice)
   EXPECT_EQ(got_message, hello_world_message);
 }
 
-CUDF_KERNEL void simple_device_char_kernel(device_span<char> result)
+CUDF_KERNEL void simple_device_char_kernel(cuda::std::span<char> result)
 {
   char const* str = "world hello";
   for (int offset = 0; offset < result.size(); ++offset) {

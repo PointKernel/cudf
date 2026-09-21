@@ -11,6 +11,8 @@
 
 #include <cub/cub.cuh>
 #include <cuda/std/array>
+#include <cuda/std/mdspan>
+#include <cuda/std/span>
 #include <cuda/stream>
 #include <thrust/copy.h>
 #include <thrust/execution_policy.h>
@@ -57,8 +59,8 @@ CUDF_KERNEL void __launch_bounds__(128, 8)
       uint32_t block_len = shuffle((lane_id == 0) ? cur[0] | (cur[1] << 8) | (cur[2] << 16) : 0);
       auto const is_uncompressed = static_cast<bool>(block_len & 1);
       uint64_t uncompressed_size;
-      device_span<uint8_t const>* init_in_ctl = nullptr;
-      device_span<uint8_t>* init_out_ctl      = nullptr;
+      cuda::std::span<uint8_t const>* init_in_ctl = nullptr;
+      cuda::std::span<uint8_t>* init_out_ctl      = nullptr;
       block_len >>= 1;
       cur += block_header_size;
       if (block_len > compression_block_size || cur + block_len > end) {
@@ -520,25 +522,25 @@ CUDF_KERNEL void __launch_bounds__(128, 8)
 }
 
 template <int block_size>
-CUDF_KERNEL void __launch_bounds__(block_size)
-  reduce_pushdown_masks_kernel(device_span<orc_column_device_view const> orc_columns,
-                               device_2dspan<rowgroup_rows const> rowgroup_bounds,
-                               device_2dspan<size_type> set_counts)
+CUDF_KERNEL void __launch_bounds__(block_size) reduce_pushdown_masks_kernel(
+  cuda::std::span<orc_column_device_view const> orc_columns,
+  cuda::std::mdspan<rowgroup_rows const, cuda::std::dextents<size_t, 2>> rowgroup_bounds,
+  cuda::std::mdspan<size_type, cuda::std::dextents<size_t, 2>> set_counts)
 {
   using BlockReduce = cub::BlockReduce<size_type, block_size>;
   __shared__ typename BlockReduce::TempStorage temp_storage;
 
-  auto const column_id   = blockIdx.x / rowgroup_bounds.size().first;
-  auto const rowgroup_id = blockIdx.x % rowgroup_bounds.size().first;
+  auto const column_id   = blockIdx.x / rowgroup_bounds.extent(0);
+  auto const rowgroup_id = blockIdx.x % rowgroup_bounds.extent(0);
   auto const column      = orc_columns[column_id];
   auto const t           = threadIdx.x;
 
   auto const use_child_rg = column.type().id() == type_id::LIST;
-  auto const rg           = rowgroup_bounds[rowgroup_id][column_id + (use_child_rg ? 1 : 0)];
+  auto const rg           = rowgroup_bounds(rowgroup_id, column_id + (use_child_rg ? 1 : 0));
 
   if (column.pushdown_mask == nullptr) {
     // All elements are valid if the null mask is not present
-    if (t == 0) { set_counts[rowgroup_id][column_id] = rg.size(); }
+    if (t == 0) { set_counts(rowgroup_id, column_id) = rg.size(); }
     return;
   };
 
@@ -555,7 +557,7 @@ CUDF_KERNEL void __launch_bounds__(block_size)
   }
 
   count = BlockReduce(temp_storage).Sum(count);
-  if (t == 0) { set_counts[rowgroup_id][column_id] = count; }
+  if (t == 0) { set_counts(rowgroup_id, column_id) = count; }
 }
 
 void __host__ parse_compressed_stripe_data(compressed_stream_info* strm_info,
@@ -599,12 +601,13 @@ void __host__ parse_row_group_index(row_group* row_groups,
   CUDF_CUDA_TRY(cudaGetLastError());
 }
 
-void __host__ reduce_pushdown_masks(device_span<orc_column_device_view const> columns,
-                                    device_2dspan<rowgroup_rows const> rowgroups,
-                                    device_2dspan<cudf::size_type> valid_counts,
-                                    cuda::stream_ref stream)
+void __host__ reduce_pushdown_masks(
+  cuda::std::span<orc_column_device_view const> columns,
+  cuda::std::mdspan<rowgroup_rows const, cuda::std::dextents<size_t, 2>> rowgroups,
+  cuda::std::mdspan<cudf::size_type, cuda::std::dextents<size_t, 2>> valid_counts,
+  cuda::stream_ref stream)
 {
-  auto const num_blocks    = columns.size() * rowgroups.size().first;  // 1 block per rowgroup
+  auto const num_blocks    = columns.size() * rowgroups.extent(0);  // 1 block per rowgroup
   constexpr int block_size = 128;
   reduce_pushdown_masks_kernel<block_size>
     <<<num_blocks, block_size, 0, stream.get()>>>(columns, rowgroups, valid_counts);

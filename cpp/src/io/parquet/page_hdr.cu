@@ -18,6 +18,7 @@
 #include <cuda/iterator>
 #include <cuda/std/cstring>
 #include <cuda/std/iterator>
+#include <cuda/std/span>
 #include <cuda/std/tuple>
 #include <cuda/stream>
 #include <thrust/binary_search.h>
@@ -528,8 +529,8 @@ void __forceinline__ __device__ zero_out_page_header_info(byte_stream_s* bs)
  */
 CUDF_KERNEL
 void __launch_bounds__(decode_page_headers_block_size)
-  decode_page_headers_kernel(device_span<ColumnChunkDesc const> chunks,
-                             device_span<chunk_page_info> chunk_pages,
+  decode_page_headers_kernel(cuda::std::span<ColumnChunkDesc const> chunks,
+                             cuda::std::span<chunk_page_info> chunk_pages,
                              kernel_error::pointer error_code)
 {
   auto constexpr num_warps_per_block = decode_page_headers_block_size / cudf::detail::warp_size;
@@ -656,7 +657,7 @@ void __launch_bounds__(decode_page_headers_block_size)
  * @param[out] error_code Pointer to the error code for kernel failures
  */
 CUDF_KERNEL void __launch_bounds__(count_page_headers_block_size)
-  count_page_headers_kernel(cudf::device_span<ColumnChunkDesc> chunks,
+  count_page_headers_kernel(cuda::std::span<ColumnChunkDesc> chunks,
                             kernel_error::pointer error_code)
 {
   auto constexpr num_warps_per_block = decode_page_headers_block_size / cudf::detail::warp_size;
@@ -739,10 +740,10 @@ CUDF_KERNEL void __launch_bounds__(count_page_headers_block_size)
  * @brief Functor to decode specified page headers from corresponding page data spans
  */
 struct decode_from_page_data_fn {
-  cudf::device_span<ColumnChunkDesc const> colchunks;
-  cudf::device_span<PageInfo> pages;
-  cudf::device_span<cudf::device_span<uint8_t const> const> page_data;
-  cudf::device_span<size_type const> chunk_page_offsets;
+  cuda::std::span<ColumnChunkDesc const> colchunks;
+  cuda::std::span<PageInfo> pages;
+  cuda::std::span<cuda::std::span<uint8_t const> const> page_data;
+  cuda::std::span<size_type const> chunk_page_offsets;
   kernel_error::pointer error_code;
 
   __device__ void operator()(size_type page_idx) const noexcept
@@ -924,8 +925,8 @@ void count_page_headers(cudf::detail::hostdevice_span<ColumnChunkDesc> chunks,
   CUDF_CUDA_TRY(cudaGetLastError());
 }
 
-void decode_page_headers(cudf::device_span<ColumnChunkDesc const> chunks,
-                         cudf::device_span<chunk_page_info> chunk_pages,
+void decode_page_headers(cuda::std::span<ColumnChunkDesc const> chunks,
+                         cuda::std::span<chunk_page_info> chunk_pages,
                          kernel_error::pointer error_code,
                          cuda::stream_ref stream)
 {
@@ -948,10 +949,10 @@ void decode_page_headers(cudf::device_span<ColumnChunkDesc const> chunks,
 }
 
 void decode_page_headers_from_page_data(
-  cudf::device_span<ColumnChunkDesc const> chunks,
-  cudf::device_span<PageInfo> pages,
-  cudf::device_span<cudf::device_span<uint8_t const> const> page_data,
-  cudf::device_span<size_type const> chunk_page_offsets,
+  cuda::std::span<ColumnChunkDesc const> chunks,
+  cuda::std::span<PageInfo> pages,
+  cuda::std::span<cuda::std::span<uint8_t const> const> page_data,
+  cuda::std::span<size_type const> chunk_page_offsets,
   kernel_error::pointer error_code,
   cuda::stream_ref stream)
 {

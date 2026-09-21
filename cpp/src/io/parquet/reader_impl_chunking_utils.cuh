@@ -14,6 +14,7 @@
 #include <cudf/detail/utilities/integer_utils.hpp>
 
 #include <cuda/functional>
+#include <cuda/std/span>
 #include <cuda/std/utility>
 #include <cuda/stream>
 #include <thrust/binary_search.h>
@@ -33,9 +34,9 @@ struct cumulative_page_info;
 struct page_span;
 
 #if defined(CHUNKING_DEBUG)
-void print_cumulative_page_info(device_span<PageInfo const> d_pages,
-                                device_span<ColumnChunkDesc const> d_chunks,
-                                device_span<cumulative_page_info const> d_c_info,
+void print_cumulative_page_info(cuda::std::span<PageInfo const> d_pages,
+                                cuda::std::span<ColumnChunkDesc const> d_chunks,
+                                cuda::std::span<cumulative_page_info const> d_c_info,
                                 cuda::stream_ref stream);
 #endif  // CHUNKING_DEBUG
 
@@ -105,8 +106,8 @@ int64_t find_next_split(int64_t cur_pos,
  * results.
  */
 std::pair<rmm::device_uvector<cumulative_page_info>, rmm::device_uvector<int32_t>>
-adjust_cumulative_sizes(device_span<cumulative_page_info const> c_info,
-                        device_span<PageInfo const> pages,
+adjust_cumulative_sizes(cuda::std::span<cumulative_page_info const> c_info,
+                        cuda::std::span<PageInfo const> pages,
                         cuda::stream_ref stream);
 
 /**
@@ -135,10 +136,10 @@ adjust_cumulative_sizes(device_span<cumulative_page_info const> c_info,
  *
  */
 std::tuple<rmm::device_uvector<page_span>, size_t, size_t> compute_next_subpass(
-  device_span<cumulative_page_info const> c_info,
-  device_span<PageInfo const> pages,
-  device_span<ColumnChunkDesc const> chunks,
-  device_span<size_type const> page_offsets,
+  cuda::std::span<cumulative_page_info const> c_info,
+  cuda::std::span<PageInfo const> pages,
+  cuda::std::span<ColumnChunkDesc const> chunks,
+  cuda::std::span<size_type const> page_offsets,
   size_t start_row,
   size_t size_limit,
   size_t num_columns,
@@ -161,12 +162,13 @@ std::tuple<rmm::device_uvector<page_span>, size_t, size_t> compute_next_subpass(
  * @param stream The stream to execute cuda operations on
  * @returns A vector of row_range structs indicating the start and end rows for each split
  */
-std::vector<row_range> compute_page_splits_by_row(device_span<cumulative_page_info const> c_info,
-                                                  device_span<PageInfo const> pages,
-                                                  size_t skip_rows,
-                                                  size_t num_rows,
-                                                  size_t size_limit,
-                                                  cuda::stream_ref stream);
+std::vector<row_range> compute_page_splits_by_row(
+  cuda::std::span<cumulative_page_info const> c_info,
+  cuda::std::span<PageInfo const> pages,
+  size_t skip_rows,
+  size_t num_rows,
+  size_t size_limit,
+  cuda::stream_ref stream);
 
 /**
  * @brief Decompresses a mix of dictionary and non-dictionary pages from a set of column chunks
@@ -209,8 +211,8 @@ std::vector<row_range> compute_page_splits_by_row(device_span<cumulative_page_in
  * @param expected_row_count Expected row count, if applicable
  * @param stream CUDA stream used for device memory operations and kernel launches
  */
-void detect_malformed_pages(device_span<PageInfo const> pages,
-                            device_span<ColumnChunkDesc const> chunks,
+void detect_malformed_pages(cuda::std::span<PageInfo const> pages,
+                            cuda::std::span<ColumnChunkDesc const> chunks,
                             std::optional<size_t> expected_row_count,
                             cuda::stream_ref stream);
 
@@ -218,8 +220,8 @@ void detect_malformed_pages(device_span<PageInfo const> pages,
  * @brief Computes the per-page scratch space required for decompression.
  */
 rmm::device_uvector<size_t> compute_decompression_scratch_sizes(
-  device_span<ColumnChunkDesc const> chunks,
-  device_span<PageInfo const> pages,
+  cuda::std::span<ColumnChunkDesc const> chunks,
+  cuda::std::span<PageInfo const> pages,
   cuda::stream_ref stream);
 
 /**
@@ -237,12 +239,13 @@ rmm::device_uvector<size_t> compute_decompression_scratch_sizes(
  * @returns A vector of size_t values, one for each page, indicating the size needed for string
  * offsets
  */
-rmm::device_uvector<size_t> compute_string_offset_sizes(device_span<ColumnChunkDesc const> chunks,
-                                                        device_span<PageInfo const> pages,
-                                                        size_t skip_rows,
-                                                        size_t num_rows,
-                                                        cuda::stream_ref stream,
-                                                        rmm::device_async_resource_ref mr);
+rmm::device_uvector<size_t> compute_string_offset_sizes(
+  cuda::std::span<ColumnChunkDesc const> chunks,
+  cuda::std::span<PageInfo const> pages,
+  size_t skip_rows,
+  size_t num_rows,
+  cuda::stream_ref stream,
+  rmm::device_async_resource_ref mr);
 
 /**
  * @brief Computes the per-page buffer sizes required for level decode preprocessing.
@@ -260,13 +263,14 @@ rmm::device_uvector<size_t> compute_string_offset_sizes(device_span<ColumnChunkD
  * @returns A vector of size_t values, one for each page, indicating the size needed for level
  * decode preprocessing
  */
-rmm::device_uvector<size_t> compute_level_decode_sizes(device_span<ColumnChunkDesc const> chunks,
-                                                       device_span<PageInfo const> pages,
-                                                       int level_type_size,
-                                                       size_t skip_rows,
-                                                       size_t num_rows,
-                                                       cuda::stream_ref stream,
-                                                       rmm::device_async_resource_ref mr);
+rmm::device_uvector<size_t> compute_level_decode_sizes(
+  cuda::std::span<ColumnChunkDesc const> chunks,
+  cuda::std::span<PageInfo const> pages,
+  int level_type_size,
+  size_t skip_rows,
+  size_t num_rows,
+  cuda::stream_ref stream,
+  rmm::device_async_resource_ref mr);
 
 /**
  * @brief Computes the level decode buffer sizes for a single page.
@@ -295,8 +299,8 @@ CUDF_HOST_DEVICE inline void compute_page_level_decode_sizes(PageType const& pag
  * @brief Add the cost of decompression codec scratch space to the per-page cumulative
  * size information
  */
-void include_scratch_size(device_span<size_t const> pages,
-                          device_span<cumulative_page_info> c_info,
+void include_scratch_size(cuda::std::span<size_t const> pages,
+                          cuda::std::span<cumulative_page_info> c_info,
                           cuda::stream_ref stream);
 
 /**
@@ -336,7 +340,7 @@ struct get_span_size {
  * indices
  */
 struct get_span_size_by_index {
-  cudf::device_span<page_span const> page_indices;
+  cuda::std::span<page_span const> page_indices;
   __device__ inline size_t operator()(size_t i) const
   {
     return i >= page_indices.size() ? 0 : page_indices[i].end - page_indices[i].start;
@@ -347,7 +351,7 @@ struct get_span_size_by_index {
  * @brief Functor which returns the span of page indices for a given column index
  */
 struct get_page_span_by_column {
-  cudf::device_span<size_type const> page_offsets;
+  cuda::std::span<size_type const> page_offsets;
   __device__ inline page_span operator()(size_t i) const
   {
     return {static_cast<size_t>(page_offsets[i]), static_cast<size_t>(page_offsets[i + 1])};
@@ -358,7 +362,7 @@ struct get_page_span_by_column {
  * @brief Functor which returns the end row index for a cumulative_page_info
  */
 struct get_page_end_row_index {
-  device_span<cumulative_page_info const> c_info;
+  cuda::std::span<cumulative_page_info const> c_info;
   __device__ inline size_t operator()(size_t i) const { return c_info[i].end_row_index; }
 };
 
@@ -420,7 +424,7 @@ struct codec_stats {
  * @brief Functor which retrieves per-page decompression information.
  */
 struct get_decomp_info {
-  device_span<ColumnChunkDesc const> chunks;
+  cuda::std::span<ColumnChunkDesc const> chunks;
   __device__ inline decompression_info operator()(PageInfo const& p) const
   {
     return {parquet_compression_support(chunks[p.chunk_idx].codec).first,
@@ -558,9 +562,9 @@ struct get_page_input_size {
  * @brief Functor which sets the absolute row index of a page in a cumulative_page_info struct
  */
 struct set_row_index {
-  device_span<ColumnChunkDesc const> chunks;
-  device_span<PageInfo const> pages;
-  device_span<cumulative_page_info> c_info;
+  cuda::std::span<ColumnChunkDesc const> chunks;
+  cuda::std::span<PageInfo const> pages;
+  cuda::std::span<cumulative_page_info> c_info;
   size_t max_row;
 
   __device__ inline void operator()(size_t i)
@@ -624,18 +628,18 @@ struct page_total_size {
  */
 template <typename RowIndexIter>
 struct get_page_span {
-  device_span<size_type const> page_offsets;
-  device_span<ColumnChunkDesc const> chunks;
-  device_span<PageInfo const> pages;
+  cuda::std::span<size_type const> page_offsets;
+  cuda::std::span<ColumnChunkDesc const> chunks;
+  cuda::std::span<PageInfo const> pages;
   RowIndexIter page_row_index;
   size_t const start_row;
   size_t const end_row;
   bool const is_first_subpass;
   bool const has_offset_index;
 
-  get_page_span(device_span<size_type const> _page_offsets,
-                device_span<ColumnChunkDesc const> _chunks,
-                device_span<PageInfo const> _pages,
+  get_page_span(cuda::std::span<size_type const> _page_offsets,
+                cuda::std::span<ColumnChunkDesc const> _chunks,
+                cuda::std::span<PageInfo const> _pages,
                 RowIndexIter _page_row_index,
                 size_t _start_row,
                 size_t _end_row,
@@ -706,11 +710,11 @@ struct get_page_span {
  * location, and store the index mapping
  */
 struct copy_subpass_page {
-  cudf::device_span<PageInfo const> src_pages;
-  cudf::device_span<PageInfo> dst_pages;
-  cudf::device_span<size_t> page_src_index;
-  cudf::device_span<size_t const> page_offsets;
-  cudf::device_span<page_span const> page_indices;
+  cuda::std::span<PageInfo const> src_pages;
+  cuda::std::span<PageInfo> dst_pages;
+  cuda::std::span<size_t> page_src_index;
+  cuda::std::span<size_t const> page_offsets;
+  cuda::std::span<page_span const> page_indices;
   __device__ void operator()(size_t i) const
   {
     auto const index =

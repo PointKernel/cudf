@@ -13,6 +13,8 @@
 #include <cudf/utilities/export.hpp>
 #include <cudf/utilities/span.hpp>
 
+#include <cuda/std/span>
+
 namespace cudf {
 namespace detail {
 
@@ -24,7 +26,7 @@ CUDF_KERNEL void __launch_bounds__(block_size)
                   table_device_view build,
                   row_equality const equality_probe,
                   hash_set_ref_type set_ref,
-                  cudf::device_span<bool> left_table_keep_mask,
+                  cuda::std::span<bool> left_table_keep_mask,
                   cudf::ast::detail::expression_device_view device_expression_data)
 {
   // Normally the casting of a shared memory array is used to create multiple
@@ -69,7 +71,7 @@ void launch_mixed_join_semi(bool has_nulls,
                             table_device_view build,
                             row_equality const equality_probe,
                             hash_set_ref_type set_ref,
-                            cudf::device_span<bool> left_table_keep_mask,
+                            cuda::std::span<bool> left_table_keep_mask,
                             cudf::ast::detail::expression_device_view device_expression_data,
                             detail::grid_1d const config,
                             int64_t shmem_size_per_block,

@@ -22,6 +22,7 @@
 #include <cudf/io/parquet_schema.hpp>
 #include <cudf/utilities/memory_resource.hpp>
 
+#include <cuda/std/span>
 #include <cuda/stream>
 
 #include <memory>
@@ -380,7 +381,7 @@ class reader_impl {
    */
   void fill_pruned_offsets(size_t skip_rows,
                            size_t num_rows,
-                           cudf::device_span<size_t> initial_str_offsets);
+                           cuda::std::span<size_t> initial_str_offsets);
 
   /**
    * @brief Creates file-wide parquet chunk information.

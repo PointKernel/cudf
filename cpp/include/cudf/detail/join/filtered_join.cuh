@@ -20,6 +20,7 @@
 #include <cuco/pair.cuh>
 #include <cuco/probing_scheme.cuh>
 #include <cuco/types.cuh>
+#include <cuda/std/span>
 #include <cuda/stream>
 
 #include <cstddef>
@@ -162,25 +163,25 @@ class filtered_join {
   void query_right_table(cudf::table_view const& left,
                          Iterator left_iter,
                          Ref query_ref,
-                         cudf::device_span<bool> contains_map,
+                         cuda::std::span<bool> contains_map,
                          cuda::stream_ref stream);
 
   void query_right_table_primitive(
     cudf::table_view const& left,
     std::shared_ptr<cudf::detail::row::equality::preprocessed_table> const& preprocessed_left,
-    cudf::device_span<bool> contains_map,
+    cuda::std::span<bool> contains_map,
     cuda::stream_ref stream);
 
   void query_right_table_flat(
     cudf::table_view const& left,
     std::shared_ptr<cudf::detail::row::equality::preprocessed_table> const& preprocessed_left,
-    cudf::device_span<bool> contains_map,
+    cuda::std::span<bool> contains_map,
     cuda::stream_ref stream);
 
   void query_right_table_nested(
     cudf::table_view const& left,
     std::shared_ptr<cudf::detail::row::equality::preprocessed_table> const& preprocessed_left,
-    cudf::device_span<bool> contains_map,
+    cuda::std::span<bool> contains_map,
     cuda::stream_ref stream);
 
   enum class row_operator_mode : uint8_t { PRIMITIVE, FLAT, NESTED };

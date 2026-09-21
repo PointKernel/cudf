@@ -11,6 +11,7 @@
 
 #include <rmm/resource_ref.hpp>
 
+#include <cuda/std/span>
 #include <cuda/stream>
 
 #include <cstdint>
@@ -25,7 +26,7 @@ std::pair<std::unique_ptr<table>, rmm::device_uvector<size_type>> compute_global
   table_view const& values,
   SetType const& key_set,
   host_span<aggregation::Kind const> h_agg_kinds,
-  device_span<aggregation::Kind const> d_agg_kinds,
+  cuda::std::span<aggregation::Kind const> d_agg_kinds,
   std::span<int8_t const> is_agg_intermediate,
   cuda::stream_ref stream,
   rmm::device_async_resource_ref mr);

@@ -19,6 +19,7 @@
 #include <cudf/utilities/span.hpp>
 
 #include <cuda/iterator>
+#include <cuda/std/span>
 #include <cuda/std/tuple>
 
 #include <algorithm>
@@ -151,7 +152,7 @@ TEST_F(JsonTest, StackContext)
   // Prepare input & output buffers
   cudf::string_scalar const d_scalar(input, true, stream);
   auto const d_input =
-    cudf::device_span<SymbolT const>{d_scalar.data(), static_cast<size_t>(d_scalar.size())};
+    cuda::std::span<SymbolT const>{d_scalar.data(), static_cast<size_t>(d_scalar.size())};
   cudf::detail::hostdevice_vector<StackSymbolT> stack_context(input.size(), stream);
 
   // Run algorithm
@@ -202,7 +203,7 @@ TEST_F(JsonTest, StackContextUtf8)
   // Prepare input & output buffers
   cudf::string_scalar const d_scalar(input, true, stream);
   auto const d_input =
-    cudf::device_span<SymbolT const>{d_scalar.data(), static_cast<size_t>(d_scalar.size())};
+    cuda::std::span<SymbolT const>{d_scalar.data(), static_cast<size_t>(d_scalar.size())};
   cudf::detail::hostdevice_vector<StackSymbolT> stack_context(input.size(), stream);
 
   // Run algorithm
@@ -270,7 +271,7 @@ TEST_P(JsonDelimiterParamTest, StackContextRecovering)
   // Prepare input & output buffers
   cudf::string_scalar const d_scalar(input, true, stream);
   auto const d_input =
-    cudf::device_span<SymbolT const>{d_scalar.data(), static_cast<size_t>(d_scalar.size())};
+    cuda::std::span<SymbolT const>{d_scalar.data(), static_cast<size_t>(d_scalar.size())};
   cudf::detail::hostdevice_vector<StackSymbolT> stack_context(input.size(), stream);
 
   // Run algorithm
@@ -378,7 +379,7 @@ TEST_P(JsonDelimiterParamTest, StackContextRecoveringFuzz)
   // Prepare input & output buffers
   cudf::string_scalar const d_scalar(input, true, stream);
   auto const d_input =
-    cudf::device_span<SymbolT const>{d_scalar.data(), static_cast<size_t>(d_scalar.size())};
+    cuda::std::span<SymbolT const>{d_scalar.data(), static_cast<size_t>(d_scalar.size())};
   cudf::detail::hostdevice_vector<StackSymbolT> stack_context(input.size(), stream);
 
   // Run algorithm
@@ -427,7 +428,7 @@ TEST_F(JsonNewlineDelimiterTest, TokenStream)
   // Prepare input & output buffers
   cudf::string_scalar const d_scalar(input, true, stream);
   auto const d_input =
-    cudf::device_span<SymbolT const>{d_scalar.data(), static_cast<size_t>(d_scalar.size())};
+    cuda::std::span<SymbolT const>{d_scalar.data(), static_cast<size_t>(d_scalar.size())};
 
   // Parse the JSON and get the token stream
   auto [d_tokens_gpu, d_token_indices_gpu] = cuio_json::detail::get_token_stream(
@@ -562,7 +563,7 @@ TEST_F(JsonNewlineDelimiterTest, TokenStream2)
   // Prepare input & output buffers
   cudf::string_scalar const d_scalar(input, true, stream);
   auto const d_input =
-    cudf::device_span<SymbolT const>{d_scalar.data(), static_cast<size_t>(d_scalar.size())};
+    cuda::std::span<SymbolT const>{d_scalar.data(), static_cast<size_t>(d_scalar.size())};
 
   // Parse the JSON and get the token stream
   auto [d_tokens_gpu, d_token_indices_gpu] = cuio_json::detail::get_token_stream(
@@ -720,7 +721,7 @@ TEST_P(JsonDelimiterParamTest, RecoveringTokenStream)
 
   // Prepare input & output buffers
   cudf::string_scalar const d_scalar(input, true, stream);
-  auto const d_input = cudf::device_span<cuio_json::SymbolT const>{
+  auto const d_input = cuda::std::span<cuio_json::SymbolT const>{
     d_scalar.data(), static_cast<size_t>(d_scalar.size())};
 
   // Parse the JSON and get the token stream
@@ -1159,7 +1160,7 @@ TEST_P(JsonDelimiterParamTest, RecoveringTokenStreamNewlineAndDelimiter)
 
   // Prepare input & output buffers
   cudf::string_scalar const d_scalar(input, true, stream);
-  auto const d_input = cudf::device_span<cuio_json::SymbolT const>{
+  auto const d_input = cuda::std::span<cuio_json::SymbolT const>{
     d_scalar.data(), static_cast<size_t>(d_scalar.size())};
 
   // Parse the JSON and get the token stream
@@ -1329,7 +1330,7 @@ TEST_P(JsonDelimiterParamTest, RecoveringTokenStreamNewlineAsWSAndDelimiter)
 
   // Prepare input & output buffers
   cudf::string_scalar const d_scalar(input, true, stream);
-  auto const d_input = cudf::device_span<cuio_json::SymbolT const>{
+  auto const d_input = cuda::std::span<cuio_json::SymbolT const>{
     d_scalar.data(), static_cast<size_t>(d_scalar.size())};
 
   // Default parsing options
@@ -1392,7 +1393,7 @@ TEST_F(JsonTest, RejectsUnquotedValuesWithInvalidLeadingChar)
                         .strict_validation(true)
                         .build();
     cudf::string_scalar const d_scalar(s, true);
-    auto const d_input = cudf::device_span<cuio_json::SymbolT const>{
+    auto const d_input = cuda::std::span<cuio_json::SymbolT const>{
       d_scalar.data(), static_cast<size_t>(d_scalar.size())};
     auto const stream = cudf::get_default_stream();
     using token_t     = cuio_json::token_t;

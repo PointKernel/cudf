@@ -21,6 +21,7 @@
 #include <cub/device/device_memcpy.cuh>
 #include <cuda/functional>
 #include <cuda/iterator>
+#include <cuda/std/span>
 #include <cuda/stream>
 #include <cuda_runtime.h>
 #include <thrust/device_vector.h>
@@ -31,7 +32,7 @@ namespace {
 
 template <typename T>
 void table_to_array_impl(table_view const& input,
-                         device_span<cuda::std::byte> output,
+                         cuda::std::span<cuda::std::byte> output,
                          cuda::stream_ref stream)
 {
   auto const num_columns = input.num_columns();
@@ -73,7 +74,7 @@ void table_to_array_impl(table_view const& input,
 
 struct table_to_array_dispatcher {
   table_view const& input;
-  device_span<cuda::std::byte> output;
+  cuda::std::span<cuda::std::byte> output;
   cuda::stream_ref stream;
 
   template <typename T, CUDF_ENABLE_IF(is_fixed_width<T>())>
@@ -92,7 +93,7 @@ struct table_to_array_dispatcher {
 }  // namespace
 
 void table_to_array(table_view const& input,
-                    device_span<cuda::std::byte> output,
+                    cuda::std::span<cuda::std::byte> output,
                     cuda::stream_ref stream)
 {
   if (input.num_columns() == 0) return;
@@ -106,7 +107,7 @@ void table_to_array(table_view const& input,
 }  // namespace detail
 
 void table_to_array(table_view const& input,
-                    device_span<cuda::std::byte> output,
+                    cuda::std::span<cuda::std::byte> output,
                     cuda::stream_ref stream)
 {
   CUDF_FUNC_RANGE();

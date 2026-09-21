@@ -11,6 +11,8 @@
 #include <cudf/detail/utilities/vector_factories.hpp>
 #include <cudf/io/text/data_chunk_source_factories.hpp>
 
+#include <cuda/std/span>
+
 #include <fstream>
 
 namespace cudf::io::text {
@@ -73,7 +75,7 @@ class datasource_chunk_reader : public data_chunk_reader {
 
       // copy the host-pinned data on to device
       cudf::detail::cuda_memcpy_async<char>(
-        device_span<char>{chunk}.subspan(0, read_size),
+        cuda::std::span<char>{chunk}.subspan(0, read_size),
         host_span<char const>{h_ticket.buffer}.subspan(0, read_size),
         stream);
 
@@ -141,7 +143,7 @@ class istream_data_chunk_reader : public data_chunk_reader {
 
     // copy the host-pinned data on to device
     cudf::detail::cuda_memcpy_async<char>(
-      device_span<char>{chunk}.subspan(0, read_size),
+      cuda::std::span<char>{chunk}.subspan(0, read_size),
       host_span<char const>{h_ticket.buffer}.subspan(0, read_size),
       stream);
 
@@ -183,7 +185,7 @@ class host_span_data_chunk_reader : public data_chunk_reader {
 
     // copy the host data to device
     cudf::detail::cuda_memcpy_async<char>(
-      cudf::device_span<char>{chunk}.subspan(0, read_size),
+      cuda::std::span<char>{chunk}.subspan(0, read_size),
       cudf::host_span<char const>{_data}.subspan(_position, read_size),
       stream);
 
@@ -204,7 +206,7 @@ class host_span_data_chunk_reader : public data_chunk_reader {
  */
 class device_span_data_chunk_reader : public data_chunk_reader {
  public:
-  device_span_data_chunk_reader(device_span<char const> data) : _data(data) {}
+  device_span_data_chunk_reader(cuda::std::span<char const> data) : _data(data) {}
 
   void skip_bytes(std::size_t read_size) override
   {
@@ -214,7 +216,7 @@ class device_span_data_chunk_reader : public data_chunk_reader {
   std::unique_ptr<device_data_chunk> get_next_chunk(std::size_t read_size,
                                                     cuda::stream_ref stream) override
   {
-    // limit the read size to the number of bytes remaining in the device_span.
+    // limit the read size to the number of bytes remaining in the device span.
     read_size = std::min(read_size, _data.size() - _position);
 
     // create a view over the device span
@@ -228,7 +230,7 @@ class device_span_data_chunk_reader : public data_chunk_reader {
   }
 
  private:
-  device_span<char const> _data;
+  cuda::std::span<char const> _data;
   uint64_t _position = 0;
 };
 
@@ -283,14 +285,14 @@ class host_span_data_chunk_source : public data_chunk_source {
  */
 class device_span_data_chunk_source : public data_chunk_source {
  public:
-  device_span_data_chunk_source(device_span<char const> data) : _data(data) {}
+  device_span_data_chunk_source(cuda::std::span<char const> data) : _data(data) {}
   [[nodiscard]] std::unique_ptr<data_chunk_reader> create_reader() const override
   {
     return std::make_unique<device_span_data_chunk_reader>(_data);
   }
 
  private:
-  device_span<char const> _data;
+  cuda::std::span<char const> _data;
 };
 
 }  // namespace
@@ -312,7 +314,7 @@ std::unique_ptr<data_chunk_source> make_source_from_file(std::string_view filena
 
 std::unique_ptr<data_chunk_source> make_source(cudf::string_scalar& data)
 {
-  auto data_span = device_span<char const>(data.data(), data.size());
+  auto data_span = cuda::std::span<char const>(data.data(), data.size());
   return std::make_unique<device_span_data_chunk_source>(data_span);
 }
 

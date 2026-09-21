@@ -13,6 +13,7 @@
 #include <cudf/io/types.hpp>
 #include <cudf/utilities/span.hpp>
 
+#include <cuda/std/span>
 #include <cuda/stream>
 
 #include <cstdint>
@@ -111,9 +112,9 @@ std::vector<uint8_t> compress(compression_type compression, host_span<uint8_t co
  * @param stream CUDA stream used for device memory operations and kernel launches
  */
 void compress(compression_type compression,
-              device_span<device_span<uint8_t const> const> inputs,
-              device_span<device_span<uint8_t> const> outputs,
-              device_span<codec_exec_result> results,
+              cuda::std::span<cuda::std::span<uint8_t const> const> inputs,
+              cuda::std::span<cuda::std::span<uint8_t> const> outputs,
+              cuda::std::span<codec_exec_result> results,
               cuda::stream_ref stream);
 
 /**
@@ -150,9 +151,9 @@ size_t decompress(compression_type compression,
  * @param stream CUDA stream used for device memory operations and kernel launches
  */
 void decompress(compression_type compression,
-                device_span<device_span<uint8_t const> const> inputs,
-                device_span<device_span<uint8_t> const> outputs,
-                device_span<codec_exec_result> results,
+                cuda::std::span<cuda::std::span<uint8_t const> const> inputs,
+                cuda::std::span<cuda::std::span<uint8_t> const> outputs,
+                cuda::std::span<codec_exec_result> results,
                 size_t max_uncomp_chunk_size,
                 size_t max_total_uncomp_size,
                 cuda::stream_ref stream);

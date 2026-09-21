@@ -24,6 +24,8 @@
 #include <rmm/mr/managed_memory_resource.hpp>
 #include <rmm/mr/pool_memory_resource.hpp>
 
+#include <cuda/std/span>
+
 #include <algorithm>
 #include <cstdlib>
 #include <ctime>
@@ -163,8 +165,8 @@ std::unique_ptr<cudf::table> join_and_gather(cudf::table_view const& left_input,
                      cudf::get_default_stream(),
                      cudf::get_current_device_resource_ref());
 
-  auto const left_indices_span  = cudf::device_span<cudf::size_type const>{*left_join_indices};
-  auto const right_indices_span = cudf::device_span<cudf::size_type const>{*right_join_indices};
+  auto const left_indices_span  = cuda::std::span<cudf::size_type const>{*left_join_indices};
+  auto const right_indices_span = cuda::std::span<cudf::size_type const>{*right_join_indices};
 
   auto const left_indices_col  = cudf::column_view{left_indices_span};
   auto const right_indices_col = cudf::column_view{right_indices_span};

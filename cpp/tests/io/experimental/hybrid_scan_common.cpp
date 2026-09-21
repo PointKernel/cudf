@@ -21,6 +21,7 @@
 #include <rmm/device_buffer.hpp>
 
 #include <cuda/iterator>
+#include <cuda/std/span>
 
 #include <algorithm>
 #include <format>
@@ -207,7 +208,7 @@ multisource_device_data fetch_multisource_device_data(
     mr);
   tasks.get();
 
-  auto flat_spans = std::vector<cudf::device_span<uint8_t const>>{};
+  auto flat_spans = std::vector<cuda::std::span<uint8_t const>>{};
   for (auto const& source_spans : per_source_spans) {
     flat_spans.insert(flat_spans.end(), source_spans.begin(), source_spans.end());
   }
@@ -260,7 +261,7 @@ auto filter_row_groups_with_dictionaries_impl(InputType& inputs,
         mr);
     task.get();
 
-    std::vector<cudf::device_span<uint8_t const>> dict_page_data;
+    std::vector<cuda::std::span<uint8_t const>> dict_page_data;
     for (auto const& source_dict_pages : dict_page_data_per_source) {
       dict_page_data.insert(
         dict_page_data.end(), source_dict_pages.begin(), source_dict_pages.end());

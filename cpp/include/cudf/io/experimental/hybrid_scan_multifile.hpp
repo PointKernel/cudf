@@ -15,6 +15,7 @@
 
 #include <rmm/resource_ref.hpp>
 
+#include <cuda/std/span>
 #include <cuda/stream>
 
 #include <memory>
@@ -199,7 +200,7 @@ class hybrid_scan_multifile {
    * @return Vectors of filtered per-source row group indices, one per source
    */
   [[nodiscard]] std::vector<std::vector<size_type>> filter_row_groups_with_bloom_filters(
-    std::span<cudf::device_span<uint8_t const> const> bloom_filter_data,
+    std::span<cuda::std::span<uint8_t const> const> bloom_filter_data,
     std::span<std::vector<size_type> const> row_group_indices,
     parquet_reader_options const& options,
     cuda::stream_ref stream) const;
@@ -228,7 +229,7 @@ class hybrid_scan_multifile {
    * @return Vector of vectors of filtered row group indices, one per source
    */
   [[nodiscard]] std::vector<std::vector<size_type>> filter_row_groups_with_dictionary_pages(
-    cudf::host_span<cudf::device_span<uint8_t const> const> dictionary_page_data,
+    cudf::host_span<cuda::std::span<uint8_t const> const> dictionary_page_data,
     cudf::host_span<std::vector<size_type> const> row_group_indices,
     parquet_reader_options const& options,
     cuda::stream_ref stream) const;
@@ -298,7 +299,7 @@ class hybrid_scan_multifile {
    */
   [[nodiscard]] table_with_metadata materialize_filter_columns(
     cudf::host_span<std::vector<size_type> const> row_group_indices,
-    cudf::host_span<cudf::device_span<uint8_t const> const> column_chunk_data,
+    cudf::host_span<cuda::std::span<uint8_t const> const> column_chunk_data,
     cudf::mutable_column_view& row_mask,
     use_data_page_mask mask_data_pages,
     parquet_reader_options const& options,
@@ -359,7 +360,7 @@ class hybrid_scan_multifile {
    */
   [[nodiscard]] table_with_metadata materialize_payload_columns(
     cudf::host_span<std::vector<size_type> const> row_group_indices,
-    cudf::host_span<cudf::device_span<uint8_t const> const> column_chunk_data,
+    cudf::host_span<cuda::std::span<uint8_t const> const> column_chunk_data,
     cudf::column_view const& row_mask,
     use_data_page_mask mask_data_pages,
     parquet_reader_options const& options,
@@ -391,7 +392,7 @@ class hybrid_scan_multifile {
    */
   [[nodiscard]] table_with_metadata materialize_all_columns(
     cudf::host_span<std::vector<size_type> const> row_group_indices,
-    cudf::host_span<cudf::device_span<uint8_t const> const> column_chunk_data,
+    cudf::host_span<cuda::std::span<uint8_t const> const> column_chunk_data,
     parquet_reader_options const& options,
     cuda::stream_ref stream,
     rmm::device_async_resource_ref mr) const;
@@ -419,7 +420,7 @@ class hybrid_scan_multifile {
     cudf::host_span<std::vector<size_type> const> row_group_indices,
     cudf::column_view const& row_mask,
     use_data_page_mask mask_data_pages,
-    cudf::host_span<cudf::device_span<uint8_t const> const> column_chunk_data,
+    cudf::host_span<cuda::std::span<uint8_t const> const> column_chunk_data,
     parquet_reader_options const& options,
     cuda::stream_ref stream,
     rmm::device_async_resource_ref mr) const;
@@ -461,7 +462,7 @@ class hybrid_scan_multifile {
     cudf::host_span<std::vector<size_type> const> row_group_indices,
     cudf::column_view const& row_mask,
     use_data_page_mask mask_data_pages,
-    cudf::host_span<cudf::device_span<uint8_t const> const> column_chunk_data,
+    cudf::host_span<cuda::std::span<uint8_t const> const> column_chunk_data,
     parquet_reader_options const& options,
     cuda::stream_ref stream,
     rmm::device_async_resource_ref mr) const;
@@ -488,7 +489,7 @@ class hybrid_scan_multifile {
     std::size_t pass_read_limit,
     cudf::host_span<std::vector<size_type> const> row_group_indices,
     cudf::column_view const& row_mask,
-    cudf::host_span<cudf::device_span<uint8_t const> const> page_data,
+    cudf::host_span<cuda::std::span<uint8_t const> const> page_data,
     parquet_reader_options const& options,
     cuda::stream_ref stream,
     rmm::device_async_resource_ref mr) const;
@@ -524,7 +525,7 @@ class hybrid_scan_multifile {
     std::size_t chunk_read_limit,
     std::size_t pass_read_limit,
     cudf::host_span<std::vector<size_type> const> row_group_indices,
-    cudf::host_span<cudf::device_span<uint8_t const> const> column_chunk_data,
+    cudf::host_span<cuda::std::span<uint8_t const> const> column_chunk_data,
     parquet_reader_options const& options,
     cuda::stream_ref stream,
     rmm::device_async_resource_ref mr) const;

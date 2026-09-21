@@ -8,6 +8,7 @@
 #include <cudf/reduction/detail/segmented_reduction_functions.hpp>
 #include <cudf/utilities/memory_resource.hpp>
 
+#include <cuda/std/span>
 #include <cuda/stream>
 
 namespace cudf {
@@ -18,7 +19,7 @@ namespace detail {
 // translation unit. Both reductions use the same var_std intermediate and segmented CUB reduction
 // shape; keeping them together avoids emitting duplicate device kernel instantiations.
 std::unique_ptr<cudf::column> segmented_standard_deviation(column_view const& col,
-                                                           device_span<size_type const> offsets,
+                                                           cuda::std::span<size_type const> offsets,
                                                            cudf::data_type const output_dtype,
                                                            null_policy null_handling,
                                                            size_type ddof,
@@ -31,7 +32,7 @@ std::unique_ptr<cudf::column> segmented_standard_deviation(column_view const& co
 }
 
 std::unique_ptr<cudf::column> segmented_variance(column_view const& col,
-                                                 device_span<size_type const> offsets,
+                                                 cuda::std::span<size_type const> offsets,
                                                  cudf::data_type const output_dtype,
                                                  null_policy null_handling,
                                                  size_type ddof,

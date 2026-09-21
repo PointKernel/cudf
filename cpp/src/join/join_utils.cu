@@ -22,6 +22,7 @@
 #include <cuda/iterator>
 #include <cuda/std/functional>
 #include <cuda/std/iterator>
+#include <cuda/std/span>
 #include <cuda/std/tuple>
 #include <cuda/stream>
 #include <thrust/scatter.h>
@@ -102,7 +103,7 @@ struct to_no_match_pair {
 VectorPair finalize_full_join(VectorPair&& indices,
                               size_type left_table_num_rows,
                               size_type right_table_num_rows,
-                              std::optional<cudf::device_span<size_type const>> right_matches,
+                              std::optional<cuda::std::span<size_type const>> right_matches,
                               cuda::stream_ref stream,
                               rmm::device_async_resource_ref mr,
                               std::optional<size_type> unmatched_right_count)
@@ -183,8 +184,8 @@ VectorPair finalize_full_join(VectorPair&& indices,
 }
 
 VectorPair finalize_full_join(
-  cudf::host_span<cudf::device_span<size_type const> const> left_partials,
-  cudf::host_span<cudf::device_span<size_type const> const> right_partials,
+  cudf::host_span<cuda::std::span<size_type const> const> left_partials,
+  cudf::host_span<cuda::std::span<size_type const> const> right_partials,
   size_type left_table_num_rows,
   size_type right_table_num_rows,
   cuda::stream_ref stream,

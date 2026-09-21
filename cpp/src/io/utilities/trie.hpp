@@ -13,6 +13,7 @@
 #include <cudf/utilities/export.hpp>
 #include <cudf/utilities/span.hpp>
 
+#include <cuda/std/span>
 #include <cuda/stream>
 
 #include <optional>
@@ -42,7 +43,7 @@ struct serial_trie_node {
 
 using trie          = rmm::device_uvector<serial_trie_node>;
 using optional_trie = std::optional<trie>;
-using trie_view     = device_span<serial_trie_node const>;
+using trie_view     = cuda::std::span<serial_trie_node const>;
 
 inline trie_view make_trie_view(optional_trie const& t)
 {

@@ -27,6 +27,7 @@
 
 #include <cuda/iterator>
 #include <cuda/std/iterator>
+#include <cuda/std/span>
 #include <cuda/stream>
 #include <thrust/fill.h>
 
@@ -189,7 +190,7 @@ std::unique_ptr<rmm::device_uvector<size_type>> mixed_join_semi(
                          *right_view,
                          equality_left,
                          row_set_ref,
-                         cudf::device_span<bool>(left_table_keep_mask),
+                         cuda::std::span<bool>(left_table_keep_mask),
                          parser.device_expression_data,
                          config,
                          shmem_size_per_block,

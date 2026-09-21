@@ -21,6 +21,8 @@
 #include <rmm/device_uvector.hpp>
 
 #include <cuda/iterator>
+#include <cuda/std/mdspan>
+#include <cuda/std/span>
 #include <cuda/stream>
 #include <thrust/host_vector.h>
 
@@ -34,8 +36,6 @@ namespace cudf::io::orc::detail {
 class orc_table_view;
 
 using namespace cudf::io::detail;
-using cudf::detail::device_2dspan;
-using cudf::detail::host_2dspan;
 using cudf::detail::hostdevice_2dvector;
 
 /**
@@ -105,11 +105,11 @@ struct file_segmentation {
  * transient arena, which is freed as soon as gathering completes.
  */
 struct encoded_data {
-  rmm::device_uvector<uint8_t> persistent_buffer;       // extents that may be read in place
-  rmm::device_uvector<uint8_t> transient_buffer;        // extents always copied out by the gather
-  rmm::device_uvector<uint8_t> gathered_buffer;         // arena for gather_stripes output
-  std::vector<std::vector<device_span<uint8_t>>> data;  // [stripe][strm_id] views
-  hostdevice_2dvector<encoder_chunk_streams> streams;   // streams of encoded data, per chunk
+  rmm::device_uvector<uint8_t> persistent_buffer;  // extents that may be read in place
+  rmm::device_uvector<uint8_t> transient_buffer;   // extents always copied out by the gather
+  rmm::device_uvector<uint8_t> gathered_buffer;    // arena for gather_stripes output
+  std::vector<std::vector<cuda::std::span<uint8_t>>> data;  // [stripe][strm_id] views
+  hostdevice_2dvector<encoder_chunk_streams> streams;       // streams of encoded data, per chunk
 };
 
 /**
@@ -118,8 +118,8 @@ struct encoded_data {
 struct string_dictionaries {
   std::vector<rmm::device_uvector<uint32_t>> data;
   std::vector<rmm::device_uvector<uint32_t>> index;
-  rmm::device_uvector<device_span<uint32_t>> d_data_view;
-  rmm::device_uvector<device_span<uint32_t>> d_index_view;
+  rmm::device_uvector<cuda::std::span<uint32_t>> d_data_view;
+  rmm::device_uvector<cuda::std::span<uint32_t>> d_index_view;
   // Dictionaries are currently disabled for columns with a rowgroup larger than 2^15
   thrust::host_vector<bool> dictionary_enabled;
 };
@@ -282,16 +282,17 @@ class writer::impl {
    * @param[in,out] stripes List of stripe description
    * @param[out] bounce_buffer Temporary host output buffer
    */
-  void write_orc_data_to_sink(encoded_data const& enc_data,
-                              file_segmentation const& segmentation,
-                              orc_table_view const& orc_table,
-                              device_span<uint8_t const> compressed_data,
-                              host_span<codec_exec_result const> comp_results,
-                              host_2dspan<stripe_stream const> strm_descs,
-                              host_span<col_stats_blob const> rg_stats,
-                              orc_streams& streams,
-                              host_span<StripeInformation> stripes,
-                              host_span<uint8_t> bounce_buffer);
+  void write_orc_data_to_sink(
+    encoded_data const& enc_data,
+    file_segmentation const& segmentation,
+    orc_table_view const& orc_table,
+    cuda::std::span<uint8_t const> compressed_data,
+    host_span<codec_exec_result const> comp_results,
+    cuda::std::mdspan<stripe_stream const, cuda::std::dextents<size_t, 2>> strm_descs,
+    host_span<col_stats_blob const> rg_stats,
+    orc_streams& streams,
+    host_span<StripeInformation> stripes,
+    host_span<uint8_t> bounce_buffer);
 
   /**
    * @brief Add the processed table data into the internal file footer.

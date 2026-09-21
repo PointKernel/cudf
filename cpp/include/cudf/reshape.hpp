@@ -13,6 +13,7 @@
 #include <cudf/utilities/span.hpp>
 
 #include <cuda/functional>
+#include <cuda/std/span>
 
 #include <memory>
 
@@ -108,8 +109,8 @@ std::unique_ptr<column> byte_cast(
  * This function copies a `table_view` with columns of the same fixed-width type
  * into a 2D device array stored in column-major order.
  *
- * The output buffer must be preallocated and passed as a `device_span` using
- * a `device_span<cuda::std::byte>`. It must be large enough to hold
+ * The output buffer must be preallocated and passed as a `cuda::std::span` using
+ * a `cuda::std::span<cuda::std::byte>`. It must be large enough to hold
  * `num_rows * num_columns * sizeof(dtype)` bytes.
  *
  * @throws cudf::logic_error if columns do not all have the same type
@@ -121,7 +122,7 @@ std::unique_ptr<column> byte_cast(
  * @param stream CUDA stream used for memory operations
  */
 void table_to_array(table_view const& input,
-                    device_span<cuda::std::byte> output,
+                    cuda::std::span<cuda::std::byte> output,
                     cuda::stream_ref stream = cudf::get_default_stream());
 
 /** @} */  // end of group

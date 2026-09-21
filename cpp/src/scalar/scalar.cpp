@@ -17,6 +17,7 @@
 #include <rmm/device_buffer.hpp>
 #include <rmm/device_scalar.hpp>
 
+#include <cuda/std/span>
 #include <cuda/stream>
 
 #include <algorithm>
@@ -140,7 +141,7 @@ std::string string_scalar::to_string(cuda::stream_ref stream) const
 {
   std::string result(size(), '\0');
   detail::cuda_memcpy(host_span<char>{result.data(), result.size()},
-                      device_span<char const>{data(), _data.size()},
+                      cuda::std::span<char const>{data(), _data.size()},
                       stream);
   return result;
 }

@@ -17,6 +17,7 @@
 
 #include <rmm/device_buffer.hpp>
 
+#include <cuda/std/span>
 #include <thrust/gather.h>
 
 namespace cudf::groupby::detail {
@@ -24,7 +25,7 @@ namespace cudf::groupby::detail {
 namespace {
 
 std::unique_ptr<column> build_histogram(column_view const& values,
-                                        cudf::device_span<size_type const> group_labels,
+                                        cuda::std::span<size_type const> group_labels,
                                         std::optional<column_view> const& partial_counts,
                                         size_type num_groups,
                                         cuda::stream_ref stream,
@@ -75,7 +76,7 @@ std::unique_ptr<column> build_histogram(column_view const& values,
 }  // namespace
 
 std::unique_ptr<column> group_histogram(column_view const& values,
-                                        cudf::device_span<size_type const> group_labels,
+                                        cuda::std::span<size_type const> group_labels,
                                         size_type num_groups,
                                         cuda::stream_ref stream,
                                         rmm::device_async_resource_ref mr)
@@ -87,7 +88,7 @@ std::unique_ptr<column> group_histogram(column_view const& values,
 }
 
 std::unique_ptr<column> group_merge_histogram(column_view const& values,
-                                              cudf::device_span<size_type const> group_offsets,
+                                              cuda::std::span<size_type const> group_offsets,
                                               size_type num_groups,
                                               cuda::stream_ref stream,
                                               rmm::device_async_resource_ref mr)

@@ -7,6 +7,8 @@
 
 #include <cudf/utilities/error.hpp>
 
+#include <cuda/std/span>
+
 #include <string>
 #include <utility>
 
@@ -69,14 +71,14 @@ jintArray sizes_to_jint_array(JNIEnv* env, std::vector<cudf::size_type> const& v
   return result;
 }
 
-std::vector<cudf::device_span<uint8_t const>> make_device_spans(JNIEnv* env,
-                                                                jlongArray j_addrs,
-                                                                jlongArray j_lens)
+std::vector<cuda::std::span<uint8_t const>> make_device_spans(JNIEnv* env,
+                                                              jlongArray j_addrs,
+                                                              jlongArray j_lens)
 {
   cudf::jni::native_jlongArray addrs(env, j_addrs);
   cudf::jni::native_jlongArray lens(env, j_lens);
   CUDF_EXPECTS(addrs.size() == lens.size(), "addrs and lens arrays must have the same length");
-  std::vector<cudf::device_span<uint8_t const>> out;
+  std::vector<cuda::std::span<uint8_t const>> out;
   out.reserve(addrs.size());
   for (int i = 0; i < addrs.size(); ++i) {
     out.emplace_back(reinterpret_cast<uint8_t const*>(addrs[i]),

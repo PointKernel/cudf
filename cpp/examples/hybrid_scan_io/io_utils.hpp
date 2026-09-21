@@ -11,6 +11,7 @@
 #include <rmm/device_buffer.hpp>
 #include <rmm/resource_ref.hpp>
 
+#include <cuda/std/span>
 #include <cuda/stream>
 
 #include <future>
@@ -52,7 +53,7 @@ std::unique_ptr<cudf::io::datasource::buffer> fetch_page_index_bytes(
  * to wait on the read tasks
  */
 std::tuple<std::vector<rmm::device_buffer>,
-           std::vector<cudf::device_span<uint8_t const>>,
+           std::vector<cuda::std::span<uint8_t const>>,
            std::future<void>>
 fetch_byte_ranges_async(cudf::io::datasource& datasource,
                         cudf::host_span<cudf::io::text::byte_range_info const> byte_ranges,

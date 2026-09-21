@@ -15,6 +15,8 @@
 
 #include <cuco/pair.cuh>
 #include <cuco/storage.cuh>
+#include <cuda/std/mdspan>
+#include <cuda/std/span>
 
 namespace cudf::io::parquet::detail {
 
@@ -91,8 +93,8 @@ inline size_type __device__ row_to_value_idx(size_type idx,
  * @param frags Column fragments
  * @param stream CUDA stream to use
  */
-void populate_chunk_hash_maps(device_span<slot_type> const map_storage,
-                              cudf::detail::device_2dspan<PageFragment> frags,
+void populate_chunk_hash_maps(cuda::std::span<slot_type> const map_storage,
+                              cuda::std::mdspan<PageFragment, cuda::std::dextents<size_t, 2>> frags,
                               cuda::stream_ref stream);
 
 /**
@@ -106,10 +108,11 @@ void populate_chunk_hash_maps(device_span<slot_type> const map_storage,
  * @param frags 2D span of per-column page fragments
  * @param stream CUDA stream to use
  */
-void collect_map_entries(device_span<slot_type> const map_storage,
-                         device_span<EncColumnChunk> chunks,
-                         cudf::detail::device_2dspan<PageFragment const> frags,
-                         cuda::stream_ref stream);
+void collect_map_entries(
+  cuda::std::span<slot_type> const map_storage,
+  cuda::std::span<EncColumnChunk> chunks,
+  cuda::std::mdspan<PageFragment const, cuda::std::dextents<size_t, 2>> frags,
+  cuda::stream_ref stream);
 
 /**
  * @brief Get the Dictionary Indices for each row
@@ -124,9 +127,10 @@ void collect_map_entries(device_span<slot_type> const map_storage,
  * @param frags Column fragments
  * @param stream CUDA stream to use
  */
-void get_dictionary_indices(device_span<slot_type> const map_storage,
-                            cudf::detail::device_2dspan<PageFragment const> frags,
-                            cuda::stream_ref stream);
+void get_dictionary_indices(
+  cuda::std::span<slot_type> const map_storage,
+  cuda::std::mdspan<PageFragment const, cuda::std::dextents<size_t, 2>> frags,
+  cuda::stream_ref stream);
 
 /**
  * @brief Compute the minimum width required for the dictionary indices for each data page
@@ -134,6 +138,6 @@ void get_dictionary_indices(device_span<slot_type> const map_storage,
  * @param pages Device span of encoder pages
  * @param stream CUDA stream to use
  */
-void compute_per_page_dict_bits(device_span<EncPage> pages, cuda::stream_ref stream);
+void compute_per_page_dict_bits(cuda::std::span<EncPage> pages, cuda::stream_ref stream);
 
 }  // namespace cudf::io::parquet::detail

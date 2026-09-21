@@ -15,6 +15,8 @@
 #include <cudf/utilities/default_stream.hpp>
 #include <cudf/utilities/span.hpp>
 
+#include <cuda/std/span>
+
 #include <nvbench/nvbench.cuh>
 
 template <typename JoinFunc>
@@ -39,8 +41,8 @@ void filter_join_indices_benchmark(nvbench::state& state,
   cudf::hash_join hash_joiner(build_keys, cudf::null_equality::EQUAL);
   auto [left_indices, right_indices] = join_func(hash_joiner, probe_keys);
 
-  cudf::device_span<cudf::size_type const> left_span{left_indices->data(), left_indices->size()};
-  cudf::device_span<cudf::size_type const> right_span{right_indices->data(), right_indices->size()};
+  cuda::std::span<cudf::size_type const> left_span{left_indices->data(), left_indices->size()};
+  cuda::std::span<cudf::size_type const> right_span{right_indices->data(), right_indices->size()};
 
   state.set_cuda_stream(nvbench::make_cuda_stream_view(cudf::get_default_stream().get()));
 

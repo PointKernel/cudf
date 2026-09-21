@@ -15,6 +15,7 @@
 #include <rmm/exec_policy.hpp>
 
 #include <cuda/iterator>
+#include <cuda/std/span>
 #include <cuda/stream>
 #include <thrust/for_each.h>
 #include <thrust/transform.h>
@@ -76,7 +77,7 @@ std::pair<std::unique_ptr<table>, rmm::device_uvector<size_type>> compute_aggs_d
   table_view const& values,
   SetType const& key_set,
   host_span<aggregation::Kind const> h_agg_kinds,
-  device_span<aggregation::Kind const> d_agg_kinds,
+  cuda::std::span<aggregation::Kind const> d_agg_kinds,
   std::span<int8_t const> is_agg_intermediate,
   cuda::stream_ref stream,
   rmm::device_async_resource_ref mr)
@@ -125,7 +126,7 @@ std::pair<std::unique_ptr<table>, rmm::device_uvector<size_type>> compute_aggs_s
   table_view const& values,
   SetType const& key_set,
   host_span<aggregation::Kind const> h_agg_kinds,
-  device_span<aggregation::Kind const> d_agg_kinds,
+  cuda::std::span<aggregation::Kind const> d_agg_kinds,
   std::span<int8_t const> is_agg_intermediate,
   cuda::stream_ref stream,
   rmm::device_async_resource_ref mr)
@@ -162,7 +163,7 @@ std::pair<std::unique_ptr<table>, rmm::device_uvector<size_type>> compute_global
   table_view const& values,
   SetType const& key_set,
   host_span<aggregation::Kind const> h_agg_kinds,
-  device_span<aggregation::Kind const> d_agg_kinds,
+  cuda::std::span<aggregation::Kind const> d_agg_kinds,
   std::span<int8_t const> is_agg_intermediate,
   cuda::stream_ref stream,
   rmm::device_async_resource_ref mr)

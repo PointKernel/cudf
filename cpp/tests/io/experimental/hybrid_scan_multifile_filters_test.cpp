@@ -23,6 +23,8 @@
 #include <cudf/utilities/memory_resource.hpp>
 #include <cudf/utilities/span.hpp>
 
+#include <cuda/std/span>
+
 #include <algorithm>
 #include <cstdint>
 #include <iterator>
@@ -40,7 +42,7 @@ template <typename T>
 auto host_row_mask_data(cudf::column_view const& column, cuda::stream_ref stream)
 {
   return cudf::detail::make_host_vector<T>(
-    cudf::device_span<T const>(column.data<T>(), static_cast<size_t>(column.size())), stream);
+    cuda::std::span<T const>(column.data<T>(), static_cast<size_t>(column.size())), stream);
 }
 
 /**
@@ -622,7 +624,7 @@ TEST_F(HybridScanMultifileFiltersTest, FilterRowGroupsWithBloomFilters)
     auto const input_row_group_indices = reader->all_row_groups(options);
     ASSERT_EQ(input_row_group_indices.size(), num_sources);
 
-    auto const empty_bloom_data = std::vector<cudf::device_span<uint8_t const>>{};
+    auto const empty_bloom_data = std::vector<cuda::std::span<uint8_t const>>{};
     auto const bloom_filtered   = reader->filter_row_groups_with_bloom_filters(
       empty_bloom_data, input_row_group_indices, options, stream);
     EXPECT_EQ(bloom_filtered, input_row_group_indices);

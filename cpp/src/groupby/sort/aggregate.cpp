@@ -26,6 +26,7 @@
 #include <cudf/types.hpp>
 #include <cudf/utilities/memory_resource.hpp>
 
+#include <cuda/std/span>
 #include <cuda/stream>
 
 #include <memory>
@@ -853,12 +854,12 @@ void aggregate_result_functor::operator()<aggregation::HOST_UDF>(aggregation con
     udf_ptr->callback_num_groups = [&]() -> size_type { return helper.num_groups(stream); };
   }
   if (!udf_ptr->callback_group_offsets) {
-    udf_ptr->callback_group_offsets = [&]() -> device_span<size_type const> {
+    udf_ptr->callback_group_offsets = [&]() -> cuda::std::span<size_type const> {
       return helper.group_offsets(stream);
     };
   }
   if (!udf_ptr->callback_group_labels) {
-    udf_ptr->callback_group_labels = [&]() -> device_span<size_type const> {
+    udf_ptr->callback_group_labels = [&]() -> cuda::std::span<size_type const> {
       return helper.group_labels(stream);
     };
   }
