@@ -288,7 +288,6 @@ struct host_span {
   }
 
  private:
-  // TODO: could be std::span once host_span no longer needs to be device-usable.
   span_type _span;
   bool _is_device_accessible{false};
 };
