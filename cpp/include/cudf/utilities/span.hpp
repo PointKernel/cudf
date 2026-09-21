@@ -402,9 +402,8 @@ class device_2dspan {
    * @tparam OtherT Type of the other 2D span
    * @param other The other 2D span
    */
-  template <
-    typename OtherT,
-    std::enable_if_t<std::is_convertible_v<device_span<OtherT>, device_span<T>>, void>* = nullptr>
+  template <typename OtherT>
+    requires std::is_convertible_v<device_span<OtherT>, device_span<T>>
   constexpr device_2dspan(device_2dspan<OtherT> const& other) noexcept
     : device_2dspan{other.flat_view(), other.size().second}
   {
@@ -416,9 +415,8 @@ class device_2dspan {
    * @tparam OtherT Type of the other 2D span
    * @param other The other 2D span
    */
-  template <
-    typename OtherT,
-    std::enable_if_t<std::is_convertible_v<host_span<OtherT>, device_span<T>>, void>* = nullptr>
+  template <typename OtherT>
+    requires std::is_convertible_v<host_span<OtherT>, device_span<T>>
   constexpr device_2dspan(host_2dspan<OtherT> const& other) noexcept
     : device_2dspan{other.flat_view(), other.size().second}
   {
@@ -514,9 +512,8 @@ class host_2dspan {
    * @tparam OtherT Type of the other 2D span
    * @param other The other 2D span
    */
-  template <
-    typename OtherT,
-    std::enable_if_t<std::is_convertible_v<host_span<OtherT>, host_span<T>>, void>* = nullptr>
+  template <typename OtherT>
+    requires std::is_convertible_v<host_span<OtherT>, host_span<T>>
   constexpr host_2dspan(host_2dspan<OtherT> const& other) noexcept
     : host_2dspan{other.flat_view(), other.size().second}
   {
@@ -528,9 +525,8 @@ class host_2dspan {
    * @tparam OtherT Type of the other 2D span
    * @param other The other 2D span
    */
-  template <
-    typename OtherT,
-    std::enable_if_t<std::is_convertible_v<device_span<OtherT>, host_span<T>>, void>* = nullptr>
+  template <typename OtherT>
+    requires std::is_convertible_v<device_span<OtherT>, host_span<T>>
   constexpr host_2dspan(device_2dspan<OtherT> const& other) noexcept
     : host_2dspan{other.flat_view(), other.size().second}
   {
