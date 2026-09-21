@@ -400,12 +400,12 @@ Use `cudf::host_span<T>` only when one of the following applies:
 
 ### Multidimensional views
 
-Use `cuda::std::mdspan` from `<cuda/std/mdspan>` for multidimensional views. A contiguous row-major
-matrix can be represented by `cuda::std::mdspan<T, cuda::std::dextents<std::size_t, 2>>`.
-Use `extent(0)` and `extent(1)` for its row and column counts, `size()` for the total element count,
-and `view(row, column)` to access an element. Host and device views have the same type; select the
-appropriate data pointer explicitly. Preserve host device-accessibility metadata separately when
-constructing views used by copy helpers.
+`cudf::detail::host_2dspan<T>` and `cudf::detail::device_2dspan<T>` alias a row-major
+`cuda::std::mdspan` with two dynamic extents. Use `extent(0)` and `extent(1)` for the row and column
+counts, `size()` for the total element count, and `view(row, column)` to access an element.
+The host and device aliases have the same type; use `hostdevice_2dvector::host_view()` or
+`device_view()` to select the appropriate pointer. Use `flat_host_view()` when copy helpers need
+host device-accessibility metadata.
 
 ## cudf::scalar
 

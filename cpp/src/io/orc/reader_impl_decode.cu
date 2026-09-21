@@ -29,7 +29,6 @@
 #include <rmm/exec_policy.hpp>
 
 #include <cuda/iterator>
-#include <cuda/std/mdspan>
 #include <cuda/std/utility>
 #include <cuda/stream>
 #include <thrust/fill.h>
@@ -373,7 +372,7 @@ void decode_stream_data(int64_t num_dicts,
                         std::size_t level,
                         table_device_view const& d_tz_table,
                         cudf::detail::hostdevice_2dvector<column_desc>& chunks,
-                        cuda::std::mdspan<row_group, cuda::std::dextents<size_t, 2>> row_groups,
+                        cudf::detail::device_2dspan<row_group> row_groups,
                         std::vector<column_buffer>& out_buffers,
                         cuda::stream_ref stream,
                         rmm::device_async_resource_ref mr)
@@ -493,8 +492,8 @@ void scan_null_counts(cudf::detail::hostdevice_2dvector<column_desc> const& chun
  */
 void aggregate_child_meta(std::size_t level,
                           column_hierarchy const& selected_columns,
-                          cuda::std::mdspan<column_desc, cuda::std::dextents<size_t, 2>> chunks,
-                          cuda::std::mdspan<row_group, cuda::std::dextents<size_t, 2>> row_groups,
+                          cudf::detail::host_2dspan<column_desc> chunks,
+                          cudf::detail::host_2dspan<row_group> row_groups,
                           host_span<orc_column_meta const> nested_cols,
                           host_span<column_buffer> out_buffers,
                           reader_column_meta& col_meta)
@@ -515,13 +514,14 @@ void aggregate_child_meta(std::size_t level,
   col_meta.num_child_rows_per_stripe.resize(number_of_child_chunks);
   col_meta.rwgrp_meta.resize(num_of_rowgroups * num_child_cols);
 
-  auto child_start_row = cuda::std::mdspan<int64_t, cuda::std::dextents<size_t, 2>>(
-    col_meta.child_start_row.data(), num_of_stripes, num_child_cols);
-  auto num_child_rows_per_stripe = cuda::std::mdspan<int64_t, cuda::std::dextents<size_t, 2>>(
-    col_meta.num_child_rows_per_stripe.data(), num_of_stripes, num_child_cols);
-  auto rwgrp_meta =
-    cuda::std::mdspan<reader_column_meta::row_group_meta, cuda::std::dextents<size_t, 2>>(
-      col_meta.rwgrp_meta.data(), num_of_rowgroups, num_child_cols);
+  auto child_start_row = cudf::detail::host_2dspan<int64_t>(
+    col_meta.child_start_row.data(), num_child_cols == 0 ? 0 : num_of_stripes, num_child_cols);
+  auto num_child_rows_per_stripe =
+    cudf::detail::host_2dspan<int64_t>(col_meta.num_child_rows_per_stripe.data(),
+                                       num_child_cols == 0 ? 0 : num_of_stripes,
+                                       num_child_cols);
+  auto rwgrp_meta = cudf::detail::host_2dspan<reader_column_meta::row_group_meta>(
+    col_meta.rwgrp_meta.data(), num_child_cols == 0 ? 0 : num_of_rowgroups, num_child_cols);
 
   int index = 0;  // number of child column processed
 

@@ -12,6 +12,7 @@
 #include <rmm/device_uvector.hpp>
 #include <rmm/device_vector.hpp>
 
+#include <cuda/std/mdspan>
 #include <cuda/std/span>
 #include <thrust/detail/raw_pointer_cast.h>
 #include <thrust/device_vector.h>
@@ -297,4 +298,19 @@ template <typename T, std::size_t Extent = cuda::std::dynamic_extent>
 using device_span = cuda::std::span<T, Extent>;
 /** @} */  // end of group
 
+namespace detail {
+
+/**
+ * @brief Alias for a row-major 2D view of host data.
+ */
+template <class T>
+using host_2dspan = cuda::std::mdspan<T, cuda::std::dextents<std::size_t, 2>>;
+
+/**
+ * @brief Alias for a row-major 2D view of device data.
+ */
+template <class T>
+using device_2dspan = cuda::std::mdspan<T, cuda::std::dextents<std::size_t, 2>>;
+
+}  // namespace detail
 }  // namespace CUDF_EXPORT cudf

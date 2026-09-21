@@ -11,7 +11,6 @@
 
 #include <cub/cub.cuh>
 #include <cuda/functional>
-#include <cuda/std/mdspan>
 #include <cuda/stream>
 
 #include <limits>
@@ -1275,14 +1274,14 @@ static __device__ int decode_decimals(orc_bytestream_s* bs,
  */
 // blockDim {block_size,1,1}
 template <int block_size>
-CUDF_KERNEL void __launch_bounds__(block_size) decode_nulls_and_string_dictionaries_kernel(
-  column_desc* chunks,
-  dictionary_entry* global_dictionary,
-  size_type num_columns,
-  size_type num_stripes,
-  int64_t first_row,
-  cuda::std::mdspan<row_group, cuda::std::dextents<size_t, 2>> row_groups,
-  bool decode_nulls_by_rowgroup)
+CUDF_KERNEL void __launch_bounds__(block_size)
+  decode_nulls_and_string_dictionaries_kernel(column_desc* chunks,
+                                              dictionary_entry* global_dictionary,
+                                              size_type num_columns,
+                                              size_type num_stripes,
+                                              int64_t first_row,
+                                              device_2dspan<row_group> row_groups,
+                                              bool decode_nulls_by_rowgroup)
 {
   __shared__ __align__(16) orcdec_state_s state_g;
   using warp_reduce  = cub::WarpReduce<uint32_t>;
@@ -1619,7 +1618,7 @@ CUDF_KERNEL void __launch_bounds__(block_size)
   decode_column_data_kernel(column_desc* chunks,
                             dictionary_entry* global_dictionary,
                             table_device_view tz_table,
-                            cuda::std::mdspan<row_group, cuda::std::dextents<size_t, 2>> row_groups,
+                            device_2dspan<row_group> row_groups,
                             int64_t first_row,
                             size_type rowidx_stride,
                             size_t level,
@@ -2128,15 +2127,14 @@ CUDF_KERNEL void __launch_bounds__(block_size)
  * @param[in] level Nesting level being decoded
  * @param[in] stream CUDA stream used for device memory operations and kernel launches
  */
-void __host__ decode_nulls_and_string_dictionaries(
-  column_desc* chunks,
-  dictionary_entry* global_dictionary,
-  size_type num_columns,
-  size_type num_stripes,
-  int64_t first_row,
-  cuda::std::mdspan<row_group, cuda::std::dextents<size_t, 2>> row_groups,
-  size_t level,
-  cuda::stream_ref stream)
+void __host__ decode_nulls_and_string_dictionaries(column_desc* chunks,
+                                                   dictionary_entry* global_dictionary,
+                                                   size_type num_columns,
+                                                   size_type num_stripes,
+                                                   int64_t first_row,
+                                                   device_2dspan<row_group> row_groups,
+                                                   size_t level,
+                                                   cuda::stream_ref stream)
 {
   // A row index lets the null decode use one block per row group rather than one per stripe. Its
   // PRESENT positions only line up with the output rows when nothing is skipped.
@@ -2179,19 +2177,18 @@ void __host__ decode_nulls_and_string_dictionaries(
  * @param[in] error_count Pointer to error count output
  * @param[in] stream CUDA stream used for device memory operations and kernel launches
  */
-void __host__
-decode_column_data(column_desc* chunks,
-                   dictionary_entry* global_dictionary,
-                   cuda::std::mdspan<row_group, cuda::std::dextents<size_t, 2>> row_groups,
-                   size_type num_columns,
-                   size_type num_stripes,
-                   int64_t first_row,
-                   table_device_view tz_table,
-                   int64_t num_rowgroups,
-                   size_type rowidx_stride,
-                   size_t level,
-                   size_type* error_count,
-                   cuda::stream_ref stream)
+void __host__ decode_column_data(column_desc* chunks,
+                                 dictionary_entry* global_dictionary,
+                                 device_2dspan<row_group> row_groups,
+                                 size_type num_columns,
+                                 size_type num_stripes,
+                                 int64_t first_row,
+                                 table_device_view tz_table,
+                                 int64_t num_rowgroups,
+                                 size_type rowidx_stride,
+                                 size_t level,
+                                 size_type* error_count,
+                                 cuda::stream_ref stream)
 {
   auto const num_blocks = num_columns * (num_rowgroups > 0 ? num_rowgroups : num_stripes);
   decode_column_data_kernel<block_size><<<num_blocks, block_size, 0, stream.get()>>>(

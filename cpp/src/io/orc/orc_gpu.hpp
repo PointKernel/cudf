@@ -20,10 +20,12 @@
 #include <rmm/mr/polymorphic_allocator.hpp>
 
 #include <cuco/static_map.cuh>
-#include <cuda/std/mdspan>
 #include <cuda/stream>
 
 namespace cudf::io::orc::detail {
+
+using cudf::detail::device_2dspan;
+using cudf::detail::host_2dspan;
 
 using key_type    = size_type;
 using mapped_type = size_type;
@@ -203,9 +205,8 @@ struct stripe_dictionary {
  * @param dictionaries Dictionary descriptors
  * @param stream CUDA stream used for device memory operations and kernel launches
  */
-void initialize_dictionary_hash_maps(
-  cuda::std::mdspan<stripe_dictionary, cuda::std::dextents<size_t, 2>> dictionaries,
-  cuda::stream_ref stream);
+void initialize_dictionary_hash_maps(device_2dspan<stripe_dictionary> dictionaries,
+                                     cuda::stream_ref stream);
 
 /**
  * @brief Populates the hash maps with unique values from the stripe.
@@ -214,10 +215,9 @@ void initialize_dictionary_hash_maps(
  * @param columns  Pre-order flattened device array of ORC column views
  * @param stream CUDA stream used for device memory operations and kernel launches
  */
-void populate_dictionary_hash_maps(
-  cuda::std::mdspan<stripe_dictionary, cuda::std::dextents<size_t, 2>> dictionaries,
-  device_span<orc_column_device_view const> columns,
-  cuda::stream_ref stream);
+void populate_dictionary_hash_maps(device_2dspan<stripe_dictionary> dictionaries,
+                                   device_span<orc_column_device_view const> columns,
+                                   cuda::stream_ref stream);
 
 /**
  * @brief Stores the indices of the hash map entries in the dictionary data buffer.
@@ -225,9 +225,7 @@ void populate_dictionary_hash_maps(
  * @param dictionaries Dictionary descriptors
  * @param stream CUDA stream used for device memory operations and kernel launches
  */
-void collect_map_entries(
-  cuda::std::mdspan<stripe_dictionary, cuda::std::dextents<size_t, 2>> dictionaries,
-  cuda::stream_ref stream);
+void collect_map_entries(device_2dspan<stripe_dictionary> dictionaries, cuda::stream_ref stream);
 
 /**
  * @brief Stores the corresponding dictionary indices for each row in the column.
@@ -236,10 +234,9 @@ void collect_map_entries(
  * @param columns Pre-order flattened device array of ORC column views
  * @param stream CUDA stream used for device memory operations and kernel launches
  */
-void get_dictionary_indices(
-  cuda::std::mdspan<stripe_dictionary, cuda::std::dextents<size_t, 2>> dictionaries,
-  device_span<orc_column_device_view const> columns,
-  cuda::stream_ref stream);
+void get_dictionary_indices(device_2dspan<stripe_dictionary> dictionaries,
+                            device_span<orc_column_device_view const> columns,
+                            cuda::stream_ref stream);
 
 constexpr uint32_t encode_block_size = 512;
 
@@ -304,15 +301,14 @@ void parse_row_group_index(row_group* row_groups,
  * @param[in] level Nesting level being decoded
  * @param[in] stream CUDA stream used for device memory operations and kernel launches
  */
-void decode_nulls_and_string_dictionaries(
-  column_desc* chunks,
-  dictionary_entry* global_dictionary,
-  size_type num_columns,
-  size_type num_stripes,
-  int64_t first_row,
-  cuda::std::mdspan<row_group, cuda::std::dextents<size_t, 2>> row_groups,
-  size_t level,
-  cuda::stream_ref stream);
+void decode_nulls_and_string_dictionaries(column_desc* chunks,
+                                          dictionary_entry* global_dictionary,
+                                          size_type num_columns,
+                                          size_type num_stripes,
+                                          int64_t first_row,
+                                          device_2dspan<row_group> row_groups,
+                                          size_t level,
+                                          cuda::stream_ref stream);
 
 /**
  * @brief Launches kernel for decoding column data
@@ -332,7 +328,7 @@ void decode_nulls_and_string_dictionaries(
  */
 void decode_column_data(column_desc* chunks,
                         dictionary_entry* global_dictionary,
-                        cuda::std::mdspan<row_group, cuda::std::dextents<size_t, 2>> row_groups,
+                        device_2dspan<row_group> row_groups,
                         size_type num_columns,
                         size_type num_stripes,
                         int64_t first_row,
@@ -350,10 +346,9 @@ void decode_column_data(column_desc* chunks,
  * @param[in, out] streams chunk streams device array [column][rowgroup]
  * @param[in] stream CUDA stream used for device memory operations and kernel launches
  */
-void encode_orc_column_data(
-  cuda::std::mdspan<encoder_chunk const, cuda::std::dextents<size_t, 2>> chunks,
-  cuda::std::mdspan<encoder_chunk_streams, cuda::std::dextents<size_t, 2>> streams,
-  cuda::stream_ref stream);
+void encode_orc_column_data(device_2dspan<encoder_chunk const> chunks,
+                            device_2dspan<encoder_chunk_streams> streams,
+                            cuda::stream_ref stream);
 
 /**
  * @brief Launches kernel for encoding column dictionaries
@@ -366,14 +361,13 @@ void encode_orc_column_data(
  * @param[in,out] enc_streams chunk streams device array [column][rowgroup]
  * @param[in] stream CUDA stream used for device memory operations and kernel launches
  */
-void encode_stripe_dictionaries(
-  stripe_dictionary const* stripes,
-  device_span<orc_column_device_view const> columns,
-  cuda::std::mdspan<encoder_chunk const, cuda::std::dextents<size_t, 2>> chunks,
-  size_type num_string_columns,
-  size_type num_stripes,
-  cuda::std::mdspan<encoder_chunk_streams, cuda::std::dextents<size_t, 2>> enc_streams,
-  cuda::stream_ref stream);
+void encode_stripe_dictionaries(stripe_dictionary const* stripes,
+                                device_span<orc_column_device_view const> columns,
+                                device_2dspan<encoder_chunk const> chunks,
+                                size_type num_string_columns,
+                                size_type num_stripes,
+                                device_2dspan<encoder_chunk_streams> enc_streams,
+                                cuda::stream_ref stream);
 
 /**
  * @brief Launches kernel for compacting chunked column data prior to compression
@@ -382,10 +376,9 @@ void encode_stripe_dictionaries(
  * @param[in,out] enc_streams chunk streams device array [column][rowgroup]
  * @param[in] stream CUDA stream used for device memory operations and kernel launches
  */
-void compact_orc_data_streams(
-  cuda::std::mdspan<stripe_stream, cuda::std::dextents<size_t, 2>> strm_desc,
-  cuda::std::mdspan<encoder_chunk_streams, cuda::std::dextents<size_t, 2>> enc_streams,
-  cuda::stream_ref stream);
+void compact_orc_data_streams(device_2dspan<stripe_stream> strm_desc,
+                              device_2dspan<encoder_chunk_streams> enc_streams,
+                              cuda::stream_ref stream);
 
 /**
  * @brief Launches kernel(s) for compressing data streams
@@ -412,8 +405,8 @@ std::optional<writer_compression_statistics> compress_orc_data_streams(
   uint32_t max_comp_blk_size,
   uint32_t comp_block_align,
   bool collect_statistics,
-  cuda::std::mdspan<stripe_stream, cuda::std::dextents<size_t, 2>> strm_desc,
-  cuda::std::mdspan<encoder_chunk_streams, cuda::std::dextents<size_t, 2>> enc_streams,
+  device_2dspan<stripe_stream> strm_desc,
+  device_2dspan<encoder_chunk_streams> enc_streams,
   device_span<cudf::io::detail::codec_exec_result> comp_res,
   cuda::stream_ref stream);
 
@@ -426,12 +419,11 @@ std::optional<writer_compression_statistics> compress_orc_data_streams(
  * @param str_col_indexes Indexes of string columns in orc_columns
  * @param stream CUDA stream used for device memory operations and kernel launches
  */
-void rowgroup_char_counts(
-  cuda::std::mdspan<size_type, cuda::std::dextents<size_t, 2>> counts,
-  device_span<orc_column_device_view const> orc_columns,
-  cuda::std::mdspan<rowgroup_rows const, cuda::std::dextents<size_t, 2>> rowgroup_bounds,
-  device_span<uint32_t const> str_col_indexes,
-  cuda::stream_ref stream);
+void rowgroup_char_counts(device_2dspan<size_type> counts,
+                          device_span<orc_column_device_view const> orc_columns,
+                          device_2dspan<rowgroup_rows const> rowgroup_bounds,
+                          device_span<uint32_t const> str_col_indexes,
+                          cuda::stream_ref stream);
 
 /**
  * @brief Converts sizes of decimal elements to offsets within the rowgroup.
@@ -443,10 +435,9 @@ void rowgroup_char_counts(
  * @param elem_sizes Map between column indexes and decimal element sizes
  * @param stream CUDA stream used for device memory operations and kernel launches
  */
-void decimal_sizes_to_offsets(
-  cuda::std::mdspan<rowgroup_rows const, cuda::std::dextents<size_t, 2>> rg_bounds,
-  std::map<uint32_t, rmm::device_uvector<uint32_t>>& elem_sizes,
-  cuda::stream_ref stream);
+void decimal_sizes_to_offsets(device_2dspan<rowgroup_rows const> rg_bounds,
+                              std::map<uint32_t, rmm::device_uvector<uint32_t>>& elem_sizes,
+                              cuda::stream_ref stream);
 
 /**
  * @brief Launches kernels to initialize statistics collection
@@ -456,11 +447,10 @@ void decimal_sizes_to_offsets(
  * @param[in] rowgroup_bounds Ranges of rows in each rowgroup [rowgroup][column]
  * @param[in] stream CUDA stream used for device memory operations and kernel launches
  */
-void orc_init_statistics_groups(
-  statistics_group* groups,
-  stats_column_desc const* cols,
-  cuda::std::mdspan<rowgroup_rows const, cuda::std::dextents<size_t, 2>> rowgroup_bounds,
-  cuda::stream_ref stream);
+void orc_init_statistics_groups(statistics_group* groups,
+                                stats_column_desc const* cols,
+                                device_2dspan<rowgroup_rows const> rowgroup_bounds,
+                                cuda::stream_ref stream);
 
 /**
  * @brief Launches kernels to return statistics buffer offsets and sizes
@@ -498,10 +488,9 @@ void orc_encode_statistics(uint8_t* blob_bfr,
  * @param[out] set_counts Per rowgroup number of set bits
  * @param[in] stream CUDA stream used for device memory operations and kernel launches
  */
-void reduce_pushdown_masks(
-  device_span<orc_column_device_view const> orc_columns,
-  cuda::std::mdspan<rowgroup_rows const, cuda::std::dextents<size_t, 2>> rowgroup_bounds,
-  cuda::std::mdspan<cudf::size_type, cuda::std::dextents<size_t, 2>> set_counts,
-  cuda::stream_ref stream);
+void reduce_pushdown_masks(device_span<orc_column_device_view const> orc_columns,
+                           device_2dspan<rowgroup_rows const> rowgroup_bounds,
+                           device_2dspan<cudf::size_type> set_counts,
+                           cuda::stream_ref stream);
 
 }  // namespace cudf::io::orc::detail

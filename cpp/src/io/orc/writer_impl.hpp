@@ -21,7 +21,6 @@
 #include <rmm/device_uvector.hpp>
 
 #include <cuda/iterator>
-#include <cuda/std/mdspan>
 #include <cuda/stream>
 #include <thrust/host_vector.h>
 
@@ -35,6 +34,8 @@ namespace cudf::io::orc::detail {
 class orc_table_view;
 
 using namespace cudf::io::detail;
+using cudf::detail::device_2dspan;
+using cudf::detail::host_2dspan;
 using cudf::detail::hostdevice_2dvector;
 
 /**
@@ -281,17 +282,16 @@ class writer::impl {
    * @param[in,out] stripes List of stripe description
    * @param[out] bounce_buffer Temporary host output buffer
    */
-  void write_orc_data_to_sink(
-    encoded_data const& enc_data,
-    file_segmentation const& segmentation,
-    orc_table_view const& orc_table,
-    device_span<uint8_t const> compressed_data,
-    host_span<codec_exec_result const> comp_results,
-    cuda::std::mdspan<stripe_stream const, cuda::std::dextents<size_t, 2>> strm_descs,
-    host_span<col_stats_blob const> rg_stats,
-    orc_streams& streams,
-    host_span<StripeInformation> stripes,
-    host_span<uint8_t> bounce_buffer);
+  void write_orc_data_to_sink(encoded_data const& enc_data,
+                              file_segmentation const& segmentation,
+                              orc_table_view const& orc_table,
+                              device_span<uint8_t const> compressed_data,
+                              host_span<codec_exec_result const> comp_results,
+                              host_2dspan<stripe_stream const> strm_descs,
+                              host_span<col_stats_blob const> rg_stats,
+                              orc_streams& streams,
+                              host_span<StripeInformation> stripes,
+                              host_span<uint8_t> bounce_buffer);
 
   /**
    * @brief Add the processed table data into the internal file footer.

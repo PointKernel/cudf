@@ -24,13 +24,13 @@
 #include <cub/cub.cuh>
 #include <cuda/functional>
 #include <cuda/std/limits>
-#include <cuda/std/mdspan>
 #include <cuda/stream>
 #include <thrust/for_each.h>
 #include <thrust/transform.h>
 
 namespace cudf::io::orc::detail {
 
+using cudf::detail::device_2dspan;
 using cudf::io::detail::codec_exec_result;
 using cudf::io::detail::codec_status;
 
@@ -713,9 +713,9 @@ static __device__ void encode_null_mask(orcenc_state_s* s,
  */
 // blockDim {`encode_block_size`,1,1}
 template <int block_size>
-CUDF_KERNEL void __launch_bounds__(block_size) encode_column_data_kernel(
-  cuda::std::mdspan<encoder_chunk const, cuda::std::dextents<size_t, 2>> chunks,
-  cuda::std::mdspan<encoder_chunk_streams, cuda::std::dextents<size_t, 2>> streams)
+CUDF_KERNEL void __launch_bounds__(block_size)
+  encode_column_data_kernel(device_2dspan<encoder_chunk const> chunks,
+                            device_2dspan<encoder_chunk_streams> streams)
 {
   __shared__ __align__(16) orcenc_state_s state_g;
   __shared__ union {
@@ -1014,11 +1014,11 @@ CUDF_KERNEL void __launch_bounds__(block_size) encode_column_data_kernel(
  */
 // blockDim {512,1,1}
 template <int block_size>
-CUDF_KERNEL void __launch_bounds__(block_size) encode_string_dictionaries_kernel(
-  stripe_dictionary const* stripes,
-  device_span<orc_column_device_view const> columns,
-  cuda::std::mdspan<encoder_chunk const, cuda::std::dextents<size_t, 2>> chunks,
-  cuda::std::mdspan<encoder_chunk_streams, cuda::std::dextents<size_t, 2>> streams)
+CUDF_KERNEL void __launch_bounds__(block_size)
+  encode_string_dictionaries_kernel(stripe_dictionary const* stripes,
+                                    device_span<orc_column_device_view const> columns,
+                                    device_2dspan<encoder_chunk const> chunks,
+                                    device_2dspan<encoder_chunk_streams> streams)
 {
   __shared__ __align__(16) orcenc_state_s state_g;
   __shared__ typename cub::BlockReduce<uint32_t, block_size>::TempStorage temp_storage;
@@ -1100,12 +1100,12 @@ CUDF_KERNEL void __launch_bounds__(block_size) encode_string_dictionaries_kernel
  * @param[out] sizes List of stream sizes in bytes
  */
 // blockDim {compact_streams_block_size,1,1}
-CUDF_KERNEL void __launch_bounds__(compact_streams_block_size) init_batched_memcpy_kernel(
-  cuda::std::mdspan<stripe_stream const, cuda::std::dextents<size_t, 2>> strm_desc,
-  cuda::std::mdspan<encoder_chunk_streams, cuda::std::dextents<size_t, 2>> streams,
-  device_span<uint8_t*> srcs,
-  device_span<uint8_t*> dsts,
-  device_span<size_t> sizes)
+CUDF_KERNEL void __launch_bounds__(compact_streams_block_size)
+  init_batched_memcpy_kernel(device_2dspan<stripe_stream const> strm_desc,
+                             device_2dspan<encoder_chunk_streams> streams,
+                             device_span<uint8_t*> srcs,
+                             device_span<uint8_t*> dsts,
+                             device_span<size_t> sizes)
 {
   auto const stripe_id = (blockIdx.x / strm_desc.extent(1)) * blockDim.x + threadIdx.x;
   auto const stream_id = blockIdx.x % strm_desc.extent(1);
@@ -1147,16 +1147,16 @@ CUDF_KERNEL void __launch_bounds__(compact_streams_block_size) init_batched_memc
  * @param[in] comp_block_align Required alignment for compressed blocks
  */
 // blockDim {256,1,1}
-CUDF_KERNEL void __launch_bounds__(256) init_compression_blocks_kernel(
-  cuda::std::mdspan<stripe_stream const, cuda::std::dextents<size_t, 2>> strm_desc,
-  cuda::std::mdspan<encoder_chunk_streams const, cuda::std::dextents<size_t, 2>> streams,
-  device_span<device_span<uint8_t const>> inputs,
-  device_span<device_span<uint8_t>> outputs,
-  device_span<codec_exec_result> results,
-  device_span<uint8_t> compressed_bfr,
-  uint32_t comp_blk_size,
-  uint32_t max_comp_blk_size,
-  uint32_t comp_block_align)
+CUDF_KERNEL void __launch_bounds__(256)
+  init_compression_blocks_kernel(device_2dspan<stripe_stream const> strm_desc,
+                                 device_2dspan<encoder_chunk_streams const> streams,
+                                 device_span<device_span<uint8_t const>> inputs,
+                                 device_span<device_span<uint8_t>> outputs,
+                                 device_span<codec_exec_result> results,
+                                 device_span<uint8_t> compressed_bfr,
+                                 uint32_t comp_blk_size,
+                                 uint32_t max_comp_blk_size,
+                                 uint32_t comp_block_align)
 {
   __shared__ __align__(16) stripe_stream ss;
   __shared__ uint8_t* uncomp_base_g;
@@ -1202,14 +1202,14 @@ CUDF_KERNEL void __launch_bounds__(256) init_compression_blocks_kernel(
  * @param[in] max_comp_blk_size Max size of any block after compression
  */
 // blockDim {1024,1,1}
-CUDF_KERNEL void __launch_bounds__(1024) compact_compressed_blocks_kernel(
-  cuda::std::mdspan<stripe_stream, cuda::std::dextents<size_t, 2>> strm_desc,
-  device_span<device_span<uint8_t const> const> inputs,
-  device_span<device_span<uint8_t> const> outputs,
-  device_span<codec_exec_result> results,
-  device_span<uint8_t> compressed_bfr,
-  uint32_t comp_blk_size,
-  uint32_t max_comp_blk_size)
+CUDF_KERNEL void __launch_bounds__(1024)
+  compact_compressed_blocks_kernel(device_2dspan<stripe_stream> strm_desc,
+                                   device_span<device_span<uint8_t const> const> inputs,
+                                   device_span<device_span<uint8_t> const> outputs,
+                                   device_span<codec_exec_result> results,
+                                   device_span<uint8_t> compressed_bfr,
+                                   uint32_t comp_blk_size,
+                                   uint32_t max_comp_blk_size)
 {
   __shared__ __align__(16) stripe_stream ss;
   __shared__ uint8_t const* comp_src_g;
@@ -1285,9 +1285,8 @@ struct decimal_column_element_sizes {
 // Converts sizes of individual decimal elements to offsets within each row group
 // Conversion is done in-place
 template <int block_size>
-CUDF_KERNEL void decimal_sizes_to_offsets_kernel(
-  cuda::std::mdspan<rowgroup_rows const, cuda::std::dextents<size_t, 2>> rg_bounds,
-  device_span<decimal_column_element_sizes> sizes)
+CUDF_KERNEL void decimal_sizes_to_offsets_kernel(device_2dspan<rowgroup_rows const> rg_bounds,
+                                                 device_span<decimal_column_element_sizes> sizes)
 {
   using block_scan = cub::BlockScan<uint32_t, block_size>;
   __shared__ typename block_scan::TempStorage scan_storage;
@@ -1311,10 +1310,9 @@ CUDF_KERNEL void decimal_sizes_to_offsets_kernel(
   }
 }
 
-void encode_orc_column_data(
-  cuda::std::mdspan<encoder_chunk const, cuda::std::dextents<size_t, 2>> chunks,
-  cuda::std::mdspan<encoder_chunk_streams, cuda::std::dextents<size_t, 2>> streams,
-  cuda::stream_ref stream)
+void encode_orc_column_data(device_2dspan<encoder_chunk const> chunks,
+                            device_2dspan<encoder_chunk_streams> streams,
+                            cuda::stream_ref stream)
 {
   auto const num_blocks = chunks.extent(0) * chunks.extent(1);
   encode_column_data_kernel<encode_block_size>
@@ -1322,14 +1320,13 @@ void encode_orc_column_data(
   CUDF_CUDA_TRY(cudaGetLastError());
 }
 
-void encode_stripe_dictionaries(
-  stripe_dictionary const* stripes,
-  device_span<orc_column_device_view const> columns,
-  cuda::std::mdspan<encoder_chunk const, cuda::std::dextents<size_t, 2>> chunks,
-  size_type num_string_columns,
-  size_type num_stripes,
-  cuda::std::mdspan<encoder_chunk_streams, cuda::std::dextents<size_t, 2>> enc_streams,
-  cuda::stream_ref stream)
+void encode_stripe_dictionaries(stripe_dictionary const* stripes,
+                                device_span<orc_column_device_view const> columns,
+                                device_2dspan<encoder_chunk const> chunks,
+                                size_type num_string_columns,
+                                size_type num_stripes,
+                                device_2dspan<encoder_chunk_streams> enc_streams,
+                                cuda::stream_ref stream)
 {
   constexpr int block_size = 512;  // 512 threads per dictionary
   dim3 dim_grid(num_string_columns * num_stripes, 2);
@@ -1338,10 +1335,9 @@ void encode_stripe_dictionaries(
   CUDF_CUDA_TRY(cudaGetLastError());
 }
 
-void compact_orc_data_streams(
-  cuda::std::mdspan<stripe_stream, cuda::std::dextents<size_t, 2>> strm_desc,
-  cuda::std::mdspan<encoder_chunk_streams, cuda::std::dextents<size_t, 2>> enc_streams,
-  cuda::stream_ref stream)
+void compact_orc_data_streams(device_2dspan<stripe_stream> strm_desc,
+                              device_2dspan<encoder_chunk_streams> enc_streams,
+                              cuda::stream_ref stream)
 {
   auto const num_rowgroups = enc_streams.extent(1);
   auto const num_streams   = strm_desc.extent(1);
@@ -1374,8 +1370,8 @@ std::optional<writer_compression_statistics> compress_orc_data_streams(
   uint32_t max_comp_blk_size,
   uint32_t comp_block_align,
   bool collect_statistics,
-  cuda::std::mdspan<stripe_stream, cuda::std::dextents<size_t, 2>> strm_desc,
-  cuda::std::mdspan<encoder_chunk_streams, cuda::std::dextents<size_t, 2>> enc_streams,
+  device_2dspan<stripe_stream> strm_desc,
+  device_2dspan<encoder_chunk_streams> enc_streams,
   device_span<codec_exec_result> comp_res,
   cuda::stream_ref stream)
 {
@@ -1407,10 +1403,9 @@ std::optional<writer_compression_statistics> compress_orc_data_streams(
   }
 }
 
-void decimal_sizes_to_offsets(
-  cuda::std::mdspan<rowgroup_rows const, cuda::std::dextents<size_t, 2>> rg_bounds,
-  std::map<uint32_t, rmm::device_uvector<uint32_t>>& elem_sizes,
-  cuda::stream_ref stream)
+void decimal_sizes_to_offsets(device_2dspan<rowgroup_rows const> rg_bounds,
+                              std::map<uint32_t, rmm::device_uvector<uint32_t>>& elem_sizes,
+                              cuda::stream_ref stream)
 {
   if (rg_bounds.size() == 0) return;
 

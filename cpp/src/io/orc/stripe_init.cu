@@ -11,7 +11,6 @@
 
 #include <cub/cub.cuh>
 #include <cuda/std/array>
-#include <cuda/std/mdspan>
 #include <cuda/stream>
 #include <thrust/copy.h>
 #include <thrust/execution_policy.h>
@@ -521,10 +520,10 @@ CUDF_KERNEL void __launch_bounds__(128, 8)
 }
 
 template <int block_size>
-CUDF_KERNEL void __launch_bounds__(block_size) reduce_pushdown_masks_kernel(
-  device_span<orc_column_device_view const> orc_columns,
-  cuda::std::mdspan<rowgroup_rows const, cuda::std::dextents<size_t, 2>> rowgroup_bounds,
-  cuda::std::mdspan<size_type, cuda::std::dextents<size_t, 2>> set_counts)
+CUDF_KERNEL void __launch_bounds__(block_size)
+  reduce_pushdown_masks_kernel(device_span<orc_column_device_view const> orc_columns,
+                               device_2dspan<rowgroup_rows const> rowgroup_bounds,
+                               device_2dspan<size_type> set_counts)
 {
   using BlockReduce = cub::BlockReduce<size_type, block_size>;
   __shared__ typename BlockReduce::TempStorage temp_storage;
@@ -600,11 +599,10 @@ void __host__ parse_row_group_index(row_group* row_groups,
   CUDF_CUDA_TRY(cudaGetLastError());
 }
 
-void __host__ reduce_pushdown_masks(
-  device_span<orc_column_device_view const> columns,
-  cuda::std::mdspan<rowgroup_rows const, cuda::std::dextents<size_t, 2>> rowgroups,
-  cuda::std::mdspan<cudf::size_type, cuda::std::dextents<size_t, 2>> valid_counts,
-  cuda::stream_ref stream)
+void __host__ reduce_pushdown_masks(device_span<orc_column_device_view const> columns,
+                                    device_2dspan<rowgroup_rows const> rowgroups,
+                                    device_2dspan<cudf::size_type> valid_counts,
+                                    cuda::stream_ref stream)
 {
   auto const num_blocks    = columns.size() * rowgroups.extent(0);  // 1 block per rowgroup
   constexpr int block_size = 128;

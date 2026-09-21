@@ -41,7 +41,6 @@
 
 #include <cuda/iterator>
 #include <cuda/numeric>
-#include <cuda/std/mdspan>
 #include <cuda/stream>
 #include <thrust/fill.h>
 
@@ -1320,7 +1319,7 @@ size_t max_page_bytes(compression_type compression, size_t max_page_size_bytes)
 std::pair<std::vector<rmm::device_uvector<size_type>>, std::vector<rmm::device_uvector<size_type>>>
 build_chunk_dictionaries(hostdevice_2dvector<EncColumnChunk>& chunks,
                          host_span<parquet_column_device_view const> col_desc,
-                         cuda::std::mdspan<PageFragment, cuda::std::dextents<size_t, 2>> frags,
+                         device_2dspan<PageFragment> frags,
                          compression_type compression,
                          dictionary_policy dict_policy,
                          size_t max_dict_size,
@@ -2610,7 +2609,7 @@ void writer::impl::write(table_view const& input, std::vector<partition_info> co
 void writer::impl::write_parquet_data_to_sink(
   std::unique_ptr<aggregate_writer_metadata>& updated_agg_meta,
   device_span<EncPage const> pages,
-  cuda::std::mdspan<EncColumnChunk const, cuda::std::dextents<size_t, 2>> chunks,
+  host_2dspan<EncColumnChunk const> chunks,
   host_span<size_t const> global_rowgroup_base,
   host_span<int const> first_rg_in_part,
   host_span<int const> rg_to_part,

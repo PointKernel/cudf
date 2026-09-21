@@ -39,7 +39,6 @@
 #include <cuda/iterator>
 #include <cuda/std/climits>
 #include <cuda/std/limits>
-#include <cuda/std/mdspan>
 #include <cuda/std/optional>
 #include <cuda/std/utility>
 #include <cuda/stream>
@@ -703,8 +702,10 @@ std::vector<std::vector<rowgroup_rows>> calculate_aligned_rowgroup_bounds(
 
   auto d_pd_set_counts_data = rmm::device_uvector<cudf::size_type>(
     orc_table.num_columns() * segmentation.num_rowgroups(), stream);
-  auto const d_pd_set_counts = cuda::std::mdspan<cudf::size_type, cuda::std::dextents<size_t, 2>>{
-    d_pd_set_counts_data.data(), segmentation.num_rowgroups(), orc_table.num_columns()};
+  auto const d_pd_set_counts =
+    device_2dspan<cudf::size_type>{d_pd_set_counts_data.data(),
+                                   orc_table.num_columns() == 0 ? 0 : segmentation.num_rowgroups(),
+                                   orc_table.num_columns()};
   reduce_pushdown_masks(
     orc_table.d_columns, segmentation.rowgroups.device_view(), d_pd_set_counts, stream);
 
@@ -974,8 +975,8 @@ std::pair<encoded_data, std::vector<extent_info>> encode_columns(
   // whether an extent size may exceed what the encoder ends up writing.
   auto const num_streams = streams.size();
   std::vector<extent_info> extent_storage(segmentation.num_stripes() * num_streams);
-  auto const extents = cuda::std::mdspan<extent_info, cuda::std::dextents<size_t, 2>>{
-    extent_storage.data(), segmentation.num_stripes(), num_streams};
+  auto const extents = host_2dspan<extent_info>{
+    extent_storage.data(), num_streams == 0 ? 0 : segmentation.num_stripes(), num_streams};
   for (auto const& stripe : segmentation.stripes) {
     for (size_t col_idx = 0; col_idx < num_columns; col_idx++) {
       for (int strm_type = 0; strm_type < CI_NUM_STREAMS; ++strm_type) {
@@ -1158,13 +1159,12 @@ std::pair<encoded_data, std::vector<extent_info>> encode_columns(
  * @param[in] stream CUDA stream used for device memory operations and kernel launches
  * @return The stripes' information
  */
-std::vector<StripeInformation> gather_stripes(
-  size_t num_index_streams,
-  file_segmentation const& segmentation,
-  cuda::std::mdspan<extent_info const, cuda::std::dextents<size_t, 2>> extents,
-  encoded_data* enc_data,
-  hostdevice_2dvector<stripe_stream>* strm_desc,
-  cuda::stream_ref stream)
+std::vector<StripeInformation> gather_stripes(size_t num_index_streams,
+                                              file_segmentation const& segmentation,
+                                              host_2dspan<extent_info const> extents,
+                                              encoded_data* enc_data,
+                                              hostdevice_2dvector<stripe_stream>* strm_desc,
+                                              cuda::stream_ref stream)
 {
   if (segmentation.num_stripes() == 0) { return {}; }
 
@@ -1178,8 +1178,10 @@ std::vector<StripeInformation> gather_stripes(
     device_span<uint8_t> view{};
   };
   std::vector<gather_extent> gather_storage(segmentation.num_stripes() * num_streams_in_data);
-  auto const gather_extents = cuda::std::mdspan<gather_extent, cuda::std::dextents<size_t, 2>>{
-    gather_storage.data(), segmentation.num_stripes(), num_streams_in_data};
+  auto const gather_extents =
+    host_2dspan<gather_extent>{gather_storage.data(),
+                               num_streams_in_data == 0 ? 0 : segmentation.num_stripes(),
+                               num_streams_in_data};
 
   // Compute per-(stripe, stream) actual sizes and decide which need a gathered copy.
   for (auto const& stripe : segmentation.stripes) {
@@ -1622,20 +1624,19 @@ encoded_footer_statistics finish_statistic_blobs(Footer const& footer,
  * @param[in] compression_blocksize The block size used for compression
  * @param[in] out_sink Sink for writing data
  */
-void write_index_stream(
-  int32_t stripe_id,
-  int32_t stream_id,
-  host_span<orc_column_view const> columns,
-  file_segmentation const& segmentation,
-  cuda::std::mdspan<encoder_chunk_streams const, cuda::std::dextents<size_t, 2>> enc_streams,
-  cuda::std::mdspan<stripe_stream const, cuda::std::dextents<size_t, 2>> strm_desc,
-  host_span<codec_exec_result const> comp_res,
-  host_span<col_stats_blob const> rg_stats,
-  StripeInformation* stripe,
-  orc_streams* streams,
-  compression_type compression,
-  size_t compression_blocksize,
-  std::unique_ptr<data_sink> const& out_sink)
+void write_index_stream(int32_t stripe_id,
+                        int32_t stream_id,
+                        host_span<orc_column_view const> columns,
+                        file_segmentation const& segmentation,
+                        host_2dspan<encoder_chunk_streams const> enc_streams,
+                        host_2dspan<stripe_stream const> strm_desc,
+                        host_span<codec_exec_result const> comp_res,
+                        host_span<col_stats_blob const> rg_stats,
+                        StripeInformation* stripe,
+                        orc_streams* streams,
+                        compression_type compression,
+                        size_t compression_blocksize,
+                        std::unique_ptr<data_sink> const& out_sink)
 {
   row_group_index_info present;
   row_group_index_info data;
@@ -2211,17 +2212,16 @@ std::unique_ptr<table_input_metadata> make_table_meta(table_view const& input)
 
 // Computes the number of characters in each rowgroup for each string column and attaches the
 // results to the corresponding orc_column_view. The owning host vector is returned.
-auto set_rowgroup_char_counts(
-  orc_table_view& orc_table,
-  cuda::std::mdspan<rowgroup_rows const, cuda::std::dextents<size_t, 2>> rowgroup_bounds,
-  cuda::stream_ref stream)
+auto set_rowgroup_char_counts(orc_table_view& orc_table,
+                              device_2dspan<rowgroup_rows const> rowgroup_bounds,
+                              cuda::stream_ref stream)
 {
   auto const num_rowgroups = rowgroup_bounds.extent(0);
   auto const num_str_cols  = orc_table.num_string_columns();
 
-  auto counts         = rmm::device_uvector<size_type>(num_str_cols * num_rowgroups, stream);
-  auto counts_2d_view = cuda::std::mdspan<size_type, cuda::std::dextents<size_t, 2>>(
-    counts.data(), num_str_cols, num_rowgroups);
+  auto counts = rmm::device_uvector<size_type>(num_str_cols * num_rowgroups, stream);
+  auto counts_2d_view =
+    device_2dspan<size_type>(counts.data(), num_rowgroups == 0 ? 0 : num_str_cols, num_rowgroups);
   rowgroup_char_counts(counts_2d_view,
                        orc_table.d_columns,
                        rowgroup_bounds,
@@ -2454,9 +2454,8 @@ struct stripe_stream_size_less {
   }
 };
 
-[[nodiscard]] uint32_t find_largest_stream_size(
-  cuda::std::mdspan<stripe_stream const, cuda::std::dextents<size_t, 2>> ss,
-  cuda::stream_ref stream)
+[[nodiscard]] uint32_t find_largest_stream_size(device_2dspan<stripe_stream const> ss,
+                                                cuda::stream_ref stream)
 {
   auto const longest_stream =
     thrust::max_element(rmm::exec_policy_nosync(stream, cudf::get_current_device_resource_ref()),
@@ -2542,14 +2541,14 @@ auto convert_table_to_orc_data(table_view const& input,
   auto const num_data_streams       = streams.size() - num_index_streams;
   hostdevice_2dvector<stripe_stream> strm_descs(
     segmentation.num_stripes(), num_data_streams, stream);
-  auto stripes =
-    gather_stripes(num_index_streams,
-                   segmentation,
-                   cuda::std::mdspan<extent_info const, cuda::std::dextents<size_t, 2>>{
-                     extents.data(), segmentation.num_stripes(), streams.size()},
-                   &enc_data,
-                   &strm_descs,
-                   stream);
+  auto stripes = gather_stripes(
+    num_index_streams,
+    segmentation,
+    host_2dspan<extent_info const>{
+      extents.data(), streams.size() == 0 ? 0 : segmentation.num_stripes(), streams.size()},
+    &enc_data,
+    &strm_descs,
+    stream);
 
   if (num_rows == 0) {
     return std::tuple{std::move(enc_data),
@@ -2779,17 +2778,16 @@ void writer::impl::update_statistics(
   }
 }
 
-void writer::impl::write_orc_data_to_sink(
-  encoded_data const& enc_data,
-  file_segmentation const& segmentation,
-  orc_table_view const& orc_table,
-  device_span<uint8_t const> compressed_data,
-  host_span<codec_exec_result const> comp_results,
-  cuda::std::mdspan<stripe_stream const, cuda::std::dextents<size_t, 2>> strm_descs,
-  host_span<col_stats_blob const> rg_stats,
-  orc_streams& streams,
-  host_span<StripeInformation> stripes,
-  host_span<uint8_t> bounce_buffer)
+void writer::impl::write_orc_data_to_sink(encoded_data const& enc_data,
+                                          file_segmentation const& segmentation,
+                                          orc_table_view const& orc_table,
+                                          device_span<uint8_t const> compressed_data,
+                                          host_span<codec_exec_result const> comp_results,
+                                          host_2dspan<stripe_stream const> strm_descs,
+                                          host_span<col_stats_blob const> rg_stats,
+                                          orc_streams& streams,
+                                          host_span<StripeInformation> stripes,
+                                          host_span<uint8_t> bounce_buffer)
 {
   if (orc_table.num_rows() == 0) { return; }
 

@@ -14,8 +14,6 @@
 #include <cudf/io/detail/parquet.hpp>
 #include <cudf/utilities/span.hpp>
 
-#include <cuda/std/mdspan>
-
 #include <optional>
 
 namespace cudf::io::parquet::detail {
@@ -70,7 +68,7 @@ void fill_table_meta(table_input_metadata& table_meta);
  * @throws std::overflow_error if a single row does not fit in a page
  */
 [[nodiscard]] std::optional<size_type> compute_smaller_fragment_size(
-  cuda::std::mdspan<PageFragment const, cuda::std::dextents<size_t, 2>> fragments,
+  cudf::detail::host_2dspan<PageFragment const> fragments,
   host_span<parquet_column_device_view const> col_desc,
   size_type input_fragment_size);
 

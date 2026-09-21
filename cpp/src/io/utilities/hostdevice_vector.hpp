@@ -18,7 +18,6 @@
 
 #include <rmm/device_uvector.hpp>
 
-#include <cuda/std/mdspan>
 #include <cuda/stream>
 
 #include <utility>
@@ -152,24 +151,22 @@ class hostdevice_2dvector {
 
   [[nodiscard]] auto device_view()
   {
-    return cuda::std::mdspan<T, cuda::std::dextents<size_t, 2>>(
-      _data.device_ptr(), _size.first, _size.second);
+    return device_2dspan<T>(_data.device_ptr(), _size.second == 0 ? 0 : _size.first, _size.second);
   }
   [[nodiscard]] auto device_view() const
   {
-    return cuda::std::mdspan<T const, cuda::std::dextents<size_t, 2>>(
-      _data.device_ptr(), _size.first, _size.second);
+    return device_2dspan<T const>(
+      _data.device_ptr(), _size.second == 0 ? 0 : _size.first, _size.second);
   }
 
   [[nodiscard]] auto host_view()
   {
-    return cuda::std::mdspan<T, cuda::std::dextents<size_t, 2>>(
-      _data.host_ptr(), _size.first, _size.second);
+    return host_2dspan<T>(_data.host_ptr(), _size.second == 0 ? 0 : _size.first, _size.second);
   }
   [[nodiscard]] auto host_view() const
   {
-    return cuda::std::mdspan<T const, cuda::std::dextents<size_t, 2>>(
-      _data.host_ptr(), _size.first, _size.second);
+    return host_2dspan<T const>(
+      _data.host_ptr(), _size.second == 0 ? 0 : _size.first, _size.second);
   }
 
   [[nodiscard]] host_span<T> flat_host_view() { return _data; }

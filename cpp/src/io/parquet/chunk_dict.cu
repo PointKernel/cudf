@@ -21,7 +21,6 @@
 #include <cuda/atomic>
 #include <cuda/functional>
 #include <cuda/std/bit>
-#include <cuda/std/mdspan>
 
 namespace cudf::io::parquet::detail {
 
@@ -266,9 +265,9 @@ struct map_find_fn {
  * @param frags 2D span of page fragments
  */
 template <int block_size>
-CUDF_KERNEL void __launch_bounds__(block_size) populate_chunk_hash_maps_kernel(
-  device_span<slot_type> const map_storage,
-  cuda::std::mdspan<PageFragment, cuda::std::dextents<size_t, 2>> frags)
+CUDF_KERNEL void __launch_bounds__(block_size)
+  populate_chunk_hash_maps_kernel(device_span<slot_type> const map_storage,
+                                  cudf::detail::device_2dspan<PageFragment> frags)
 {
   auto const col_idx  = blockIdx.y;
   auto const frag_idx = blockIdx.x;
@@ -304,10 +303,10 @@ CUDF_KERNEL void __launch_bounds__(block_size) populate_chunk_hash_maps_kernel(
  * @param frags 2D span of page fragments
  */
 template <int block_size>
-CUDF_KERNEL void __launch_bounds__(block_size) collect_map_entries_kernel(
-  device_span<slot_type> const map_storage,
-  device_span<EncColumnChunk> chunks,
-  cuda::std::mdspan<PageFragment const, cuda::std::dextents<size_t, 2>> frags)
+CUDF_KERNEL void __launch_bounds__(block_size)
+  collect_map_entries_kernel(device_span<slot_type> const map_storage,
+                             device_span<EncColumnChunk> chunks,
+                             cudf::detail::device_2dspan<PageFragment const> frags)
 {
   auto& chunk = chunks[blockIdx.x];
   if (not chunk.use_dictionary) { return; }
@@ -388,9 +387,9 @@ CUDF_KERNEL void __launch_bounds__(block_size) collect_map_entries_kernel(
  * @param frags 2D span of page fragments
  */
 template <int block_size>
-CUDF_KERNEL void __launch_bounds__(block_size) get_dictionary_indices_kernel(
-  device_span<slot_type> const map_storage,
-  cuda::std::mdspan<PageFragment const, cuda::std::dextents<size_t, 2>> frags)
+CUDF_KERNEL void __launch_bounds__(block_size)
+  get_dictionary_indices_kernel(device_span<slot_type> const map_storage,
+                                cudf::detail::device_2dspan<PageFragment const> frags)
 {
   auto const col_idx  = blockIdx.y;
   auto const frag_idx = blockIdx.x;
@@ -483,7 +482,7 @@ CUDF_KERNEL void __launch_bounds__(DEFAULT_BLOCK_SIZE)
 }  // namespace
 
 void populate_chunk_hash_maps(device_span<slot_type> const map_storage,
-                              cuda::std::mdspan<PageFragment, cuda::std::dextents<size_t, 2>> frags,
+                              cudf::detail::device_2dspan<PageFragment> frags,
                               cuda::stream_ref stream)
 {
   dim3 const dim_grid(frags.extent(1), frags.extent(0));
@@ -492,11 +491,10 @@ void populate_chunk_hash_maps(device_span<slot_type> const map_storage,
   CUDF_CUDA_TRY(cudaGetLastError());
 }
 
-void collect_map_entries(
-  device_span<slot_type> const map_storage,
-  device_span<EncColumnChunk> chunks,
-  cuda::std::mdspan<PageFragment const, cuda::std::dextents<size_t, 2>> frags,
-  cuda::stream_ref stream)
+void collect_map_entries(device_span<slot_type> const map_storage,
+                         device_span<EncColumnChunk> chunks,
+                         cudf::detail::device_2dspan<PageFragment const> frags,
+                         cuda::stream_ref stream)
 {
   constexpr int block_size = 1024;
   static_assert(block_size >= MAX_FRAGMENTS_PER_CHUNK,
@@ -507,10 +505,9 @@ void collect_map_entries(
   CUDF_CUDA_TRY(cudaGetLastError());
 }
 
-void get_dictionary_indices(
-  device_span<slot_type> const map_storage,
-  cuda::std::mdspan<PageFragment const, cuda::std::dextents<size_t, 2>> frags,
-  cuda::stream_ref stream)
+void get_dictionary_indices(device_span<slot_type> const map_storage,
+                            cudf::detail::device_2dspan<PageFragment const> frags,
+                            cuda::stream_ref stream)
 {
   dim3 const dim_grid(frags.extent(1), frags.extent(0));
   get_dictionary_indices_kernel<DEFAULT_BLOCK_SIZE>

@@ -9,7 +9,6 @@
 #include <cudf/io/orc_types.hpp>
 #include <cudf/strings/detail/convert/fixed_point_to_string.cuh>
 
-#include <cuda/std/mdspan>
 #include <cuda/std/utility>
 #include <cuda/stream>
 
@@ -25,10 +24,10 @@ constexpr unsigned int init_threads_per_group = 32;
 constexpr unsigned int init_groups_per_block  = 4;
 constexpr unsigned int init_threads_per_block = init_threads_per_group * init_groups_per_block;
 
-CUDF_KERNEL void __launch_bounds__(init_threads_per_block) gpu_init_statistics_groups(
-  statistics_group* groups,
-  stats_column_desc const* cols,
-  cuda::std::mdspan<rowgroup_rows const, cuda::std::dextents<size_t, 2>> rowgroup_bounds)
+CUDF_KERNEL void __launch_bounds__(init_threads_per_block)
+  gpu_init_statistics_groups(statistics_group* groups,
+                             stats_column_desc const* cols,
+                             device_2dspan<rowgroup_rows const> rowgroup_bounds)
 {
   __shared__ __align__(4) statistics_group group_g[init_groups_per_block];
   auto const col_id = blockIdx.x % rowgroup_bounds.extent(1);
@@ -439,11 +438,10 @@ CUDF_KERNEL void __launch_bounds__(encode_threads_per_block)
   }
 }
 
-void orc_init_statistics_groups(
-  statistics_group* groups,
-  stats_column_desc const* cols,
-  cuda::std::mdspan<rowgroup_rows const, cuda::std::dextents<size_t, 2>> rowgroup_bounds,
-  cuda::stream_ref stream)
+void orc_init_statistics_groups(statistics_group* groups,
+                                stats_column_desc const* cols,
+                                device_2dspan<rowgroup_rows const> rowgroup_bounds,
+                                cuda::stream_ref stream)
 {
   auto const num_blocks =
     cudf::util::div_rounding_up_safe<size_t>(rowgroup_bounds.extent(0), init_groups_per_block) *

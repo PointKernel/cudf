@@ -20,7 +20,6 @@
 #include <cudf/table/table.hpp>
 #include <cudf/utilities/error.hpp>
 
-#include <cuda/std/mdspan>
 #include <cuda/stream>
 
 #include <memory>
@@ -32,6 +31,8 @@ namespace cudf::io::parquet::detail {
 // Forward internal classes
 struct aggregate_writer_metadata;
 
+using cudf::detail::device_2dspan;
+using cudf::detail::host_2dspan;
 using cudf::detail::hostdevice_2dvector;
 
 /**
@@ -127,14 +128,13 @@ class writer::impl {
    * @param rg_to_part A map from rowgroup to partition
    * @param[out] bounce_buffer Temporary host output buffer
    */
-  void write_parquet_data_to_sink(
-    std::unique_ptr<aggregate_writer_metadata>& updated_agg_meta,
-    device_span<EncPage const> pages,
-    cuda::std::mdspan<EncColumnChunk const, cuda::std::dextents<size_t, 2>> chunks,
-    host_span<size_t const> global_rowgroup_base,
-    host_span<int const> first_rg_in_part,
-    host_span<int const> rg_to_part,
-    host_span<uint8_t> bounce_buffer);
+  void write_parquet_data_to_sink(std::unique_ptr<aggregate_writer_metadata>& updated_agg_meta,
+                                  device_span<EncPage const> pages,
+                                  host_2dspan<EncColumnChunk const> chunks,
+                                  host_span<size_t const> global_rowgroup_base,
+                                  host_span<int const> first_rg_in_part,
+                                  host_span<int const> rg_to_part,
+                                  host_span<uint8_t> bounce_buffer);
 
   // Cuda stream to be used
   cuda::stream_ref _stream;

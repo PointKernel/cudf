@@ -27,7 +27,6 @@
 #include <cuda/std/functional>
 #include <cuda/std/iterator>
 #include <cuda/std/limits>
-#include <cuda/std/mdspan>
 #include <cuda/std/tuple>
 #include <cuda/std/utility>
 #include <cuda/stream>
@@ -42,6 +41,8 @@
 namespace cudf::io::parquet::detail {
 
 namespace {
+
+using ::cudf::detail::device_2dspan;
 
 using cudf::io::detail::codec_exec_result;
 using cudf::io::detail::codec_status;
@@ -381,7 +382,7 @@ inline void __device__ set_page_data_start(state_type* s)
 // blockDim {512,1,1}
 template <int block_size>
 CUDF_KERNEL void __launch_bounds__(block_size)
-  gpuInitRowGroupFragments(cuda::std::mdspan<PageFragment, cuda::std::dextents<size_t, 2>> frag,
+  gpuInitRowGroupFragments(device_2dspan<PageFragment> frag,
                            device_span<parquet_column_device_view const> col_desc,
                            device_span<partition_info const> partitions,
                            device_span<int const> part_frag_offset,
@@ -552,7 +553,7 @@ __device__ size_t delta_data_len(Type physical_type,
 
 // blockDim {128,1,1}
 CUDF_KERNEL void __launch_bounds__(128)
-  gpuInitPages(cuda::std::mdspan<EncColumnChunk, cuda::std::dextents<size_t, 2>> chunks,
+  gpuInitPages(device_2dspan<EncColumnChunk> chunks,
                device_span<EncPage> pages,
                device_span<size_type> page_sizes,
                device_span<size_type const> comp_page_sizes,
@@ -3394,7 +3395,7 @@ CUDF_KERNEL void __launch_bounds__(1)
   ck_g->var_bytes_size    = var_bytes;
 }
 
-void InitRowGroupFragments(cuda::std::mdspan<PageFragment, cuda::std::dextents<size_t, 2>> frag,
+void InitRowGroupFragments(device_2dspan<PageFragment> frag,
                            device_span<parquet_column_device_view const> col_desc,
                            device_span<partition_info const> partitions,
                            device_span<int const> part_frag_offset,
@@ -3429,7 +3430,7 @@ void InitFragmentStatistics(device_span<statistics_group> groups,
   CUDF_CUDA_TRY(cudaGetLastError());
 }
 
-void InitEncoderPages(cuda::std::mdspan<EncColumnChunk, cuda::std::dextents<size_t, 2>> chunks,
+void InitEncoderPages(device_2dspan<EncColumnChunk> chunks,
                       device_span<EncPage> pages,
                       device_span<size_type> page_sizes,
                       device_span<size_type const> comp_page_sizes,

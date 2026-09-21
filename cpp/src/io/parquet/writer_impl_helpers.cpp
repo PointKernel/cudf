@@ -18,8 +18,6 @@
 #include <cudf/strings/strings_column_view.hpp>
 #include <cudf/structs/structs_column_view.hpp>
 
-#include <cuda/std/mdspan>
-
 #include <algorithm>
 #include <format>
 #include <functional>
@@ -86,7 +84,7 @@ void fill_table_meta(table_input_metadata& table_meta)
 }
 
 std::optional<size_type> compute_smaller_fragment_size(
-  cuda::std::mdspan<PageFragment const, cuda::std::dextents<size_t, 2>> fragments,
+  cudf::detail::host_2dspan<PageFragment const> fragments,
   host_span<parquet_column_device_view const> col_desc,
   size_type input_fragment_size)
 {
