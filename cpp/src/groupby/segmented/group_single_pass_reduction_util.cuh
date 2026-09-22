@@ -89,6 +89,14 @@ struct null_replaced_value_accessor : value_accessor<SourceType> {
   }
 };
 
+struct square_value {
+  template <typename T>
+  CUDF_HOST_DEVICE T operator()(T value) const
+  {
+    return value * value;
+  }
+};
+
 // Error case when no other overload or specialization is available
 template <aggregation::Kind K, typename T, typename Enable = void>
 struct group_reduction_functor {
@@ -121,7 +129,8 @@ static constexpr bool is_group_reduction_supported()
   switch (K) {
     case aggregation::SUM:
       return cudf::is_numeric<T>() || cudf::is_duration<T>() || cudf::is_fixed_point<T>();
-    case aggregation::PRODUCT: return cudf::detail::is_product_supported<T>();
+    case aggregation::PRODUCT:
+    case aggregation::SUM_OF_SQUARES: return cudf::detail::is_product_supported<T>();
     case aggregation::MIN:
     case aggregation::MAX: return cudf::is_fixed_width<T>() and is_relationally_comparable<T, T>();
     case aggregation::ARGMIN:
@@ -182,7 +191,12 @@ struct group_reduction_functor<
         0,
         null_replaced_value_accessor<SourceDType, ResultDType>{
           *d_values_ptr, init, values.has_nulls()});
-      do_reduction(inp_values, result_begin, OpType{});
+      if constexpr (K == aggregation::SUM_OF_SQUARES) {
+        auto const squared_values = cuda::transform_iterator{inp_values, square_value{}};
+        do_reduction(squared_values, result_begin, OpType{});
+      } else {
+        do_reduction(inp_values, result_begin, OpType{});
+      }
     }
 
     if (values.has_nulls()) {

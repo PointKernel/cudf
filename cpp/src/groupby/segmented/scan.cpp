@@ -4,9 +4,9 @@
  */
 
 #include "groupby/common/utils.hpp"
-#include "groupby/sort/functors.hpp"
-#include "groupby/sort/group_reductions.hpp"
-#include "groupby/sort/group_scan.hpp"
+#include "groupby/segmented/functors.hpp"
+#include "groupby/segmented/group_reductions.hpp"
+#include "groupby/segmented/group_scan.hpp"
 
 #include <cudf/aggregation.hpp>
 #include <cudf/column/column_view.hpp>
@@ -47,20 +47,6 @@ struct scan_result_functor final : store_result_functor {
   {
     CUDF_FAIL("Unsupported groupby scan aggregation");
   }
-
- private:
-  column_view get_grouped_values()
-  {
-    // early exit if presorted
-    if (is_presorted()) { return values; }
-
-    // TODO (dm): After implementing single pass multi-agg, explore making a
-    //            cache of all grouped value columns rather than one at a time
-    if (grouped_values)
-      return grouped_values->view();
-    else
-      return (grouped_values = helper.grouped_values(values, stream, mr))->view();
-  };
 };
 
 template <>
@@ -210,20 +196,21 @@ void scan_result_functor::operator()<aggregation::RANK>(aggregation const& agg)
 }
 }  // namespace detail
 
-// Sort-based groupby
-std::pair<std::unique_ptr<table>, std::vector<aggregation_result>> groupby::sort_scan(
+// Aggregation over contiguous groups
+std::pair<std::unique_ptr<table>, std::vector<aggregation_result>> groupby::scan_grouped(
   std::span<scan_request const> requests,
   cuda::stream_ref stream,
   rmm::device_async_resource_ref mr)
 {
+  helper().grouped_order(stream);
+
   // We're going to start by creating a cache of results so that aggs that
   // depend on other aggs will not have to be recalculated. e.g. mean depends on
   // sum and count. std depends on mean and count
   cudf::detail::result_cache cache(requests.size());
 
   for (auto const& request : requests) {
-    auto store_functor =
-      detail::scan_result_functor(request.values, helper(), cache, stream, mr, _keys_are_sorted);
+    auto store_functor = detail::scan_result_functor(request.values, helper(), cache, stream, mr);
     for (auto const& aggregation : request.aggregations) {
       // TODO (dm): single pass compute all supported reductions
       cudf::detail::aggregation_dispatcher(aggregation->kind, store_functor, *aggregation);
@@ -232,7 +219,7 @@ std::pair<std::unique_ptr<table>, std::vector<aggregation_result>> groupby::sort
 
   auto results = detail::extract_results(requests, cache, stream, mr);
 
-  return std::pair(helper().sorted_keys(stream, mr), std::move(results));
+  return std::pair(helper().grouped_keys(stream, mr), std::move(results));
 }
 }  // namespace groupby
 }  // namespace cudf

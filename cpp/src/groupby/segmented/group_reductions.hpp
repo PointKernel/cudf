@@ -15,7 +15,7 @@
 #include <memory>
 
 /** @internal @file Internal API in this file are mostly segmented reduction operations on column,
- * which are used in sort-based groupby aggregations.
+ * which are used after grouping keys with HashCSR.
  *
  */
 namespace cudf {
@@ -43,6 +43,21 @@ std::unique_ptr<column> group_sum(column_view const& values,
                                   cudf::device_span<size_type const> group_labels,
                                   cuda::stream_ref stream,
                                   rmm::device_async_resource_ref mr);
+
+/**
+ * @brief Internal API to calculate groupwise sum of squares.
+ *
+ * @param values Grouped values to square and sum
+ * @param num_groups Number of groups
+ * @param group_labels ID of the group that each value belongs to
+ * @param stream CUDA stream used for device memory operations and kernel launches
+ * @param mr Device memory resource used to allocate the returned column's device memory
+ */
+std::unique_ptr<column> group_sum_of_squares(column_view const& values,
+                                             size_type num_groups,
+                                             cudf::device_span<size_type const> group_labels,
+                                             cuda::stream_ref stream,
+                                             rmm::device_async_resource_ref mr);
 
 /**
  * @brief Internal API to calculate groupwise sum with overflow detection.
@@ -147,14 +162,14 @@ std::unique_ptr<column> group_max(column_view const& values,
  * @param values Grouped values to get maximum value's index from
  * @param num_groups Number of groups
  * @param group_labels ID of group that the corresponding value belongs to
- * @param key_sort_order Indices indicating sort order of groupby keys
+ * @param grouped_order Original row indices in grouped order
  * @param stream CUDA stream used for device memory operations and kernel launches.
  * @param mr Device memory resource used to allocate the returned column's device memory
  */
 std::unique_ptr<column> group_argmax(column_view const& values,
                                      size_type num_groups,
                                      cudf::device_span<size_type const> group_labels,
-                                     column_view const& key_sort_order,
+                                     column_view const& grouped_order,
                                      cuda::stream_ref stream,
                                      rmm::device_async_resource_ref mr);
 
@@ -172,14 +187,14 @@ std::unique_ptr<column> group_argmax(column_view const& values,
  * @param values Grouped values to get minimum value's index from
  * @param num_groups Number of groups
  * @param group_labels ID of group that the corresponding value belongs to
- * @param key_sort_order Indices indicating sort order of groupby keys
+ * @param grouped_order Original row indices in grouped order
  * @param stream CUDA stream used for device memory operations and kernel launches.
  * @param mr Device memory resource used to allocate the returned column's device memory
  */
 std::unique_ptr<column> group_argmin(column_view const& values,
                                      size_type num_groups,
                                      cudf::device_span<size_type const> group_labels,
-                                     column_view const& key_sort_order,
+                                     column_view const& grouped_order,
                                      cuda::stream_ref stream,
                                      rmm::device_async_resource_ref mr);
 

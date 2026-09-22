@@ -62,14 +62,13 @@ std::unique_ptr<table> dispatch_groupby(table_view const& keys,
 
 /**
  * @brief Indicates if a set of aggregation requests can be satisfied with a
- * hash-based groupby implementation.
+ * direct HashCSR reductions.
  *
  * @param requests The set of columns to aggregate and the aggregations to
  * perform
- * @return true A hash-based groupby should be used
- * @return false A hash-based groupby should not be used
+ * @return Whether every request supports the direct reductions
  */
-bool can_use_hash_groupby(std::span<aggregation_request const> requests)
+bool can_use_single_pass_aggregations(std::span<aggregation_request const> requests)
 {
   return std::all_of(requests.begin(), requests.end(), [](aggregation_request const& r) {
     auto const v_type = is_dictionary(r.values.type())

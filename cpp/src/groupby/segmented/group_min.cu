@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-#include "groupby/sort/group_single_pass_reduction_util.cuh"
+#include "groupby/segmented/group_single_pass_reduction_util.cuh"
 
 #include <cudf/utilities/memory_resource.hpp>
 
@@ -12,7 +12,7 @@
 namespace cudf {
 namespace groupby {
 namespace detail {
-std::unique_ptr<column> group_max(column_view const& values,
+std::unique_ptr<column> group_min(column_view const& values,
                                   size_type num_groups,
                                   cudf::device_span<size_type const> group_labels,
                                   cuda::stream_ref stream,
@@ -22,7 +22,7 @@ std::unique_ptr<column> group_max(column_view const& values,
                        ? dictionary_column_view(values).keys().type()
                        : values.type();
   return type_dispatcher(values_type,
-                         group_reduction_dispatcher<aggregation::MAX>{},
+                         group_reduction_dispatcher<aggregation::MIN>{},
                          values,
                          num_groups,
                          group_labels,

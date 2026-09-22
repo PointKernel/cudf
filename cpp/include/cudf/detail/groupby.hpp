@@ -18,14 +18,13 @@ namespace cudf {
 namespace groupby::detail::hash {
 /**
  * @brief Indicates if a set of aggregation requests can be satisfied with a
- * hash-based groupby implementation.
+ * direct HashCSR reductions.
  *
  * @param requests The set of columns to aggregate and the aggregations to
  * perform
- * @return true A hash-based groupby can be used
- * @return false A hash-based groupby cannot be used
+ * @return Whether every request supports the direct reductions
  */
-bool can_use_hash_groupby(std::span<aggregation_request const> requests);
+bool can_use_single_pass_aggregations(std::span<aggregation_request const> requests);
 
 // Hash-based groupby
 std::pair<std::unique_ptr<table>, std::vector<aggregation_result>> groupby(

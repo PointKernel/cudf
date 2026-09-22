@@ -4,8 +4,8 @@
  */
 
 #include "groupby/common/utils.hpp"
-#include "groupby/sort/functors.hpp"
-#include "groupby/sort/group_reductions.hpp"
+#include "groupby/segmented/functors.hpp"
+#include "groupby/segmented/group_reductions.hpp"
 
 #include <cudf/aggregation.hpp>
 #include <cudf/aggregation/host_udf.hpp>
@@ -15,7 +15,7 @@
 #include <cudf/detail/aggregation/result_cache.hpp>
 #include <cudf/detail/binaryop.hpp>
 #include <cudf/detail/gather.hpp>
-#include <cudf/detail/groupby/sort_helper.hpp>
+#include <cudf/detail/groupby/groupby_helper.hpp>
 #include <cudf/detail/tdigest/tdigest.hpp>
 #include <cudf/detail/unary.hpp>
 #include <cudf/dictionary/dictionary_column_view.hpp>
@@ -28,6 +28,7 @@
 
 #include <cuda/stream>
 
+#include <algorithm>
 #include <memory>
 #include <unordered_map>
 #include <utility>
@@ -36,6 +37,26 @@ namespace cudf {
 namespace groupby {
 namespace detail {
 namespace {
+
+bool needs_stable_groups(aggregation::Kind kind)
+{
+  switch (kind) {
+    case aggregation::COUNT_ALL:
+    case aggregation::COUNT_VALID:
+    case aggregation::HISTOGRAM:
+    case aggregation::MERGE_HISTOGRAM:
+    case aggregation::COLLECT_SET:
+    case aggregation::MERGE_SETS:
+    case aggregation::MERGE_TDIGEST:
+    case aggregation::BITWISE_AGG:
+    case aggregation::TOP_K:
+    case aggregation::QUANTILE:
+    case aggregation::MEDIAN:
+    case aggregation::NUNIQUE:
+    case aggregation::TDIGEST: return false;
+    default: return true;
+  }
+}
 
 /**
  * @brief Creates column views with only valid elements in both input column views
@@ -95,14 +116,16 @@ void aggregate_result_functor::operator()<aggregation::COUNT_VALID>(aggregation 
 {
   if (cache.has_result(values, agg)) return;
 
-  cache.add_result(
-    values,
-    agg,
-    get_grouped_values().nullable()
-      ? detail::group_count_valid(
-          get_grouped_values(), helper.group_labels(stream), helper.num_groups(stream), stream, mr)
-      : detail::group_count_all(
-          helper.group_offsets(stream), helper.num_groups(stream), stream, mr));
+  cache.add_result(values,
+                   agg,
+                   values.has_nulls()
+                     ? detail::group_count_valid(get_unordered_grouped_values(),
+                                                 helper.group_labels(stream),
+                                                 helper.num_groups(stream),
+                                                 stream,
+                                                 mr)
+                     : detail::group_count_all(
+                         helper.group_offsets(stream), helper.num_groups(stream), stream, mr));
 }
 
 template <>
@@ -121,11 +144,13 @@ void aggregate_result_functor::operator()<aggregation::HISTOGRAM>(aggregation co
 {
   if (cache.has_result(values, agg)) return;
 
-  cache.add_result(
-    values,
-    agg,
-    detail::group_histogram(
-      get_grouped_values(), helper.group_labels(stream), helper.num_groups(stream), stream, mr));
+  cache.add_result(values,
+                   agg,
+                   detail::group_histogram(get_unordered_grouped_values(),
+                                           helper.group_labels(stream),
+                                           helper.num_groups(stream),
+                                           stream,
+                                           mr));
 }
 
 template <>
@@ -137,6 +162,18 @@ void aggregate_result_functor::operator()<aggregation::SUM>(aggregation const& a
     values,
     agg,
     detail::group_sum(
+      get_grouped_values(), helper.num_groups(stream), helper.group_labels(stream), stream, mr));
+}
+
+template <>
+void aggregate_result_functor::operator()<aggregation::SUM_OF_SQUARES>(aggregation const& agg)
+{
+  if (cache.has_result(values, agg)) return;
+
+  cache.add_result(
+    values,
+    agg,
+    detail::group_sum_of_squares(
       get_grouped_values(), helper.num_groups(stream), helper.group_labels(stream), stream, mr));
 }
 
@@ -174,7 +211,7 @@ void aggregate_result_functor::operator()<aggregation::ARGMAX>(aggregation const
                    detail::group_argmax(get_grouped_values(),
                                         helper.num_groups(stream),
                                         helper.group_labels(stream),
-                                        helper.key_sort_order(stream),
+                                        helper.grouped_order(stream),
                                         stream,
                                         mr));
 }
@@ -189,7 +226,7 @@ void aggregate_result_functor::operator()<aggregation::ARGMIN>(aggregation const
                    detail::group_argmin(get_grouped_values(),
                                         helper.num_groups(stream),
                                         helper.group_labels(stream),
-                                        helper.key_sort_order(stream),
+                                        helper.grouped_order(stream),
                                         stream,
                                         mr));
 }
@@ -462,7 +499,7 @@ void aggregate_result_functor::operator()<aggregation::COLLECT_SET>(aggregation 
 
   auto const null_handling =
     dynamic_cast<cudf::detail::collect_set_aggregation const&>(agg)._null_handling;
-  auto const collect_result = detail::group_collect(get_grouped_values(),
+  auto const collect_result = detail::group_collect(get_unordered_grouped_values(),
                                                     helper.group_offsets(stream),
                                                     helper.num_groups(stream),
                                                     null_handling,
@@ -538,7 +575,7 @@ void aggregate_result_functor::operator()<aggregation::MERGE_SETS>(aggregation c
 {
   if (cache.has_result(values, agg)) { return; }
 
-  auto const merged_result   = detail::group_merge_lists(get_grouped_values(),
+  auto const merged_result   = detail::group_merge_lists(get_unordered_grouped_values(),
                                                        helper.group_offsets(stream),
                                                        helper.num_groups(stream),
                                                        stream,
@@ -594,11 +631,13 @@ void aggregate_result_functor::operator()<aggregation::MERGE_HISTOGRAM>(aggregat
 {
   if (cache.has_result(values, agg)) { return; }
 
-  cache.add_result(
-    values,
-    agg,
-    detail::group_merge_histogram(
-      get_grouped_values(), helper.group_offsets(stream), helper.num_groups(stream), stream, mr));
+  cache.add_result(values,
+                   agg,
+                   detail::group_merge_histogram(get_unordered_grouped_values(),
+                                                 helper.group_offsets(stream),
+                                                 helper.num_groups(stream),
+                                                 stream,
+                                                 mr));
 }
 
 /**
@@ -791,7 +830,7 @@ void aggregate_result_functor::operator()<aggregation::MERGE_TDIGEST>(aggregatio
     dynamic_cast<cudf::detail::merge_tdigest_aggregation const&>(agg).max_centroids;
   cache.add_result(values,
                    agg,
-                   cudf::tdigest::detail::group_merge_tdigest(get_grouped_values(),
+                   cudf::tdigest::detail::group_merge_tdigest(get_unordered_grouped_values(),
                                                               helper.group_offsets(stream),
                                                               helper.group_labels(stream),
                                                               helper.num_groups(stream),
@@ -807,7 +846,7 @@ void aggregate_result_functor::operator()<aggregation::BITWISE_AGG>(aggregation 
 
   auto const bit_op = dynamic_cast<cudf::detail::bitwise_aggregation const&>(agg).bit_op;
   auto result       = detail::group_bitwise(bit_op,
-                                      get_grouped_values(),
+                                      get_unordered_grouped_values(),
                                       helper.group_labels(stream),
                                       helper.num_groups(stream),
                                       stream,
@@ -824,7 +863,7 @@ void aggregate_result_functor::operator()<aggregation::TOP_K>(aggregation const&
   auto const topk_order = dynamic_cast<cudf::detail::top_k_aggregation const&>(agg).topk_order;
 
   auto result = detail::group_top_k(
-    k, topk_order, get_grouped_values(), helper.group_offsets(stream), stream, mr);
+    k, topk_order, get_unordered_grouped_values(), helper.group_offsets(stream), stream, mr);
   cache.add_result(values, agg, std::move(result));
 }
 
@@ -875,12 +914,22 @@ void aggregate_result_functor::operator()<aggregation::HOST_UDF>(aggregation con
 
 }  // namespace detail
 
-// Sort-based groupby
-std::pair<std::unique_ptr<table>, std::vector<aggregation_result>> groupby::sort_aggregate(
+// Aggregation over contiguous groups
+std::pair<std::unique_ptr<table>, std::vector<aggregation_result>> groupby::aggregate_grouped(
   std::span<aggregation_request const> requests,
   cuda::stream_ref stream,
   rmm::device_async_resource_ref mr)
 {
+  // Build ordered rows directly when any request needs them, before metadata or unordered
+  // requests can materialize an intermediate permutation. Existing cached groups are reused.
+  if (std::any_of(requests.begin(), requests.end(), [](auto const& request) {
+        return std::any_of(request.aggregations.begin(),
+                           request.aggregations.end(),
+                           [](auto const& agg) { return detail::needs_stable_groups(agg->kind); });
+      })) {
+    helper().grouped_order(stream);
+  }
+
   // We're going to start by creating a cache of results so that aggs that
   // depend on other aggs will not have to be recalculated. e.g. mean depends on
   // sum and count. std depends on mean and count
