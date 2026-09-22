@@ -44,7 +44,7 @@ TYPED_TEST(groupby_correlation_test, basic)
   auto agg =
     cudf::make_correlation_aggregation<cudf::groupby_aggregation>(cudf::correlation_type::PEARSON);
   test_single_agg(
-    keys, vals, expect_keys, expect_vals, std::move(agg), force_materialized_values::YES);
+    keys, vals, expect_keys, expect_vals, std::move(agg), include_nth_aggregation::YES);
 }
 
 TYPED_TEST(groupby_correlation_test, empty_cols)
@@ -62,7 +62,7 @@ TYPED_TEST(groupby_correlation_test, empty_cols)
   auto agg =
     cudf::make_correlation_aggregation<cudf::groupby_aggregation>(cudf::correlation_type::PEARSON);
   test_single_agg(
-    keys, vals, expect_keys, expect_vals, std::move(agg), force_materialized_values::YES);
+    keys, vals, expect_keys, expect_vals, std::move(agg), include_nth_aggregation::YES);
 }
 
 TYPED_TEST(groupby_correlation_test, zero_valid_keys)
@@ -80,7 +80,7 @@ TYPED_TEST(groupby_correlation_test, zero_valid_keys)
   auto agg =
     cudf::make_correlation_aggregation<cudf::groupby_aggregation>(cudf::correlation_type::PEARSON);
   test_single_agg(
-    keys, vals, expect_keys, expect_vals, std::move(agg), force_materialized_values::YES);
+    keys, vals, expect_keys, expect_vals, std::move(agg), include_nth_aggregation::YES);
 }
 
 TYPED_TEST(groupby_correlation_test, zero_valid_values)
@@ -99,7 +99,7 @@ TYPED_TEST(groupby_correlation_test, zero_valid_values)
   auto agg =
     cudf::make_correlation_aggregation<cudf::groupby_aggregation>(cudf::correlation_type::PEARSON);
   test_single_agg(
-    keys, vals, expect_keys, expect_vals, std::move(agg), force_materialized_values::YES);
+    keys, vals, expect_keys, expect_vals, std::move(agg), include_nth_aggregation::YES);
 }
 
 TYPED_TEST(groupby_correlation_test, null_keys_and_values)
@@ -124,7 +124,7 @@ TYPED_TEST(groupby_correlation_test, null_keys_and_values)
   auto agg =
     cudf::make_correlation_aggregation<cudf::groupby_aggregation>(cudf::correlation_type::PEARSON);
   test_single_agg(
-    keys, vals, expect_keys, expect_vals, std::move(agg), force_materialized_values::YES);
+    keys, vals, expect_keys, expect_vals, std::move(agg), include_nth_aggregation::YES);
 }
 
 TYPED_TEST(groupby_correlation_test, null_values_same)
@@ -150,7 +150,7 @@ TYPED_TEST(groupby_correlation_test, null_values_same)
   auto agg =
     cudf::make_correlation_aggregation<cudf::groupby_aggregation>(cudf::correlation_type::PEARSON);
   test_single_agg(
-    keys, vals, expect_keys, expect_vals, std::move(agg), force_materialized_values::YES);
+    keys, vals, expect_keys, expect_vals, std::move(agg), include_nth_aggregation::YES);
 }
 
 // keys=[1, 1, 1, 2, 2, 2, 2,   3, N, 3, 4]
@@ -180,7 +180,7 @@ TYPED_TEST(groupby_correlation_test, null_values_different)
   auto agg =
     cudf::make_correlation_aggregation<cudf::groupby_aggregation>(cudf::correlation_type::PEARSON);
   test_single_agg(
-    keys, vals, expect_keys, expect_vals, std::move(agg), force_materialized_values::YES);
+    keys, vals, expect_keys, expect_vals, std::move(agg), include_nth_aggregation::YES);
 }
 
 TYPED_TEST(groupby_correlation_test, min_periods)
@@ -201,19 +201,19 @@ TYPED_TEST(groupby_correlation_test, min_periods)
   auto agg1 = cudf::make_correlation_aggregation<cudf::groupby_aggregation>(
     cudf::correlation_type::PEARSON, 3);
   test_single_agg(
-    keys, vals, expect_keys, expect_vals1, std::move(agg1), force_materialized_values::YES);
+    keys, vals, expect_keys, expect_vals1, std::move(agg1), include_nth_aggregation::YES);
 
   cudf::test::fixed_width_column_wrapper<R, double> expect_vals2{{1.0, 0.6, nan}, {0, 1, 0}};
   auto agg2 = cudf::make_correlation_aggregation<cudf::groupby_aggregation>(
     cudf::correlation_type::PEARSON, 4);
   test_single_agg(
-    keys, vals, expect_keys, expect_vals2, std::move(agg2), force_materialized_values::YES);
+    keys, vals, expect_keys, expect_vals2, std::move(agg2), include_nth_aggregation::YES);
 
   cudf::test::fixed_width_column_wrapper<R, double> expect_vals3{{1.0, 0.6, nan}, {0, 0, 0}};
   auto agg3 = cudf::make_correlation_aggregation<cudf::groupby_aggregation>(
     cudf::correlation_type::PEARSON, 5);
   test_single_agg(
-    keys, vals, expect_keys, expect_vals3, std::move(agg3), force_materialized_values::YES);
+    keys, vals, expect_keys, expect_vals3, std::move(agg3), include_nth_aggregation::YES);
 }
 
 struct groupby_dictionary_correlation_test : public cudf::test::BaseFixture {};
@@ -236,5 +236,5 @@ TEST_F(groupby_dictionary_correlation_test, basic)
   auto agg =
     cudf::make_correlation_aggregation<cudf::groupby_aggregation>(cudf::correlation_type::PEARSON);
   test_single_agg(
-    keys, vals, expect_keys, expect_vals, std::move(agg), force_materialized_values::YES);
+    keys, vals, expect_keys, expect_vals, std::move(agg), include_nth_aggregation::YES);
 }

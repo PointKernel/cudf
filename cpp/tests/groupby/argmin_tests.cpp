@@ -38,7 +38,7 @@ TYPED_TEST(groupby_argmin_test, basic)
 
   auto agg2 = cudf::make_argmin_aggregation<cudf::groupby_aggregation>();
   test_single_agg(
-    keys, vals, expect_keys, expect_vals, std::move(agg2), force_materialized_values::YES);
+    keys, vals, expect_keys, expect_vals, std::move(agg2), include_nth_aggregation::YES);
 }
 
 TYPED_TEST(groupby_argmin_test, zero_valid_keys)
@@ -59,7 +59,7 @@ TYPED_TEST(groupby_argmin_test, zero_valid_keys)
 
   auto agg2 = cudf::make_argmin_aggregation<cudf::groupby_aggregation>();
   test_single_agg(
-    keys, vals, expect_keys, expect_vals, std::move(agg2), force_materialized_values::YES);
+    keys, vals, expect_keys, expect_vals, std::move(agg2), include_nth_aggregation::YES);
 }
 
 TYPED_TEST(groupby_argmin_test, zero_valid_values)
@@ -80,7 +80,7 @@ TYPED_TEST(groupby_argmin_test, zero_valid_values)
 
   auto agg2 = cudf::make_argmin_aggregation<cudf::groupby_aggregation>();
   test_single_agg(
-    keys, vals, expect_keys, expect_vals, std::move(agg2), force_materialized_values::YES);
+    keys, vals, expect_keys, expect_vals, std::move(agg2), include_nth_aggregation::YES);
 }
 
 TYPED_TEST(groupby_argmin_test, null_keys_and_values)
@@ -107,7 +107,7 @@ TYPED_TEST(groupby_argmin_test, null_keys_and_values)
   // TODO: explore making this a gtest parameter
   auto agg2 = cudf::make_argmin_aggregation<cudf::groupby_aggregation>();
   test_single_agg(
-    keys, vals, expect_keys, expect_vals, std::move(agg2), force_materialized_values::YES);
+    keys, vals, expect_keys, expect_vals, std::move(agg2), include_nth_aggregation::YES);
 }
 
 struct groupby_argmin_string_test : public cudf::test::BaseFixture {};
@@ -128,7 +128,7 @@ TEST_F(groupby_argmin_string_test, basic)
 
   auto agg2 = cudf::make_argmin_aggregation<cudf::groupby_aggregation>();
   test_single_agg(
-    keys, vals, expect_keys, expect_vals, std::move(agg2), force_materialized_values::YES);
+    keys, vals, expect_keys, expect_vals, std::move(agg2), include_nth_aggregation::YES);
 }
 
 TEST_F(groupby_argmin_string_test, zero_valid_values)
@@ -146,7 +146,7 @@ TEST_F(groupby_argmin_string_test, zero_valid_values)
 
   auto agg2 = cudf::make_argmin_aggregation<cudf::groupby_aggregation>();
   test_single_agg(
-    keys, vals, expect_keys, expect_vals, std::move(agg2), force_materialized_values::YES);
+    keys, vals, expect_keys, expect_vals, std::move(agg2), include_nth_aggregation::YES);
 }
 
 struct groupby_dictionary_argmin_test : public cudf::test::BaseFixture {};
@@ -173,7 +173,7 @@ TEST_F(groupby_dictionary_argmin_test, basic)
                   expect_keys,
                   expect_vals,
                   cudf::make_argmin_aggregation<cudf::groupby_aggregation>(),
-                  force_materialized_values::YES);
+                  include_nth_aggregation::YES);
 }
 
 struct groupby_argmin_struct_test : public cudf::test::BaseFixture {};

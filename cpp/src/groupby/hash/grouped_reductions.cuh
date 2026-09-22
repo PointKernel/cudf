@@ -57,7 +57,20 @@ struct reduction_columns {
 constexpr size_type rows_per_chunk               = 1 << 10;
 constexpr thread_index_type reduction_block_size = 256;
 
-/// Fold groups no wider than a warp in one thread, using only their actual values.
+/// Bind inputs that depend on a group (such as centered deviations) once per
+/// segment. Ordinary iterators do not evaluate the group lookup.
+template <typename Values, typename GroupIterator>
+__device__ auto values_for_group(Values values, GroupIterator groups, size_type segment)
+{
+  if constexpr (requires { values.for_group(size_type{}); }) {
+    return values.for_group(groups[segment]);
+  } else {
+    return values;
+  }
+}
+
+/// Fold groups no wider than a warp in one thread, using only their actual
+/// values.
 template <typename Columns, typename Op, typename T>
 CUDF_KERNEL void reduce_small_groups_kernel(device_span<size_type const> offsets,
                                             Columns columns,
@@ -72,11 +85,12 @@ CUDF_KERNEL void reduce_small_groups_kernel(device_span<size_type const> offsets
     // Adjacent threads write adjacent groups of one column.
     auto const group  = batched ? linear % num_groups : linear;
     auto const column = columns[static_cast<size_type>(batched ? linear / num_groups : 0)];
-    auto const values = column.values;
     auto const output = column.output;
     auto const begin  = static_cast<cuda::std::int64_t>(offsets[group]);
     auto const end    = static_cast<cuda::std::int64_t>(offsets[group + 1]);
     if (end - begin <= cudf::detail::warp_size) {
+      auto const values =
+        values_for_group(column.values, cuda::counting_iterator<size_type>{0}, group);
       T partial = values[begin];
       for (auto position = begin + 1; position < end; ++position) {
         partial = op(partial, values[position]);
@@ -92,6 +106,7 @@ template <int threads_per_segment,
           typename EndIterator,
           typename Columns,
           typename OutputIndexIterator,
+          typename GroupIterator,
           typename Op,
           typename T>
 CUDF_KERNEL void reduce_segments_kernel(size_type num_segments,
@@ -99,6 +114,7 @@ CUDF_KERNEL void reduce_segments_kernel(size_type num_segments,
                                         EndIterator ends,
                                         Columns columns,
                                         OutputIndexIterator output_indices,
+                                        GroupIterator group_indices,
                                         Op op,
                                         T init)
 {
@@ -122,7 +138,7 @@ CUDF_KERNEL void reduce_segments_kernel(size_type num_segments,
   }
   auto const column_index = column_major ? linear / num_segments : linear % columns.size();
   auto const column       = columns[static_cast<size_type>(column_index)];
-  auto const values       = column.values;
+  auto const values       = values_for_group(column.values, group_indices, segment);
   auto const output       = column.output;
   auto const begin        = static_cast<cuda::std::int64_t>(begins[segment]);
   auto const end          = static_cast<cuda::std::int64_t>(ends[segment]);
@@ -150,6 +166,7 @@ template <int threads_per_segment,
           typename EndIterator,
           typename Columns,
           typename OutputIndexIterator,
+          typename GroupIterator,
           typename Op,
           typename T>
 void reduce_segments(size_type num_segments,
@@ -157,6 +174,7 @@ void reduce_segments(size_type num_segments,
                      EndIterator ends,
                      Columns columns,
                      OutputIndexIterator output_indices,
+                     GroupIterator group_indices,
                      Op op,
                      T init,
                      cuda::stream_ref stream)
@@ -170,7 +188,7 @@ void reduce_segments(size_type num_segments,
     cudf::detail::grid_1d{num_collectives * threads_per_segment, reduction_block_size};
   reduce_segments_kernel<threads_per_segment>
     <<<config.num_blocks, config.num_threads_per_block, 0, stream.get()>>>(
-      num_segments, begins, ends, columns, output_indices, op, init);
+      num_segments, begins, ends, columns, output_indices, group_indices, op, init);
   CUDF_CUDA_TRY(cudaGetLastError());
 }
 
@@ -181,7 +199,8 @@ void reduce_group_columns(grouped_rows const& grouped,
                           Op op,
                           T init,
                           cuda::stream_ref stream,
-                          cudf::memory_resources mr)
+                          cudf::memory_resources mr,
+                          bool long_groups_only = false)
 {
   auto const num_groups        = static_cast<size_type>(grouped.offsets.size() - 1);
   auto const num_warp_groups   = static_cast<size_type>(grouped.warp_groups.size());
@@ -190,7 +209,8 @@ void reduce_group_columns(grouped_rows const& grouped,
                                    : static_cast<size_type>(grouped.group_chunks.size() - 1);
   auto const num_direct_groups = num_warp_groups - num_long_groups;
   auto const num_chunks        = static_cast<size_type>(grouped.chunk_ranges.size());
-  using Column                 = decltype(columns[size_type{0}]);
+  if (long_groups_only && num_long_groups == 0) { return; }
+  using Column = decltype(columns[size_type{0}]);
   if constexpr (!cuda::std::is_same_v<Columns, Column>) {
     // Split only when a stage would exceed CUDA's maximum one-dimensional grid size.
     constexpr thread_index_type max_grid_x = std::numeric_limits<size_type>::max();
@@ -200,22 +220,29 @@ void reduce_group_columns(grouped_rows const& grouped,
         max_columns = std::min(max_columns, max_grid_x * segments_per_block / segments);
       }
     };
-    limit_columns(num_warp_groups < num_groups ? num_groups : 0, reduction_block_size);
-    limit_columns(num_direct_groups, reduction_block_size / cudf::detail::warp_size);
+    if (!long_groups_only) {
+      limit_columns(num_warp_groups < num_groups ? num_groups : 0, reduction_block_size);
+      limit_columns(num_direct_groups, reduction_block_size / cudf::detail::warp_size);
+    }
     limit_columns(num_long_groups > 0 ? num_chunks : 0, 1);
     limit_columns(num_long_groups, 1);
     if (columns.size() > max_columns) {
       for (size_type first = 0; first < columns.size();) {
         auto const count =
           static_cast<size_type>(std::min(max_columns, thread_index_type{columns.size() - first}));
-        reduce_group_columns(
-          grouped, reduction_columns{columns.columns + first, count}, op, init, stream, mr);
+        reduce_group_columns(grouped,
+                             reduction_columns{columns.columns + first, count},
+                             op,
+                             init,
+                             stream,
+                             mr,
+                             long_groups_only);
         first += count;
       }
       return;
     }
   }
-  if (num_warp_groups < num_groups) {
+  if (!long_groups_only && num_warp_groups < num_groups) {
     auto const config = cudf::detail::grid_1d{
       static_cast<thread_index_type>(num_groups) * columns.size(), reduction_block_size};
     reduce_small_groups_kernel<<<config.num_blocks,
@@ -225,12 +252,13 @@ void reduce_group_columns(grouped_rows const& grouped,
     CUDF_CUDA_TRY(cudaGetLastError());
   }
   auto const group_ids = grouped.warp_groups.begin();
-  if (num_direct_groups > 0) {
+  if (!long_groups_only && num_direct_groups > 0) {
     reduce_segments<cudf::detail::warp_size>(
       num_direct_groups,
       cuda::make_permutation_iterator(grouped.offsets.begin(), group_ids),
       cuda::make_permutation_iterator(grouped.offsets.begin() + 1, group_ids),
       columns,
+      group_ids,
       group_ids,
       op,
       init,
@@ -245,6 +273,15 @@ void reduce_group_columns(grouped_rows const& grouped,
   auto const ends = cuda::transform_iterator{
     grouped.chunk_ranges.begin(),
     [] __device__(cuda::std::array<size_type, 2> const& range) -> size_type { return range[1]; }};
+  auto const chunk_groups = cuda::transform_iterator{
+    grouped.chunk_order.begin(),
+    [group_chunks     = grouped.group_chunks.begin(),
+     group_chunks_end = grouped.group_chunks.end(),
+     long_group_ids   = group_ids + num_direct_groups] __device__(size_type chunk) -> size_type {
+      auto const index =
+        cuda::std::upper_bound(group_chunks, group_chunks_end, chunk) - group_chunks - 1;
+      return long_group_ids[index];
+    }};
   auto const reduce_partials = [&](auto first_columns, auto final_columns) {
     reduce_segments<reduction_block_size>(
       num_chunks,
@@ -252,6 +289,7 @@ void reduce_group_columns(grouped_rows const& grouped,
       cuda::make_permutation_iterator(ends, grouped.chunk_order.begin()),
       first_columns,
       grouped.chunk_order.begin(),
+      chunk_groups,
       op,
       init,
       stream);
@@ -259,6 +297,7 @@ void reduce_group_columns(grouped_rows const& grouped,
                                           grouped.group_chunks.begin(),
                                           grouped.group_chunks.begin() + 1,
                                           final_columns,
+                                          group_ids + num_direct_groups,
                                           group_ids + num_direct_groups,
                                           op,
                                           init,

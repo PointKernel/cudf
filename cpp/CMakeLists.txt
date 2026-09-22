@@ -742,45 +742,35 @@ add_library(
   src/groupby/hash/compute_single_pass_aggs.cpp
   src/groupby/hash/compute_single_pass_aggs.cu
   src/groupby/hash/extract_single_pass_aggs.cpp
+  src/groupby/hash/group_bitwise.cu
+  src/groupby/hash/group_collect.cu
+  src/groupby/hash/group_correlation.cu
+  src/groupby/hash/group_count_scan.cu
+  src/groupby/hash/group_histogram.cu
   src/groupby/hash/group_keys.cu
+  src/groupby/hash/group_max_scan.cu
+  src/groupby/hash/group_merge_lists.cu
+  src/groupby/hash/group_merge_m2.cu
+  src/groupby/hash/group_min_scan.cu
+  src/groupby/hash/group_nth_element.cu
+  src/groupby/hash/group_nunique.cu
+  src/groupby/hash/group_product_scan.cu
+  src/groupby/hash/group_quantiles.cu
+  src/groupby/hash/group_rank_scan.cu
+  src/groupby/hash/group_replace_nulls.cu
+  src/groupby/hash/group_sum_scan.cu
+  src/groupby/hash/group_topk.cu
   src/groupby/hash/groupby.cu
   src/groupby/hash/hash_compound_agg_finalizer.cu
+  src/groupby/hash/host_udf_aggregation.cpp
   src/groupby/hash/output_utils.cu
+  src/groupby/hash/scan.cpp
   src/groupby/hash/single_pass_argminmax.cu
+  src/groupby/hash/single_pass_m2.cu
   src/groupby/hash/single_pass_minmax.cu
   src/groupby/hash/single_pass_product.cu
   src/groupby/hash/single_pass_sum_overflow.cu
   src/groupby/hash/single_pass_sums.cu
-  src/groupby/segmented/aggregate.cpp
-  src/groupby/segmented/group_argmax.cu
-  src/groupby/segmented/group_argmin.cu
-  src/groupby/segmented/group_bitwise.cu
-  src/groupby/segmented/group_collect.cu
-  src/groupby/segmented/group_correlation.cu
-  src/groupby/segmented/group_count.cu
-  src/groupby/segmented/group_count_scan.cu
-  src/groupby/segmented/group_histogram.cu
-  src/groupby/segmented/group_m2.cu
-  src/groupby/segmented/group_max.cu
-  src/groupby/segmented/group_max_scan.cu
-  src/groupby/segmented/group_merge_lists.cu
-  src/groupby/segmented/group_merge_m2.cu
-  src/groupby/segmented/group_min.cu
-  src/groupby/segmented/group_min_scan.cu
-  src/groupby/segmented/group_nth_element.cu
-  src/groupby/segmented/group_nunique.cu
-  src/groupby/segmented/group_product.cu
-  src/groupby/segmented/group_product_scan.cu
-  src/groupby/segmented/group_quantiles.cu
-  src/groupby/segmented/group_rank_scan.cu
-  src/groupby/segmented/group_replace_nulls.cu
-  src/groupby/segmented/group_std.cu
-  src/groupby/segmented/group_sum.cu
-  src/groupby/segmented/group_sum_overflow.cu
-  src/groupby/segmented/group_sum_scan.cu
-  src/groupby/segmented/group_topk.cu
-  src/groupby/segmented/host_udf_aggregation.cpp
-  src/groupby/segmented/scan.cpp
   src/groupby/streaming_groupby.cpp
   src/groupby/streaming_groupby/aggregate.cu
   src/groupby/streaming_groupby/impl.cu

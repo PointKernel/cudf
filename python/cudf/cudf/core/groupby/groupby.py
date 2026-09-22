@@ -3125,7 +3125,7 @@ class GroupBy(Serializable, Reducible, Scannable):
     def _cov_or_corr(self, func, method_name):
         """
         Internal function that is called by either corr() or cov()
-        for sort groupby correlation and covariance computations,
+        for groupby correlation and covariance computations,
         respectively.
         """
         # create expanded dataframe consisting all combinations of the

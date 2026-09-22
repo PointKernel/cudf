@@ -4,9 +4,10 @@
  */
 
 #include "groupby/common/utils.hpp"
-#include "groupby/segmented/functors.hpp"
-#include "groupby/segmented/group_reductions.hpp"
-#include "groupby/segmented/group_scan.hpp"
+#include "groupby/hash/compute_groupby.hpp"
+#include "groupby/hash/functors.hpp"
+#include "groupby/hash/group_reductions.hpp"
+#include "groupby/hash/group_scan.hpp"
 
 #include <cudf/aggregation.hpp>
 #include <cudf/column/column_view.hpp>
@@ -166,16 +167,16 @@ void scan_result_functor::operator()<aggregation::RANK>(aggregation const& agg)
                           stream,
                           cudf::get_current_device_resource_ref());
   if (rank_agg._percentage != rank_percentage::NONE) {
-    auto count = get_grouped_values().nullable() and rank_agg._null_handling == null_policy::EXCLUDE
-                   ? detail::group_count_valid(get_grouped_values(),
-                                               helper.group_labels(stream),
-                                               helper.num_groups(stream),
-                                               stream,
-                                               cudf::get_current_device_resource_ref())
-                   : detail::group_count_all(helper.group_offsets(stream),
-                                             helper.num_groups(stream),
-                                             stream,
-                                             cudf::get_current_device_resource_ref());
+    auto const null_handling = values.nullable() && rank_agg._null_handling == null_policy::EXCLUDE
+                                 ? null_policy::EXCLUDE
+                                 : null_policy::INCLUDE;
+    aggregation_request request;
+    request.values = values;
+    request.aggregations.push_back(make_count_aggregation<groupby_aggregation>(null_handling));
+    cudf::detail::result_cache counts(1);
+    hash::compute_aggregations(
+      std::span{&request, 1}, helper, counts, stream, cudf::get_current_device_resource_ref());
+    auto count = counts.release_result(values, *request.aggregations.front());
     result     = detail::group_rank_to_percentage(rank_agg._method,
                                               rank_agg._percentage,
                                               *result,
@@ -204,9 +205,7 @@ std::pair<std::unique_ptr<table>, std::vector<aggregation_result>> groupby::scan
 {
   helper().grouped_order(stream);
 
-  // We're going to start by creating a cache of results so that aggs that
-  // depend on other aggs will not have to be recalculated. e.g. mean depends on
-  // sum and count. std depends on mean and count
+  // Reuse repeated scan results across requests.
   cudf::detail::result_cache cache(requests.size());
 
   for (auto const& request : requests) {

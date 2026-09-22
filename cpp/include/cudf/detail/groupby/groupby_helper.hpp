@@ -10,6 +10,7 @@
 #include <cudf/table/table_view.hpp>
 #include <cudf/types.hpp>
 #include <cudf/utilities/memory_resource.hpp>
+#include <cudf/utilities/span.hpp>
 
 #include <rmm/device_uvector.hpp>
 
@@ -21,7 +22,8 @@ namespace cudf {
 namespace groupby::detail {
 namespace hash {
 struct grouped_keys;
-}
+struct grouped_rows;
+}  // namespace hash
 
 /**
  * @brief Helper class for computing grouped operations
@@ -31,8 +33,7 @@ struct grouped_keys;
  * 1. On-demand grouping or sorting of a value column based on `keys`
  *   which is provided at construction
  * 2. Group offsets: starting offsets of all groups in grouped key table
- * 3. Group valid sizes: The number of valid values in each group in a sorted
- *   value column
+ * 3. Group rows: original row indices and scheduling metadata for direct reductions
  */
 struct groupby_helper {
   using index_vector       = rmm::device_uvector<size_type>;
@@ -160,6 +161,20 @@ struct groupby_helper {
   column_view grouped_order(cuda::stream_ref stream);
 
   /**
+   * @brief Get grouped row indices without requiring input order within each group.
+   *
+   * The returned span is invalidated if a later request materializes stable row order.
+   */
+  device_span<size_type const> unordered_grouped_order(cuda::stream_ref stream);
+
+  /**
+   * @brief Get cached row indices, offsets, and scheduling arrays for direct reductions.
+   *
+   * The returned reference is invalidated if a later request materializes stable row order.
+   */
+  hash::grouped_rows const& reduction_groups(cuda::stream_ref stream);
+
+  /**
    * @brief Get each group's offset into the grouped order of `keys`.
    *
    * Computes and stores the group offsets on first invocation and returns
@@ -213,11 +228,12 @@ struct groupby_helper {
   column_ptr _unsorted_keys_labels;             ///< Labels in input order, null for excluded rows
   table_view _keys;                             ///< Input grouping keys
   std::unique_ptr<hash::grouped_keys> _groups;  ///< HashCSR grouping metadata
-  index_vector_ptr _group_labels;               ///< Labels in grouped order
-  sorted _keys_pre_sorted;                      ///< Whether key groups are already contiguous
-  null_policy _include_null_keys;               ///< Whether to retain null key rows
-  bool _is_presorted;   ///< Whether grouped values can use the input directly
-  bool _stable{false};  ///< Whether rows within each group are in input order
+  std::unique_ptr<hash::grouped_rows> _reduction_groups;  ///< Cached reduction scheduling
+  index_vector_ptr _group_labels;                         ///< Labels in grouped order
+  sorted _keys_pre_sorted;         ///< Whether key groups are already contiguous
+  null_policy _include_null_keys;  ///< Whether to retain null key rows
+  bool _is_presorted;              ///< Whether grouped values can use the input directly
+  bool _stable{false};             ///< Whether rows within each group are in input order
 };
 
 }  // namespace groupby::detail

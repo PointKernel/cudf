@@ -168,7 +168,7 @@ TYPED_TEST(FixedPointTestBothReps, GroupBySortMeanDecimalAsValue)
 
     auto agg = cudf::make_mean_aggregation<cudf::groupby_aggregation>();
     test_single_agg(
-      keys, vals, expect_keys, expect_vals_min, std::move(agg), force_materialized_values::YES);
+      keys, vals, expect_keys, expect_vals_min, std::move(agg), include_nth_aggregation::YES);
   }
 }
 

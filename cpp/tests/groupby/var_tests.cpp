@@ -161,8 +161,8 @@ TYPED_TEST(groupby_var_test, dictionary)
                   cudf::make_variance_aggregation<cudf::groupby_aggregation>());
 }
 
-// Direct and segmented reductions must produce the same groupby variance.
-TYPED_TEST(groupby_var_test, DirectVsSegmented)
+// Adding quantiles to a request must preserve its variance result.
+TYPED_TEST(groupby_var_test, SeparateAndCombinedRequests)
 {
   using K = int32_t;
   using V = double;
@@ -181,7 +181,7 @@ TYPED_TEST(groupby_var_test, DirectVsSegmented)
 
   auto result1 = gb_obj.aggregate(requests);
 
-  // This aggregation requires materialized grouped values.
+  // Add an aggregation that sorts values within each group.
   auto agg2 = cudf::make_quantile_aggregation<cudf::groupby_aggregation>({0.25});
   requests[0].aggregations.push_back(std::move(agg2));
 

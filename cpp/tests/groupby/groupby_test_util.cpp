@@ -49,7 +49,7 @@ void test_single_agg(cudf::column_view const& keys,
                      cudf::column_view const& expect_keys,
                      cudf::column_view const& expect_vals,
                      std::unique_ptr<cudf::groupby_aggregation>&& agg,
-                     force_materialized_values materialize_values,
+                     include_nth_aggregation include_nth,
                      cudf::null_policy include_null_keys,
                      cudf::sorted keys_are_sorted,
                      std::vector<cudf::order> const& column_order,
@@ -84,8 +84,8 @@ void test_single_agg(cudf::column_view const& keys,
     requests[0].aggregations.push_back(std::unique_ptr<cudf::groupby_aggregation>{
       dynamic_cast<cudf::groupby_aggregation*>(agg->clone().release())});
 
-    if (materialize_values == force_materialized_values::YES) {
-      // Exercise reductions over materialized grouped values.
+    if (include_nth == include_nth_aggregation::YES) {
+      // Exercise the same reductions in mixed aggregation requests.
       requests[0].aggregations.push_back(
         cudf::make_nth_element_aggregation<cudf::groupby_aggregation>(0));
     }
@@ -160,13 +160,13 @@ void test_sum_agg(cudf::column_view const& keys,
                   cudf::column_view const& expected_values,
                   std::source_location const& location)
 {
-  auto const do_test = [&](auto const materialize_values_option) {
+  auto const do_test = [&](auto const include_nth_option) {
     test_single_agg(keys,
                     values,
                     expected_keys,
                     expected_values,
                     cudf::make_sum_aggregation<cudf::groupby_aggregation>(),
-                    materialize_values_option,
+                    include_nth_option,
                     cudf::null_policy::INCLUDE,
                     cudf::sorted::NO,
                     {},
@@ -175,8 +175,8 @@ void test_sum_agg(cudf::column_view const& keys,
                     test_streaming::NO,
                     location);
   };
-  do_test(force_materialized_values::YES);
-  do_test(force_materialized_values::NO);
+  do_test(include_nth_aggregation::YES);
+  do_test(include_nth_aggregation::NO);
 }
 
 void test_single_scan(cudf::column_view const& keys,

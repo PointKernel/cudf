@@ -53,8 +53,6 @@ struct store_result_functor {
   {
     if (is_presorted()) { return values; }
 
-    // TODO (dm): After implementing single pass multi-agg, explore making a
-    //            cache of all grouped value columns rather than one at a time
     // Input order is required by NTH_ELEMENT, COLLECT_LIST and host UDFs even when a prior
     // aggregation on the same values requested a value-sorted view.
     return grouped_values ? grouped_values->view()

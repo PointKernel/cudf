@@ -70,7 +70,18 @@ std::unique_ptr<column> count_groups(reduction_context const& ctx,
                                      cuda::stream_ref stream,
                                      cudf::memory_resources mr);
 
-// Kind-specific TUs explicitly instantiate this bridge; the frontend needs no reducer definition.
+/// Compute centered M2 across compatible columns, optionally returning each
+/// column's valid count. When counts are included, results and intermediate
+/// flags alternate M2 and COUNT_VALID.
+std::vector<std::unique_ptr<column>> compute_m2_reductions(
+  host_span<reduction_context const> contexts,
+  std::span<int8_t const> is_intermediate,
+  bool include_counts,
+  cuda::stream_ref stream,
+  cudf::memory_resources mr);
+
+// Kind-specific TUs explicitly instantiate this bridge; the frontend needs no
+// reducer definition.
 template <aggregation::Kind K>
 std::unique_ptr<column> compute_reduction(reduction_context const& ctx,
                                           cuda::stream_ref stream,

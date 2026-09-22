@@ -6,24 +6,20 @@
 #include "compute_groupby.hpp"
 #include "compute_single_pass_aggs.hpp"
 #include "extract_single_pass_aggs.hpp"
-#include "group_keys.hpp"
-#include "groupby/common/utils.hpp"
 #include "hash_compound_agg_finalizer.hpp"
-#include "helpers.cuh"
 
 #include <cudf/detail/aggregation/aggregation.hpp>
-#include <cudf/detail/gather.hpp>
+#include <cudf/detail/groupby/groupby_helper.hpp>
 #include <cudf/types.hpp>
-#include <cudf/utilities/error.hpp>
 #include <cudf/utilities/memory_resource.hpp>
 #include <cudf/utilities/span.hpp>
 
-#include <rmm/device_buffer.hpp>
 #include <rmm/device_uvector.hpp>
 
-#include <cuda/std/cstdint>
+#include <cuda/std/array>
 #include <cuda/stream>
 
+#include <algorithm>
 #include <cstddef>
 #include <functional>
 #include <unordered_set>
@@ -38,10 +34,10 @@ namespace {
 // extracted reductions with the same equality so an earlier compound request cannot choose the
 // resource or nullability of a later requested result, or allocate a result that the cache drops.
 auto extract_hash_groupby_aggs(std::span<aggregation_request const> requests,
-                               cuda::stream_ref stream)
+                               cudf::detail::result_cache const& cache,
+                               cuda::stream_ref stream,
+                               bool expose_intermediates)
 {
-  if (requests.size() <= 1) { return extract_single_pass_aggs(requests, stream); }
-
   using aggregation_set =
     std::unordered_set<std::pair<column_view, std::reference_wrapper<aggregation const>>,
                        cudf::detail::pair_column_aggregation_hash,
@@ -54,17 +50,18 @@ auto extract_hash_groupby_aggs(std::span<aggregation_request const> requests,
   }
 
   auto [values, kinds, aggs, is_intermediate, has_compound] =
-    extract_single_pass_aggs(requests, stream);
+    extract_single_pass_aggs(requests, stream, true);
   aggregation_set extracted;
   std::vector<column_view> unique_values;
   unique_values.reserve(aggs.size());
   for (std::size_t i = 0; i < aggs.size(); ++i) {
+    if (cache.has_result(values.column(i), *aggs[i])) { continue; }
     auto const key =
       std::pair<column_view, std::reference_wrapper<aggregation const>>{values.column(i), *aggs[i]};
     if (!extracted.insert(key).second) { continue; }
     auto const output       = unique_values.size();
     kinds[output]           = kinds[i];
-    is_intermediate[output] = !requested.contains(key);
+    is_intermediate[output] = !expose_intermediates && !requested.contains(key);
     if (output != i) { aggs[output] = std::move(aggs[i]); }
     unique_values.push_back(values.column(i));
   }
@@ -80,44 +77,26 @@ auto extract_hash_groupby_aggs(std::span<aggregation_request const> requests,
 
 }  // namespace
 
-template <typename Equal, typename Hash>
-std::unique_ptr<table> compute_groupby(table_view const& keys,
-                                       std::span<aggregation_request const> requests,
-                                       bool skip_rows_with_nulls,
-                                       Equal const& d_row_equal,
-                                       Hash const& d_row_hash,
-                                       cudf::detail::result_cache* cache,
-                                       cuda::stream_ref stream,
-                                       cudf::memory_resources mr)
+void compute_aggregations(std::span<aggregation_request const> requests,
+                          groupby_helper& helper,
+                          cudf::detail::result_cache& cache,
+                          cuda::stream_ref stream,
+                          cudf::memory_resources mr,
+                          bool expose_intermediates)
 {
-  auto const num_rows            = keys.num_rows();
-  auto const temp_mr             = mr.get_temporary_mr();
-  auto const temporary_resources = cudf::memory_resources{temp_mr, temp_mr};
+  if (std::all_of(requests.begin(), requests.end(), [&](auto const& request) {
+        return std::all_of(request.aggregations.begin(),
+                           request.aggregations.end(),
+                           [&](auto const& agg) { return cache.has_result(request.values, *agg); });
+      })) {
+    return;
+  }
 
-  [[maybe_unused]] auto [row_bitmask_data, row_bitmask] =
-    skip_rows_with_nulls
-      ? cudf::groupby::detail::compute_row_bitmask(keys, stream, temporary_resources)
-      : std::pair<rmm::device_buffer, bitmask_type const*>{rmm::device_buffer{0, stream, temp_mr},
-                                                           nullptr};
+  auto const temp_mr = mr.get_temporary_mr();
 
-  auto const groups = group_keys(
-    num_rows, row_bitmask, d_row_equal, d_row_hash, !requests.empty(), stream, temporary_resources);
-
-  auto const gather_keys = [&] {
-    return cudf::detail::gather(keys,
-                                groups.key_rows,
-                                out_of_bounds_policy::DONT_CHECK,
-                                cudf::negative_index_policy::NOT_ALLOWED,
-                                stream,
-                                mr);
-  };
-
-  // In case of no requests, we still need to generate a set of unique keys.
-  if (requests.empty()) { return gather_keys(); }
-
-  // Compute all single pass aggs first.
+  // Compute only missing single-pass results, preserving the extracted batching and fusion order.
   auto const [values, agg_kinds, aggs, is_agg_intermediate, has_compound_aggs] =
-    extract_hash_groupby_aggs(requests, stream);
+    extract_hash_groupby_aggs(requests, cache, stream, expose_intermediates);
 
   // Counts without null filtering come directly from the group offsets.
   auto const needs_reduction = [&] {
@@ -129,75 +108,40 @@ std::unique_ptr<table> compute_groupby(table_view const& keys,
     }
     return false;
   }();
-  auto const grouped =
-    needs_reduction
-      ? make_grouped_rows(groups.grouped_rows, groups.group_offsets, stream, temporary_resources)
-      : grouped_rows{groups.grouped_rows,
-                     groups.group_offsets,
+  if (values.num_columns() != 0) {
+    auto results = [&] {
+      if (needs_reduction) {
+        return compute_single_pass_aggs(
+          values, agg_kinds, is_agg_intermediate, helper.reduction_groups(stream), stream, mr);
+      }
+      auto const grouped =
+        grouped_rows{helper.unordered_grouped_order(stream),
+                     helper.group_offsets(stream),
                      rmm::device_uvector<size_type>{0, stream, temp_mr},
                      rmm::device_uvector<size_type>{0, stream, temp_mr},
                      rmm::device_uvector<cuda::std::array<size_type, 2>>{0, stream, temp_mr},
                      rmm::device_uvector<size_type>{0, stream, temp_mr}};
-  auto results =
-    compute_single_pass_aggs(values, agg_kinds, is_agg_intermediate, grouped, stream, mr);
-  for (std::size_t i = 0; i < results.size(); ++i) {
-    cache->add_result(values.column(i), *aggs[i], std::move(results[i]));
+      return compute_single_pass_aggs(values, agg_kinds, is_agg_intermediate, grouped, stream, mr);
+    }();
+    for (std::size_t i = 0; i < results.size(); ++i) {
+      cache.add_result(values.column(i), *aggs[i], std::move(results[i]));
+    }
   }
 
   if (has_compound_aggs) {
-    // Requested M2 results must be cached on the output resource before VARIANCE or STD asks
-    // for an intermediate M2, regardless of the order of requests on a shared values column.
-    for (auto const& request : requests) {
-      auto const finalizer =
-        hash_compound_agg_finalizer(request.values, cache, row_bitmask, stream, mr);
-      for (auto const& agg : request.aggregations) {
-        if (agg->kind == aggregation::M2) {
-          cudf::detail::aggregation_dispatcher(agg->kind, finalizer, *agg);
-        }
-      }
-    }
     for (auto const& request : requests) {
       auto const& agg_v = request.aggregations;
       auto const& col   = request.values;
 
       // The finalizers only combine the single-pass results with linear transformations such as
       // addition/multiplication (e.g. for variance/stddev); they do not aggregate further.
-      auto const finalizer = hash_compound_agg_finalizer(col, cache, row_bitmask, stream, mr);
+      auto const finalizer = hash_compound_agg_finalizer(col, &cache, nullptr, stream, mr);
       for (auto&& agg : agg_v) {
-        if (agg->kind == aggregation::VARIANCE || agg->kind == aggregation::STD) {
-          // Explicit M2 outputs were finalized above. Any missing M2 is only an intermediate
-          // for this ordinary groupby; the shared finalizer also serves streaming groupby.
-          auto const m2_agg = make_m2_aggregation();
-          auto const m2_finalizer =
-            hash_compound_agg_finalizer(col, cache, row_bitmask, stream, temporary_resources);
-          cudf::detail::aggregation_dispatcher(m2_agg->kind, m2_finalizer, *m2_agg);
-        }
+        if (cache.has_result(col, *agg)) { continue; }
         cudf::detail::aggregation_dispatcher(agg->kind, finalizer, *agg);
       }
     }
   }
-
-  return gather_keys();
 }
-
-template std::unique_ptr<table> compute_groupby<row_comparator_t, row_hash_t>(
-  table_view const& keys,
-  std::span<aggregation_request const> requests,
-  bool skip_rows_with_nulls,
-  row_comparator_t const& d_row_equal,
-  row_hash_t const& d_row_hash,
-  cudf::detail::result_cache* cache,
-  cuda::stream_ref stream,
-  cudf::memory_resources mr);
-
-template std::unique_ptr<table> compute_groupby<nullable_row_comparator_t, row_hash_t>(
-  table_view const& keys,
-  std::span<aggregation_request const> requests,
-  bool skip_rows_with_nulls,
-  nullable_row_comparator_t const& d_row_equal,
-  row_hash_t const& d_row_hash,
-  cudf::detail::result_cache* cache,
-  cuda::stream_ref stream,
-  cudf::memory_resources mr);
 
 }  // namespace cudf::groupby::detail::hash

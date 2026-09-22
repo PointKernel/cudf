@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-#include "groupby/segmented/group_scan_util.cuh"
+#include "groupby/hash/group_scan_util.cuh"
 
 #include <cudf/utilities/memory_resource.hpp>
 
@@ -12,14 +12,14 @@
 namespace cudf {
 namespace groupby {
 namespace detail {
-std::unique_ptr<column> min_scan(column_view const& values,
+std::unique_ptr<column> sum_scan(column_view const& values,
                                  size_type num_groups,
                                  cudf::device_span<size_type const> group_labels,
                                  cuda::stream_ref stream,
                                  rmm::device_async_resource_ref mr)
 {
   return type_dispatcher(values.type(),
-                         group_scan_dispatcher<aggregation::MIN>{},
+                         group_scan_dispatcher<aggregation::SUM>{},
                          values,
                          num_groups,
                          group_labels,

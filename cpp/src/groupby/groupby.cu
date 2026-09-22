@@ -49,22 +49,6 @@ groupby::groupby(table_view const& keys,
 {
 }
 
-// Select reductions over the HashCSR permutation or materialized grouped values.
-std::pair<std::unique_ptr<table>, std::vector<aggregation_result>> groupby::dispatch_aggregation(
-  std::span<aggregation_request const> requests,
-  cuda::stream_ref stream,
-  rmm::device_async_resource_ref mr)
-{
-  // Use the direct reductions when they support every request. Materialized grouped values
-  // serve the remaining aggregations and reuse any grouping already cached by this object.
-  if (_keys_are_sorted == sorted::NO and not _helper and
-      detail::hash::can_use_single_pass_aggregations(requests)) {
-    return detail::hash::groupby(_keys, requests, _include_null_keys, stream, mr);
-  } else {
-    return aggregate_grouped(requests, stream, mr);
-  }
-}
-
 // Destructor
 // Needs to be in source file because groupby_helper was forward declared
 groupby::~groupby() = default;
@@ -228,7 +212,7 @@ std::pair<std::unique_ptr<table>, std::vector<aggregation_result>> groupby::aggr
 
   if (_keys.num_rows() == 0) { return {empty_like(_keys), empty_results(requests, stream, mr)}; }
 
-  return dispatch_aggregation(requests, stream, mr);
+  return detail::hash::groupby(requests, helper(), stream, mr);
 }
 
 // Compute scan requests

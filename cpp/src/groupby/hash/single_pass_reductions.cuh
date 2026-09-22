@@ -45,6 +45,12 @@
 
 namespace cudf::groupby::detail::hash {
 
+// Keep the nested row comparator and its reduction instantiation in the extrema TU.
+std::unique_ptr<column> compute_nested_argminmax(reduction_context const& ctx,
+                                                 bool is_argmin,
+                                                 cuda::stream_ref stream,
+                                                 cudf::memory_resources mr);
+
 /// Reads a fixed-width element, going through the keys when the column is a dictionary.
 template <typename T>
 struct value_accessor {
@@ -239,23 +245,27 @@ struct grouped_reduction_fn {
                                      cuda::stream_ref stream,
                                      cudf::memory_resources mr) const
   {
-    auto result = make_size_type_column(ctx, stream, mr);
-    if (ctx.num_groups == 0) { return result; }
+    if constexpr (cudf::is_nested<T>()) {
+      return compute_nested_argminmax(ctx, K == aggregation::ARGMIN, stream, mr);
+    } else {
+      auto result = make_size_type_column(ctx, stream, mr);
+      if (ctx.num_groups == 0) { return result; }
 
-    // The grouped rows are the input row indices themselves, so reducing them with the
-    // element comparator yields the input index of each group's extremum. The sentinel identity
-    // loses against every valid row and is left in place for all-null groups.
-    constexpr auto is_argmin = K == aggregation::ARGMIN;
-    reduce_groups(ctx.grouped,
-                  ctx.grouped.rows.begin(),
-                  result->mutable_view().begin<size_type>(),
-                  cudf::detail::element_argminmax_fn<rep_type_t<T>>{
-                    ctx.d_values, ctx.values.has_nulls(), is_argmin},
-                  is_argmin ? cudf::detail::ARGMIN_SENTINEL : cudf::detail::ARGMAX_SENTINEL,
-                  stream,
-                  mr);
-    set_group_null_mask(*result, ctx, stream, mr);
-    return result;
+      // The grouped rows are the input row indices themselves, so reducing them with the
+      // element comparator yields the input index of each group's extremum. The sentinel identity
+      // loses against every valid row and is left in place for all-null groups.
+      constexpr auto is_argmin = K == aggregation::ARGMIN;
+      reduce_groups(ctx.grouped,
+                    ctx.grouped.rows.begin(),
+                    result->mutable_view().begin<size_type>(),
+                    cudf::detail::element_argminmax_fn<rep_type_t<T>>{
+                      ctx.d_values, ctx.values.has_nulls(), is_argmin},
+                    is_argmin ? cudf::detail::ARGMIN_SENTINEL : cudf::detail::ARGMAX_SENTINEL,
+                    stream,
+                    mr);
+      set_group_null_mask(*result, ctx, stream, mr);
+      return result;
+    }
   }
 
   template <typename T>

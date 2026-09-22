@@ -388,20 +388,8 @@ class groupby {
   detail::groupby_helper& helper();
 
   /**
-   * @brief Dispatches to the appropriate implementation to satisfy the
-   * aggregation requests.
+   * @brief Compute scan requests over the cached groups.
    */
-  std::pair<std::unique_ptr<table>, std::vector<aggregation_result>> dispatch_aggregation(
-    std::span<aggregation_request const> requests,
-    cuda::stream_ref stream,
-    rmm::device_async_resource_ref mr);
-
-  // Aggregations and scans over contiguous groups
-  std::pair<std::unique_ptr<table>, std::vector<aggregation_result>> aggregate_grouped(
-    std::span<aggregation_request const> requests,
-    cuda::stream_ref stream,
-    rmm::device_async_resource_ref mr);
-
   std::pair<std::unique_ptr<table>, std::vector<aggregation_result>> scan_grouped(
     std::span<scan_request const> requests,
     cuda::stream_ref stream,

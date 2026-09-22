@@ -4,6 +4,7 @@
  */
 
 #include "groupby/common/utils.hpp"
+#include "groupby/hash/compute_single_pass_aggs.hpp"
 #include "groupby/hash/group_keys.hpp"
 #include "groupby_helper_group_offsets.cuh"
 
@@ -190,6 +191,8 @@ void groupby_helper::make_stable(cuda::stream_ref stream)
 {
   build_groups(stream, true);
   if (_stable) { return; }
+  // Scheduling contains spans into the current row buffer and hints derived from its order.
+  _reduction_groups.reset();
   auto const size       = _groups->num_grouped_rows;
   auto const num_groups = _groups->num_groups;
   if (num_groups == 1) {
@@ -211,6 +214,23 @@ column_view groupby_helper::grouped_order(cuda::stream_ref stream)
 {
   make_stable(stream);
   return column_view(device_span<size_type const>{_groups->grouped_rows});
+}
+
+device_span<size_type const> groupby_helper::unordered_grouped_order(cuda::stream_ref stream)
+{
+  build_groups(stream);
+  return _groups->grouped_rows;
+}
+
+hash::grouped_rows const& groupby_helper::reduction_groups(cuda::stream_ref stream)
+{
+  if (!_reduction_groups) {
+    build_groups(stream);
+    auto const mr     = cudf::get_current_device_resource_ref();
+    _reduction_groups = std::make_unique<hash::grouped_rows>(hash::make_grouped_rows(
+      _groups->grouped_rows, _groups->group_offsets, stream, cudf::memory_resources{mr, mr}));
+  }
+  return *_reduction_groups;
 }
 
 groupby_helper::index_vector const& groupby_helper::group_offsets(cuda::stream_ref stream)
@@ -298,9 +318,19 @@ groupby_helper::column_ptr groupby_helper::unordered_grouped_values(
 std::unique_ptr<table> groupby_helper::unique_keys(cuda::stream_ref stream,
                                                    rmm::device_async_resource_ref mr)
 {
-  build_groups(stream);
+  std::unique_ptr<hash::grouped_keys> key_groups;
+  if (!_groups && _keys_pre_sorted == sorted::NO && _keys.num_rows() != 0) {
+    // Empty aggregation requests need only representatives. Keep this metadata local so a
+    // later operation can populate the helper with complete grouped rows.
+    auto const temp_mr = cudf::get_current_device_resource_ref();
+    key_groups         = std::make_unique<hash::grouped_keys>(hash::group_keys(
+      _keys, _include_null_keys, false, stream, cudf::memory_resources{temp_mr, temp_mr}));
+  } else {
+    build_groups(stream);
+  }
+  auto const& groups = key_groups ? *key_groups : *_groups;
   return cudf::detail::gather(_keys,
-                              _groups->key_rows,
+                              groups.key_rows,
                               out_of_bounds_policy::DONT_CHECK,
                               negative_index_policy::NOT_ALLOWED,
                               stream,

@@ -113,7 +113,7 @@ TYPED_TEST(groupby_keys_test, include_null_keys)
                   expect_keys,
                   expect_vals,
                   std::move(agg),
-                  force_materialized_values::NO,
+                  include_nth_aggregation::NO,
                   cudf::null_policy::INCLUDE);
 }
 
@@ -137,7 +137,7 @@ TYPED_TEST(groupby_keys_test, pre_sorted_keys)
                   expect_keys,
                   expect_vals,
                   std::move(agg),
-                  force_materialized_values::YES,
+                  include_nth_aggregation::YES,
                   cudf::null_policy::EXCLUDE,
                   cudf::sorted::YES);
 }
@@ -162,7 +162,7 @@ TYPED_TEST(groupby_keys_test, pre_sorted_keys_descending)
                   expect_keys,
                   expect_vals,
                   std::move(agg),
-                  force_materialized_values::YES,
+                  include_nth_aggregation::YES,
                   cudf::null_policy::EXCLUDE,
                   cudf::sorted::YES,
                   {cudf::order::DESCENDING});
@@ -189,7 +189,7 @@ TYPED_TEST(groupby_keys_test, pre_sorted_keys_nullable)
                   expect_keys,
                   expect_vals,
                   std::move(agg),
-                  force_materialized_values::YES,
+                  include_nth_aggregation::YES,
                   cudf::null_policy::EXCLUDE,
                   cudf::sorted::YES);
 }
@@ -217,7 +217,7 @@ TYPED_TEST(groupby_keys_test, pre_sorted_keys_nulls_before_include_nulls)
                   expect_keys,
                   expect_vals,
                   std::move(agg),
-                  force_materialized_values::YES,
+                  include_nth_aggregation::YES,
                   cudf::null_policy::INCLUDE,
                   cudf::sorted::YES);
 }
@@ -353,7 +353,7 @@ TEST_F(groupby_dictionary_keys_test, basic)
                   expect_keys,
                   expect_vals,
                   cudf::make_sum_aggregation<cudf::groupby_aggregation>(),
-                  force_materialized_values::YES);
+                  include_nth_aggregation::YES);
 }
 
 struct groupby_cache_test : public cudf::test::BaseFixture {};
@@ -380,7 +380,7 @@ TEST_F(groupby_cache_test, duplicate_agggregations)
   // hash groupby
   EXPECT_NO_THROW(gb_obj.aggregate(requests));
 
-  // Exercise reductions over materialized grouped values.
+  // Exercise the same reductions in mixed aggregation requests.
   requests[0].aggregations.push_back(
     cudf::make_nth_element_aggregation<cudf::groupby_aggregation>(0));
   EXPECT_NO_THROW(gb_obj.aggregate(requests));
@@ -410,7 +410,7 @@ TEST_F(groupby_cache_test, duplicate_columns)
   // hash groupby
   EXPECT_NO_THROW(gb_obj.aggregate(requests));
 
-  // Exercise reductions over materialized grouped values.
+  // Exercise the same reductions in mixed aggregation requests.
   requests[0].aggregations.push_back(
     cudf::make_nth_element_aggregation<cudf::groupby_aggregation>(0));
   EXPECT_NO_THROW(gb_obj.aggregate(requests));

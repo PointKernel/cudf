@@ -34,7 +34,7 @@ TYPED_TEST(groupby_count_test, basic)
 
   auto agg1 = cudf::make_count_aggregation<cudf::groupby_aggregation>();
   test_single_agg(
-    keys, vals, expect_keys, expect_vals, std::move(agg1), force_materialized_values::YES);
+    keys, vals, expect_keys, expect_vals, std::move(agg1), include_nth_aggregation::YES);
 
   auto agg2 = cudf::make_count_aggregation<cudf::groupby_aggregation>(cudf::null_policy::INCLUDE);
   test_single_agg(keys, vals, expect_keys, expect_vals, std::move(agg2));
@@ -56,7 +56,7 @@ TYPED_TEST(groupby_count_test, empty_cols)
 
   auto agg1 = cudf::make_count_aggregation<cudf::groupby_aggregation>();
   test_single_agg(
-    keys, vals, expect_keys, expect_vals, std::move(agg1), force_materialized_values::YES);
+    keys, vals, expect_keys, expect_vals, std::move(agg1), include_nth_aggregation::YES);
 }
 
 TYPED_TEST(groupby_count_test, zero_valid_keys)
@@ -75,7 +75,7 @@ TYPED_TEST(groupby_count_test, zero_valid_keys)
 
   auto agg1 = cudf::make_count_aggregation<cudf::groupby_aggregation>();
   test_single_agg(
-    keys, vals, expect_keys, expect_vals, std::move(agg1), force_materialized_values::YES);
+    keys, vals, expect_keys, expect_vals, std::move(agg1), include_nth_aggregation::YES);
 
   auto agg2 = cudf::make_count_aggregation<cudf::groupby_aggregation>(cudf::null_policy::INCLUDE);
   test_single_agg(keys, vals, expect_keys, expect_vals, std::move(agg2));
@@ -97,7 +97,7 @@ TYPED_TEST(groupby_count_test, zero_valid_values)
 
   auto agg1 = cudf::make_count_aggregation<cudf::groupby_aggregation>();
   test_single_agg(
-    keys, vals, expect_keys, expect_vals, std::move(agg1), force_materialized_values::YES);
+    keys, vals, expect_keys, expect_vals, std::move(agg1), include_nth_aggregation::YES);
 
   cudf::test::fixed_width_column_wrapper<R> expect_vals2{3};
   auto agg2 = cudf::make_count_aggregation<cudf::groupby_aggregation>(cudf::null_policy::INCLUDE);
@@ -127,7 +127,7 @@ TYPED_TEST(groupby_count_test, null_keys_and_values)
 
   auto agg1 = cudf::make_count_aggregation<cudf::groupby_aggregation>();
   test_single_agg(
-    keys, vals, expect_keys, expect_vals, std::move(agg1), force_materialized_values::YES);
+    keys, vals, expect_keys, expect_vals, std::move(agg1), include_nth_aggregation::YES);
 
   cudf::test::fixed_width_column_wrapper<R> expect_vals2{3, 4, 2, 1};
   auto agg2 = cudf::make_count_aggregation<cudf::groupby_aggregation>(cudf::null_policy::INCLUDE);
@@ -153,7 +153,7 @@ TEST_F(groupby_count_string_test, basic)
 
   auto agg1 = cudf::make_count_aggregation<cudf::groupby_aggregation>();
   test_single_agg(
-    keys, vals, expect_keys, expect_vals, std::move(agg1), force_materialized_values::YES);
+    keys, vals, expect_keys, expect_vals, std::move(agg1), include_nth_aggregation::YES);
 }
 // clang-format on
 
@@ -183,7 +183,7 @@ TYPED_TEST(GroupByCountFixedPointTest, GroupByCount)
 
   auto agg1 = cudf::make_count_aggregation<cudf::groupby_aggregation>();
   test_single_agg(
-    keys, vals, expect_keys, expect_vals, std::move(agg1), force_materialized_values::YES);
+    keys, vals, expect_keys, expect_vals, std::move(agg1), include_nth_aggregation::YES);
 
   auto agg2 = cudf::make_count_aggregation<cudf::groupby_aggregation>(cudf::null_policy::INCLUDE);
   test_single_agg(keys, vals, expect_keys, expect_vals, std::move(agg2));
@@ -212,5 +212,5 @@ TEST_F(groupby_dictionary_count_test, basic)
                   expect_keys,
                   expect_vals,
                   cudf::make_count_aggregation<cudf::groupby_aggregation>(),
-                  force_materialized_values::YES);
+                  include_nth_aggregation::YES);
 }

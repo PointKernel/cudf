@@ -64,9 +64,9 @@ TYPED_TEST(groupby_sum_overflow_test, Basic)
     auto agg = cudf::make_sum_overflow_aggregation<cudf::groupby_aggregation>();
     test_single_agg(keys, vals, expect_keys, *expect_vals, std::move(agg));
 
-    auto agg_sort = cudf::make_sum_overflow_aggregation<cudf::groupby_aggregation>();
+    auto agg_mixed = cudf::make_sum_overflow_aggregation<cudf::groupby_aggregation>();
     test_single_agg(
-      keys, vals, expect_keys, *expect_vals, std::move(agg_sort), force_materialized_values::YES);
+      keys, vals, expect_keys, *expect_vals, std::move(agg_mixed), include_nth_aggregation::YES);
   } else {
     // For integer types
     cudf::test::fixed_width_column_wrapper<V> vals{0, 1, 2, 3, 4, 5, 6, 7, 8, 9};
@@ -83,9 +83,9 @@ TYPED_TEST(groupby_sum_overflow_test, Basic)
     auto agg = cudf::make_sum_overflow_aggregation<cudf::groupby_aggregation>();
     test_single_agg(keys, vals, expect_keys, *expect_vals, std::move(agg));
 
-    auto agg_sort = cudf::make_sum_overflow_aggregation<cudf::groupby_aggregation>();
+    auto agg_mixed = cudf::make_sum_overflow_aggregation<cudf::groupby_aggregation>();
     test_single_agg(
-      keys, vals, expect_keys, *expect_vals, std::move(agg_sort), force_materialized_values::YES);
+      keys, vals, expect_keys, *expect_vals, std::move(agg_mixed), include_nth_aggregation::YES);
   }
 }
 
@@ -97,7 +97,7 @@ TYPED_TEST(groupby_sum_overflow_test, MixedRequestsWithTdigest)
   cudf::test::fixed_width_column_wrapper<K> keys{1, 2, 3, 1, 2, 2, 1, 3, 3, 2};
   cudf::test::fixed_width_column_wrapper<K> expect_keys{1, 2, 3};
 
-  // Co-request TDIGEST to exercise reductions over materialized grouped values,
+  // Co-request TDIGEST to exercise mixed aggregation requests,
   // then verify the SUM_OVERFLOW struct and TDIGEST results.
   auto run_and_check = [&](cudf::column_view const& vals, cudf::column_view const& expect_vals) {
     std::vector<cudf::groupby::aggregation_request> requests;
@@ -217,9 +217,9 @@ TYPED_TEST(groupby_sum_overflow_test, ZeroValidValues)
   test_single_agg(keys, vals, expect_keys, *expect_vals, std::move(agg));
 
   // Exercise segmented reductions for an all-null group.
-  auto agg_sort = cudf::make_sum_overflow_aggregation<cudf::groupby_aggregation>();
+  auto agg_mixed = cudf::make_sum_overflow_aggregation<cudf::groupby_aggregation>();
   test_single_agg(
-    keys, vals, expect_keys, *expect_vals, std::move(agg_sort), force_materialized_values::YES);
+    keys, vals, expect_keys, *expect_vals, std::move(agg_mixed), include_nth_aggregation::YES);
 }
 
 TYPED_TEST(groupby_sum_overflow_test, NullKeysAndValues)
@@ -255,9 +255,9 @@ TYPED_TEST(groupby_sum_overflow_test, NullKeysAndValues)
   test_single_agg(keys, vals, expect_keys, *expect_vals, std::move(agg));
 
   // Exercise segmented reductions with null keys and null values.
-  auto agg_sort = cudf::make_sum_overflow_aggregation<cudf::groupby_aggregation>();
+  auto agg_mixed = cudf::make_sum_overflow_aggregation<cudf::groupby_aggregation>();
   test_single_agg(
-    keys, vals, expect_keys, *expect_vals, std::move(agg_sort), force_materialized_values::YES);
+    keys, vals, expect_keys, *expect_vals, std::move(agg_mixed), include_nth_aggregation::YES);
 }
 
 TYPED_TEST(groupby_sum_overflow_test, OverflowDetection)
@@ -285,7 +285,7 @@ TYPED_TEST(groupby_sum_overflow_test, OverflowDetection)
     CUDF_TEST_EXPECT_COLUMNS_EQUAL(sorted->view().column(1), expect_overflow);
   };
 
-  // Same check, but a co-requested TDIGEST requires materialized grouped values.
+  // Same check with a co-requested TDIGEST.
   auto check_overflow_flags_sort = [](cudf::column_view const& keys,
                                       cudf::column_view const& vals,
                                       cudf::column_view const& expect_keys,
@@ -415,7 +415,7 @@ TYPED_TEST(groupby_sum_overflow_test, SlicedInput)
                     expect_keys,
                     *expect_vals,
                     cudf::make_sum_overflow_aggregation<cudf::groupby_aggregation>(),
-                    force_materialized_values::YES);
+                    include_nth_aggregation::YES);
   } else {
     cudf::test::fixed_width_column_wrapper<V> vals_full{99, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9};
     auto sum_col = cudf::test::fixed_width_column_wrapper<V>{9, 19, 17};
@@ -436,7 +436,7 @@ TYPED_TEST(groupby_sum_overflow_test, SlicedInput)
                     expect_keys,
                     *expect_vals,
                     cudf::make_sum_overflow_aggregation<cudf::groupby_aggregation>(),
-                    force_materialized_values::YES);
+                    include_nth_aggregation::YES);
   }
 }
 

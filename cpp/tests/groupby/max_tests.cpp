@@ -43,7 +43,7 @@ TYPED_TEST(groupby_max_test, basic)
 
   auto agg2 = cudf::make_max_aggregation<cudf::groupby_aggregation>();
   test_single_agg(
-    keys, vals, expect_keys, expect_vals, std::move(agg2), force_materialized_values::YES);
+    keys, vals, expect_keys, expect_vals, std::move(agg2), include_nth_aggregation::YES);
 }
 
 TYPED_TEST(groupby_max_test, empty_cols)
@@ -62,7 +62,7 @@ TYPED_TEST(groupby_max_test, empty_cols)
 
   auto agg2 = cudf::make_max_aggregation<cudf::groupby_aggregation>();
   test_single_agg(
-    keys, vals, expect_keys, expect_vals, std::move(agg2), force_materialized_values::YES);
+    keys, vals, expect_keys, expect_vals, std::move(agg2), include_nth_aggregation::YES);
 }
 
 TYPED_TEST(groupby_max_test, zero_valid_keys)
@@ -81,7 +81,7 @@ TYPED_TEST(groupby_max_test, zero_valid_keys)
 
   auto agg2 = cudf::make_max_aggregation<cudf::groupby_aggregation>();
   test_single_agg(
-    keys, vals, expect_keys, expect_vals, std::move(agg2), force_materialized_values::YES);
+    keys, vals, expect_keys, expect_vals, std::move(agg2), include_nth_aggregation::YES);
 }
 
 TYPED_TEST(groupby_max_test, zero_valid_values)
@@ -100,7 +100,7 @@ TYPED_TEST(groupby_max_test, zero_valid_values)
 
   auto agg2 = cudf::make_max_aggregation<cudf::groupby_aggregation>();
   test_single_agg(
-    keys, vals, expect_keys, expect_vals, std::move(agg2), force_materialized_values::YES);
+    keys, vals, expect_keys, expect_vals, std::move(agg2), include_nth_aggregation::YES);
 }
 
 TYPED_TEST(groupby_max_test, null_keys_and_values)
@@ -124,7 +124,7 @@ TYPED_TEST(groupby_max_test, null_keys_and_values)
 
   auto agg2 = cudf::make_max_aggregation<cudf::groupby_aggregation>();
   test_single_agg(
-    keys, vals, expect_keys, expect_vals, std::move(agg2), force_materialized_values::YES);
+    keys, vals, expect_keys, expect_vals, std::move(agg2), include_nth_aggregation::YES);
 }
 
 struct groupby_max_string_test : public cudf::test::BaseFixture {};
@@ -143,7 +143,7 @@ TEST_F(groupby_max_string_test, basic)
 
   auto agg2 = cudf::make_max_aggregation<cudf::groupby_aggregation>();
   test_single_agg(
-    keys, vals, expect_keys, expect_vals, std::move(agg2), force_materialized_values::YES);
+    keys, vals, expect_keys, expect_vals, std::move(agg2), include_nth_aggregation::YES);
 }
 
 TEST_F(groupby_max_string_test, zero_valid_values)
@@ -159,7 +159,7 @@ TEST_F(groupby_max_string_test, zero_valid_values)
 
   auto agg2 = cudf::make_max_aggregation<cudf::groupby_aggregation>();
   test_single_agg(
-    keys, vals, expect_keys, expect_vals, std::move(agg2), force_materialized_values::YES);
+    keys, vals, expect_keys, expect_vals, std::move(agg2), include_nth_aggregation::YES);
 }
 
 TEST_F(groupby_max_string_test, max_sorted_strings)
@@ -197,7 +197,7 @@ TEST_F(groupby_max_string_test, max_sorted_strings)
                   expect_keys,
                   expect_vals,
                   std::move(agg),
-                  force_materialized_values::NO,
+                  include_nth_aggregation::NO,
                   cudf::null_policy::INCLUDE,
                   cudf::sorted::YES);
 }
@@ -227,7 +227,7 @@ TEST_F(groupby_dictionary_max_test, basic)
                   expect_keys,
                   expect_vals->view(),
                   cudf::make_max_aggregation<cudf::groupby_aggregation>(),
-                  force_materialized_values::YES);
+                  include_nth_aggregation::YES);
 }
 
 TEST_F(groupby_dictionary_max_test, fixed_width)
@@ -251,7 +251,7 @@ TEST_F(groupby_dictionary_max_test, fixed_width)
                   expect_keys,
                   expect_vals_w,
                   cudf::make_max_aggregation<cudf::groupby_aggregation>(),
-                  force_materialized_values::YES);
+                  include_nth_aggregation::YES);
 }
 
 template <typename T>
@@ -279,7 +279,7 @@ TYPED_TEST(GroupByMaxFixedPointTest, GroupBySortMaxDecimalAsValue)
 
     auto agg3 = cudf::make_max_aggregation<cudf::groupby_aggregation>();
     test_single_agg(
-      keys, vals, expect_keys, expect_vals_max, std::move(agg3), force_materialized_values::YES);
+      keys, vals, expect_keys, expect_vals_max, std::move(agg3), include_nth_aggregation::YES);
   }
 }
 
@@ -527,7 +527,7 @@ TYPED_TEST(groupby_max_floating_point_test, values_with_infinity)
   // Exercise the segmented reduction affected by this issue.
   auto agg = cudf::make_max_aggregation<cudf::groupby_aggregation>();
   test_single_agg(
-    keys, vals, expected_keys, expected_vals, std::move(agg), force_materialized_values::YES);
+    keys, vals, expected_keys, expected_vals, std::move(agg), include_nth_aggregation::YES);
 }
 
 TYPED_TEST(groupby_max_floating_point_test, values_with_nan)
@@ -594,7 +594,7 @@ TEST_F(groupby_max_hash_based_shmem_kernel_test, all_unique_keys)
                     include_null ? nullable_keys : excluded_keys,
                     include_null ? nullable_values : excluded_values,
                     cudf::make_max_aggregation<cudf::groupby_aggregation>(),
-                    force_materialized_values::NO,
+                    include_nth_aggregation::NO,
                     null_handling);
   }
 }

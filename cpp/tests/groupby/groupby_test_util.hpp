@@ -10,7 +10,7 @@
 
 #include <source_location>
 
-enum class force_materialized_values : bool { NO, YES };
+enum class include_nth_aggregation : bool { NO, YES };
 enum class test_streaming : bool { NO, YES };
 
 void test_single_agg(cudf::column_view const& keys,
@@ -18,7 +18,7 @@ void test_single_agg(cudf::column_view const& keys,
                      cudf::column_view const& expect_keys,
                      cudf::column_view const& expect_vals,
                      std::unique_ptr<cudf::groupby_aggregation>&& agg,
-                     force_materialized_values materialize_values = force_materialized_values::NO,
+                     include_nth_aggregation include_nth          = include_nth_aggregation::NO,
                      cudf::null_policy include_null_keys          = cudf::null_policy::EXCLUDE,
                      cudf::sorted keys_are_sorted                 = cudf::sorted::NO,
                      std::vector<cudf::order> const& column_order = {},

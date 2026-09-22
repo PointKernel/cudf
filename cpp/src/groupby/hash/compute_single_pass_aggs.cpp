@@ -115,8 +115,10 @@ std::unique_ptr<column> compute_aggregation(aggregation::Kind kind,
 
 bool is_single_pass_agg_supported(data_type values_type, aggregation::Kind kind)
 {
-  if (cudf::is_nested(values_type)) { return false; }
   if (kind == aggregation::COUNT_VALID || kind == aggregation::COUNT_ALL) { return true; }
+  if (cudf::is_nested(values_type)) {
+    return kind == aggregation::ARGMIN || kind == aggregation::ARGMAX;
+  }
   if (values_type.id() == type_id::EMPTY) { return false; }
   return type_dispatcher(values_type,
                          [kind]<typename T>() { return is_reduction_supported<T>(kind); });
@@ -213,6 +215,43 @@ std::vector<std::unique_ptr<column>> compute_single_pass_aggs(
     auto const nullable = !is_agg_intermediate[i] && kind != aggregation::COUNT_VALID &&
                           kind != aggregation::COUNT_ALL && col.has_nulls();
     auto const ctx = reduction_context{col, *d_col, values_type, grouped, num_groups, nullable};
+
+    if (kind == aggregation::M2) {
+      auto const has_count = [&](std::size_t index) {
+        return index + 1 < num_aggs && agg_kinds[index + 1] == aggregation::COUNT_VALID &&
+               cudf::detail::is_shallow_equivalent(values.column(index), values.column(index + 1));
+      };
+      auto const include_counts = has_count(i);
+      auto const stride         = include_counts ? 2 : 1;
+      auto end                  = i + stride;
+      while (end < num_aggs && agg_kinds[end] == aggregation::M2 &&
+             has_count(end) == include_counts) {
+        auto const& next = values.column(end);
+        auto const type =
+          is_dictionary(next.type()) ? dictionary_column_view(next).keys().type() : next.type();
+        if (type != values_type) { break; }
+        end += stride;
+      }
+      std::vector<decltype(d_col)> device_views;
+      std::vector<reduction_context> contexts;
+      device_views.reserve((end - i) / stride);
+      contexts.reserve((end - i) / stride);
+      device_views.push_back(std::move(d_col));
+      contexts.push_back(ctx);
+      for (auto j = i + stride; j < end; j += stride) {
+        auto const& next = values.column(j);
+        device_views.push_back(column_device_view::create(next, stream, mr.get_temporary_mr()));
+        contexts.push_back({next, *device_views.back(), values_type, grouped, num_groups, false});
+      }
+      // Counts already present in the shared cache, or preceding M2, are left
+      // alone. Only an adjacent count for this input is supplied by the
+      // centered reduction's first pass.
+      auto batch = compute_m2_reductions(
+        contexts, is_agg_intermediate.subspan(i, end - i), include_counts, stream, mr);
+      std::move(batch.begin(), batch.end(), std::back_inserter(results));
+      i = end;
+      continue;
+    }
 
     auto const sums_end    = fused_end(i, values_type);
     auto const extrema_end = minmax_sum_end(i, values_type);

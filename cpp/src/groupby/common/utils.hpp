@@ -66,7 +66,7 @@ std::pair<rmm::device_buffer, bitmask_type const*> compute_row_bitmask(table_vie
                                                                        cuda::stream_ref stream,
                                                                        cudf::memory_resources mr);
 
-/// Whether the given aggregation kind is supported by hash-based groupby.
+/// Whether the aggregation decomposes into the shared single-pass reductions.
 constexpr bool is_hash_aggregation(aggregation::Kind k)
 {
   switch (k) {
