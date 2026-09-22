@@ -1,11 +1,17 @@
 /*
- * SPDX-FileCopyrightText: Copyright (c) 2021-2025, NVIDIA CORPORATION.
+ * SPDX-FileCopyrightText: Copyright (c) 2021-2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
 
 #pragma once
 
-#include "join/join_common_utils.cuh"
+// Kernel definitions for the conditional joins. Kernels have internal linkage, so every
+// translation unit that includes this header compiles its own copies. Only the owner
+// translation units conditional_join_kernels.cu and conditional_join_kernels_nulls.cu may
+// include it; all other code goes through the launchers declared in
+// conditional_join_kernels.hpp.
+
+#include "join/conditional_join_kernels.hpp"
 #include "join/join_common_utils.hpp"
 
 #include <cudf/ast/detail/expression_evaluator.cuh>
@@ -14,11 +20,15 @@
 #include <cudf/detail/utilities/grid_1d.cuh>
 #include <cudf/join/join.hpp>
 #include <cudf/table/table_device_view.cuh>
+#include <cudf/utilities/error.hpp>
 
 #include <cub/cub.cuh>
 
 namespace cudf {
 namespace detail {
+
+/// Number of output rows each warp caches in shared memory before flushing to global memory
+constexpr cudf::size_type DEFAULT_CONDITIONAL_JOIN_CACHE_SIZE = 128;
 
 /**
  * @brief Adds a pair of indices to the shared memory cache
@@ -458,6 +468,78 @@ CUDF_KERNEL void conditional_join_anti_semi(
     }
     if (found_match) break;
   }
+}
+
+template <bool has_nulls>
+void launch_compute_conditional_join_output_size(
+  table_device_view const& left_table,
+  table_device_view const& right_table,
+  join_kind join_type,
+  ast::detail::expression_device_view device_expression_data,
+  bool swap_tables,
+  std::size_t* output_size,
+  grid_1d const& config,
+  std::size_t shmem_size_per_block,
+  cuda::stream_ref stream)
+{
+  compute_conditional_join_output_size<DEFAULT_JOIN_BLOCK_SIZE, has_nulls>
+    <<<config.num_blocks, config.num_threads_per_block, shmem_size_per_block, stream.get()>>>(
+      left_table, right_table, join_type, device_expression_data, swap_tables, output_size);
+  CUDF_CUDA_TRY(cudaGetLastError());
+}
+
+template <bool has_nulls>
+void launch_conditional_join(table_device_view const& left_table,
+                             table_device_view const& right_table,
+                             join_kind join_type,
+                             size_type* join_output_l,
+                             size_type* join_output_r,
+                             std::size_t* current_idx,
+                             ast::detail::expression_device_view device_expression_data,
+                             std::size_t max_size,
+                             bool swap_tables,
+                             grid_1d const& config,
+                             std::size_t shmem_size_per_block,
+                             cuda::stream_ref stream)
+{
+  conditional_join<DEFAULT_JOIN_BLOCK_SIZE, DEFAULT_CONDITIONAL_JOIN_CACHE_SIZE, has_nulls>
+    <<<config.num_blocks, config.num_threads_per_block, shmem_size_per_block, stream.get()>>>(
+      left_table,
+      right_table,
+      join_type,
+      join_output_l,
+      join_output_r,
+      current_idx,
+      device_expression_data,
+      max_size,
+      swap_tables);
+  CUDF_CUDA_TRY(cudaGetLastError());
+}
+
+template <bool has_nulls>
+void launch_conditional_join_anti_semi(table_device_view const& left_table,
+                                       table_device_view const& right_table,
+                                       join_kind join_type,
+                                       size_type* join_output_l,
+                                       std::size_t* current_idx,
+                                       ast::detail::expression_device_view device_expression_data,
+                                       std::size_t max_size,
+                                       grid_1d const& config,
+                                       std::size_t shmem_size_per_block,
+                                       cuda::stream_ref stream)
+{
+  conditional_join_anti_semi<DEFAULT_JOIN_BLOCK_SIZE,
+                             DEFAULT_CONDITIONAL_JOIN_CACHE_SIZE,
+                             has_nulls>
+    <<<config.num_blocks, config.num_threads_per_block, shmem_size_per_block, stream.get()>>>(
+      left_table,
+      right_table,
+      join_type,
+      join_output_l,
+      current_idx,
+      device_expression_data,
+      max_size);
+  CUDF_CUDA_TRY(cudaGetLastError());
 }
 
 }  // namespace detail

@@ -4,7 +4,7 @@
  */
 
 #include "join/conditional_join.hpp"
-#include "join/conditional_join_kernels.cuh"
+#include "join/conditional_join_kernels.hpp"
 #include "join/join_common_utils.hpp"
 
 #include <cudf/ast/detail/expression_parser.hpp>
@@ -27,10 +27,6 @@
 
 namespace cudf {
 namespace detail {
-namespace {
-constexpr int DEFAULT_CACHE_SIZE = 128;
-}
-
 std::unique_ptr<rmm::device_uvector<size_type>> conditional_join_anti_semi(
   table_view const& left,
   table_view const& right,
@@ -79,15 +75,25 @@ std::unique_ptr<rmm::device_uvector<size_type>> conditional_join_anti_semi(
     // Allocate storage for the counter used to get the size of the join output
     cudf::detail::device_scalar<std::size_t> size(0, stream, mr);
     if (has_nulls) {
-      compute_conditional_join_output_size<DEFAULT_JOIN_BLOCK_SIZE, true>
-        <<<config.num_blocks, config.num_threads_per_block, shmem_size_per_block, stream.get()>>>(
-          *left_table, *right_table, join_type, parser.device_expression_data, false, size.data());
-      CUDF_CUDA_TRY(cudaGetLastError());
+      launch_compute_conditional_join_output_size<true>(*left_table,
+                                                        *right_table,
+                                                        join_type,
+                                                        parser.device_expression_data,
+                                                        false,
+                                                        size.data(),
+                                                        config,
+                                                        shmem_size_per_block,
+                                                        stream);
     } else {
-      compute_conditional_join_output_size<DEFAULT_JOIN_BLOCK_SIZE, false>
-        <<<config.num_blocks, config.num_threads_per_block, shmem_size_per_block, stream.get()>>>(
-          *left_table, *right_table, join_type, parser.device_expression_data, false, size.data());
-      CUDF_CUDA_TRY(cudaGetLastError());
+      launch_compute_conditional_join_output_size<false>(*left_table,
+                                                         *right_table,
+                                                         join_type,
+                                                         parser.device_expression_data,
+                                                         false,
+                                                         size.data(),
+                                                         config,
+                                                         shmem_size_per_block,
+                                                         stream);
     }
     join_size = size.value(stream);
   }
@@ -100,27 +106,27 @@ std::unique_ptr<rmm::device_uvector<size_type>> conditional_join_anti_semi(
   auto const& join_output_l = left_indices->data();
 
   if (has_nulls) {
-    conditional_join_anti_semi<DEFAULT_JOIN_BLOCK_SIZE, DEFAULT_CACHE_SIZE, true>
-      <<<config.num_blocks, config.num_threads_per_block, shmem_size_per_block, stream.get()>>>(
-        *left_table,
-        *right_table,
-        join_type,
-        join_output_l,
-        write_index.data(),
-        parser.device_expression_data,
-        join_size);
-    CUDF_CUDA_TRY(cudaGetLastError());
+    launch_conditional_join_anti_semi<true>(*left_table,
+                                            *right_table,
+                                            join_type,
+                                            join_output_l,
+                                            write_index.data(),
+                                            parser.device_expression_data,
+                                            join_size,
+                                            config,
+                                            shmem_size_per_block,
+                                            stream);
   } else {
-    conditional_join_anti_semi<DEFAULT_JOIN_BLOCK_SIZE, DEFAULT_CACHE_SIZE, false>
-      <<<config.num_blocks, config.num_threads_per_block, shmem_size_per_block, stream.get()>>>(
-        *left_table,
-        *right_table,
-        join_type,
-        join_output_l,
-        write_index.data(),
-        parser.device_expression_data,
-        join_size);
-    CUDF_CUDA_TRY(cudaGetLastError());
+    launch_conditional_join_anti_semi<false>(*left_table,
+                                             *right_table,
+                                             join_type,
+                                             join_output_l,
+                                             write_index.data(),
+                                             parser.device_expression_data,
+                                             join_size,
+                                             config,
+                                             shmem_size_per_block,
+                                             stream);
   }
   return left_indices;
 }
@@ -201,25 +207,25 @@ conditional_join(table_view const& left,
     // Allocate storage for the counter used to get the size of the join output
     cudf::detail::device_scalar<std::size_t> size(0, stream, mr);
     if (has_nulls) {
-      compute_conditional_join_output_size<DEFAULT_JOIN_BLOCK_SIZE, true>
-        <<<config.num_blocks, config.num_threads_per_block, shmem_size_per_block, stream.get()>>>(
-          *left_table,
-          *right_table,
-          kernel_join_type,
-          parser.device_expression_data,
-          swap_tables,
-          size.data());
-      CUDF_CUDA_TRY(cudaGetLastError());
+      launch_compute_conditional_join_output_size<true>(*left_table,
+                                                        *right_table,
+                                                        kernel_join_type,
+                                                        parser.device_expression_data,
+                                                        swap_tables,
+                                                        size.data(),
+                                                        config,
+                                                        shmem_size_per_block,
+                                                        stream);
     } else {
-      compute_conditional_join_output_size<DEFAULT_JOIN_BLOCK_SIZE, false>
-        <<<config.num_blocks, config.num_threads_per_block, shmem_size_per_block, stream.get()>>>(
-          *left_table,
-          *right_table,
-          kernel_join_type,
-          parser.device_expression_data,
-          swap_tables,
-          size.data());
-      CUDF_CUDA_TRY(cudaGetLastError());
+      launch_compute_conditional_join_output_size<false>(*left_table,
+                                                         *right_table,
+                                                         kernel_join_type,
+                                                         parser.device_expression_data,
+                                                         swap_tables,
+                                                         size.data(),
+                                                         config,
+                                                         shmem_size_per_block,
+                                                         stream);
     }
     join_size = size.value(stream);
   }
@@ -245,31 +251,31 @@ conditional_join(table_view const& left,
   auto const& join_output_r = right_indices->data();
 
   if (has_nulls) {
-    conditional_join<DEFAULT_JOIN_BLOCK_SIZE, DEFAULT_CACHE_SIZE, true>
-      <<<config.num_blocks, config.num_threads_per_block, shmem_size_per_block, stream.get()>>>(
-        *left_table,
-        *right_table,
-        kernel_join_type,
-        join_output_l,
-        join_output_r,
-        write_index.data(),
-        parser.device_expression_data,
-        join_size,
-        swap_tables);
-    CUDF_CUDA_TRY(cudaGetLastError());
+    launch_conditional_join<true>(*left_table,
+                                  *right_table,
+                                  kernel_join_type,
+                                  join_output_l,
+                                  join_output_r,
+                                  write_index.data(),
+                                  parser.device_expression_data,
+                                  join_size,
+                                  swap_tables,
+                                  config,
+                                  shmem_size_per_block,
+                                  stream);
   } else {
-    conditional_join<DEFAULT_JOIN_BLOCK_SIZE, DEFAULT_CACHE_SIZE, false>
-      <<<config.num_blocks, config.num_threads_per_block, shmem_size_per_block, stream.get()>>>(
-        *left_table,
-        *right_table,
-        kernel_join_type,
-        join_output_l,
-        join_output_r,
-        write_index.data(),
-        parser.device_expression_data,
-        join_size,
-        swap_tables);
-    CUDF_CUDA_TRY(cudaGetLastError());
+    launch_conditional_join<false>(*left_table,
+                                   *right_table,
+                                   kernel_join_type,
+                                   join_output_l,
+                                   join_output_r,
+                                   write_index.data(),
+                                   parser.device_expression_data,
+                                   join_size,
+                                   swap_tables,
+                                   config,
+                                   shmem_size_per_block,
+                                   stream);
   }
 
   auto join_indices = std::pair(std::move(left_indices), std::move(right_indices));
@@ -354,25 +360,25 @@ std::size_t compute_conditional_join_output_size(table_view const& left,
   // Determine number of output rows without actually building the output to simply
   // find what the size of the output will be.
   if (has_nulls) {
-    compute_conditional_join_output_size<DEFAULT_JOIN_BLOCK_SIZE, true>
-      <<<config.num_blocks, config.num_threads_per_block, shmem_size_per_block, stream.get()>>>(
-        *left_table,
-        *right_table,
-        join_type,
-        parser.device_expression_data,
-        swap_tables,
-        size.data());
-    CUDF_CUDA_TRY(cudaGetLastError());
+    launch_compute_conditional_join_output_size<true>(*left_table,
+                                                      *right_table,
+                                                      join_type,
+                                                      parser.device_expression_data,
+                                                      swap_tables,
+                                                      size.data(),
+                                                      config,
+                                                      shmem_size_per_block,
+                                                      stream);
   } else {
-    compute_conditional_join_output_size<DEFAULT_JOIN_BLOCK_SIZE, false>
-      <<<config.num_blocks, config.num_threads_per_block, shmem_size_per_block, stream.get()>>>(
-        *left_table,
-        *right_table,
-        join_type,
-        parser.device_expression_data,
-        swap_tables,
-        size.data());
-    CUDF_CUDA_TRY(cudaGetLastError());
+    launch_compute_conditional_join_output_size<false>(*left_table,
+                                                       *right_table,
+                                                       join_type,
+                                                       parser.device_expression_data,
+                                                       swap_tables,
+                                                       size.data(),
+                                                       config,
+                                                       shmem_size_per_block,
+                                                       stream);
   }
   return size.value(stream);
 }
