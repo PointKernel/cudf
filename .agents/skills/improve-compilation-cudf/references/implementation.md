@@ -6,6 +6,23 @@ old file names, traits, aggregation sets, or CUDA qualifiers.
 
 ## Choose a mechanism that fits the evidence
 
+Prefer this order when several techniques address the same bottleneck:
+
+1. Remove avoidable work: redundant instantiations, dispatch dimensions that do not affect
+   the operation, unnecessary heavy includes, or repeated calls that can use an existing
+   compiled overload without new materialization.
+2. Change where necessary work is compiled: split independent instantiations to expose
+   parallelism, or co-locate equivalent kernel families to avoid duplicate emission.
+   Choose according to the target metric and measure the effect on both time and size.
+3. Change the device computation boundary: materialize hashes/flags/bounds, introduce
+   indirection, change inlining, or swap algorithms only when the diagnosed cost warrants
+   the additional runtime and memory investigation.
+
+This orders investigation by expected disruption, not guaranteed safety or benefit.
+Dispatch removal can change codegen, and TU moves can affect optimization. Skip directly
+to a later technique when evidence already rules out the earlier ones; do not make
+unrelated cleanups or run every experiment just to complete this list.
+
 | Observed cause | Candidate change | Start with |
 | --- | --- | --- |
 | Dispatch does not use the selected C++ type | Remove that dispatch; retain exceptional preprocessing such as dictionary key normalization | #23282 |
@@ -74,6 +91,9 @@ caller.cpp or caller.cu includes operation.hpp and calls the host entry point
 These file names are illustrative. Do not split a short instantiation TU again unless it
 contains independently separable instantiation work. Keep common alias declarations
 consistent and update the current CMake source list for additions/removals.
+Move shared non-template initialization, copy, or fill work into ordinary functions when
+that avoids recompiling it for every specialization. Preserve internal visibility and
+stream/resource parameters, and keep launchers with the device definitions they need.
 
 `extern template` can suppress applicable implicit instantiations even when a definition
 is visible; this is a valid C++ design. It does not remove header parsing, guarantee that
@@ -93,6 +113,11 @@ dispatched C++ type and called a type-erased table operation; a direct dictionar
 preserved required preprocessing without instantiating the common path for every type.
 Do not delete dispatch just because its immediate call is type-erased: preceding logic,
 overload selection, validation, and error behavior may still depend on the type.
+
+Before introducing a custom type map, check whether `dispatch_storage_type` or
+`row::primitive::dispatch_primitive_type` already provides the required representation.
+Verify its current supported types and semantics against the caller; a storage or primitive
+mapping is not appropriate for every operation.
 
 For a supported subset, a custom `IdTypeMap` can map excluded IDs to a sentinel type.
 The functor must guard that sentinel with `if constexpr` before mentioning unsupported

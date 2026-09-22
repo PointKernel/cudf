@@ -138,6 +138,20 @@ all-architecture results. Do not add percentage savings from PRs with different 
 
 ## Correctness and runtime coverage
 
+Choose validation from what the change can affect, not merely its label as a cleanup.
+Keep required repository checks and measure the compilation/size metric being claimed.
+
+| Change | Validation to start with | When to add runtime comparisons |
+| --- | --- | --- |
+| Documentation or skill guidance | Check links, structure, and executable examples that changed | No GPU benchmark is needed |
+| Include cleanup, host-only moves, or mechanical instantiation ownership changes | Build affected consumers and configurations; link; run affected existing tests; check symbols when ownership/visibility changes | When generated device code, launch behavior, or equivalence is uncertain |
+| Dispatch/type erasure, inlining, materialization, algorithm, preprocessing, or allocation changes | Affected tests covering the changed dimensions, plus paired benchmarks and relevant scratch/peak-memory measurements | Required for paths whose runtime behavior can change |
+
+Capture the relevant runtime baseline before editing when a comparison is needed.
+Do not run an unrelated GPU suite for every header or documentation edit. If source moves
+change the compiler's optimization scope, treat them as potentially affecting runtime
+rather than assuming that moved code generates identical kernels.
+
 Select existing suites using the current build's available targets. Depending on the path,
 cover joins/search, groupby/streaming groupby, reductions, rolling, sorting, strings, and
 affected test utilities. Add focused regression cases only for uncovered semantics.
@@ -147,7 +161,8 @@ operation-specific boundaries. For explicit instantiations, test every supported
 and the actual group/block parameters. Compile Debug or multiple supported CUDA versions
 when the change depends on inlining, template lookup, or compiler behavior.
 
-Run paired benchmarks on identical datasets/seeds and GPU conditions. Include setup,
+When runtime comparisons are needed, run paired benchmarks on identical datasets/seeds
+and GPU conditions. Include setup,
 preprocessing, scratch allocation, and synchronization if changed. Separate reusable-state
 and one-shot paths when relevant. Report median/variation and material outliers, not just
 a geometric mean; distinguish noise in tiny cases from repeatable regressions. Profile
@@ -158,6 +173,24 @@ The proposed global-memory dispatcher and reduction materialization in #21973 re
 runtime despite compiling faster. The report itself asks for independent revalidation.
 Its claim that splitting always improves wall time is not a guarantee under limited jobs,
 RAM pressure, duplicated parsing, or a different dependency critical path.
+
+## Decide whether to keep the change
+
+Agree on the target metric and use any runtime/memory constraints already set for the task.
+Do not invent a universal speedup threshold or silently trade away supported behavior.
+
+- **Keep:** comparable measurements show a repeatable improvement in the stated metric,
+  appropriate correctness/link checks pass, runtime and memory costs satisfy the task's
+  constraints, and the added maintenance cost is justified by the benefit.
+- **Rework:** the compile/size benefit is real but a particular path regresses, scratch
+  grows too much, or the implementation adds unnecessary complexity. Narrow the change,
+  retain the original path where appropriate, and remeasure the changed cases.
+- **Discard:** the apparent gain disappears under comparable conditions, the change breaks
+  required behavior, or its costs outweigh the benefit. Restore only the experiment's own
+  edits; preserve unrelated work and record the useful negative result.
+- **Inconclusive:** noise, missing coverage, or unavailable hardware prevents a decision.
+  State the limitation and needed evidence; do not present the candidate as a demonstrated
+  improvement. Do not keep repeating equivalent tests without a reason they will resolve it.
 
 ## Result format
 
