@@ -5,15 +5,22 @@
 
 #pragma once
 
-#include <cudf/ast/detail/expression_parser.hpp>
-#include <cudf/detail/utilities/grid_1d.cuh>
 #include <cudf/join/join.hpp>
-#include <cudf/table/table_device_view.cuh>
 #include <cudf/types.hpp>
 
 #include <cuda/stream>
 
 #include <cstddef>
+
+namespace CUDF_EXPORT cudf {
+class table_device_view;
+namespace ast::detail {
+struct expression_device_view;
+}  // namespace ast::detail
+namespace detail {
+class grid_1d;
+}  // namespace detail
+}  // namespace CUDF_EXPORT cudf
 
 namespace cudf::detail {
 
@@ -57,7 +64,9 @@ void launch_compute_conditional_join_output_size(
   cuda::stream_ref stream);
 
 /**
- * @brief Launches the kernel that performs an inner, left, or full conditional join.
+ * @brief Launches the kernel that performs an inner or left conditional join.
+ *
+ * Full joins use a left join here and append unmatched right rows separately.
  *
  * @tparam has_nulls Whether the expression may evaluate to null
  *

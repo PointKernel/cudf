@@ -22,7 +22,9 @@
 #include <cudf/table/table_device_view.cuh>
 #include <cudf/utilities/error.hpp>
 
-#include <cub/cub.cuh>
+#include <cub/block/block_reduce.cuh>
+#include <cub/util_ptx.cuh>
+#include <cuda/atomic>
 
 namespace cudf {
 namespace detail {
@@ -297,22 +299,12 @@ CUDF_KERNEL void conditional_join(table_device_view left_table,
         output_dest, left_row_index, right_row_index, 0, thread_intermediate_storage);
 
       if (output_dest.is_valid() && output_dest.value()) {
-        // If the rows are equal, then we have found a true match
-        // In the case of left anti joins we only add indices from left after
-        // the loop if we have found _no_ matches from the right.
-        // In the case of left semi joins we only add the first match (note
-        // that the current logic relies on the fact that we process all right
-        // table rows for a single left table row on a single thread so that no
-        // synchronization of found_match is required).
-        if ((join_type != join_kind::LEFT_ANTI_JOIN) &&
-            !(join_type == join_kind::LEFT_SEMI_JOIN && found_match)) {
-          add_pair_to_cache(left_row_index,
-                            right_row_index,
-                            current_idx_shared,
-                            warp_id,
-                            join_shared_l[warp_id],
-                            join_shared_r[warp_id]);
-        }
+        add_pair_to_cache(left_row_index,
+                          right_row_index,
+                          current_idx_shared,
+                          warp_id,
+                          join_shared_l[warp_id],
+                          join_shared_r[warp_id]);
         found_match = true;
       }
 
@@ -338,11 +330,8 @@ CUDF_KERNEL void conditional_join(table_device_view left_table,
       __syncwarp(activemask);
     }
 
-    // Left, left anti, and full joins all require saving left columns that
-    // aren't present in the right.
-    if ((join_type == join_kind::LEFT_JOIN || join_type == join_kind::LEFT_ANTI_JOIN ||
-         join_type == join_kind::FULL_JOIN) &&
-        (!found_match)) {
+    // Full joins launch this kernel as a left join and append unmatched right rows later.
+    if (join_type == join_kind::LEFT_JOIN && !found_match) {
       // TODO: This code assumes that swap_tables is false for all join
       // kinds aside from inner joins. Once the code is generalized to handle
       // other joins we'll want to switch the variable in the line below back
