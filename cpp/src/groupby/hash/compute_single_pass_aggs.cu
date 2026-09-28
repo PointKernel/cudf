@@ -13,6 +13,7 @@
 #include <cudf/detail/iterator.cuh>
 #include <cudf/detail/utilities/cuda.cuh>
 #include <cudf/detail/utilities/integer_utils.hpp>
+#include <cudf/detail/valid_if.cuh>
 #include <cudf/null_mask.hpp>
 #include <cudf/types.hpp>
 #include <cudf/utilities/bit.hpp>
@@ -48,6 +49,23 @@
 #include <utility>
 
 namespace cudf::groupby::detail::hash {
+
+std::pair<rmm::device_buffer, size_type> make_mask_from_validity(bool* begin,
+                                                                 bool* end,
+                                                                 cuda::stream_ref stream,
+                                                                 cudf::memory_resources mr)
+{
+  return cudf::detail::valid_if(begin, end, cuda::std::identity{}, stream, mr);
+}
+
+std::pair<rmm::device_buffer, size_type> make_mask_from_counts(size_type const* begin,
+                                                               size_type const* end,
+                                                               cuda::stream_ref stream,
+                                                               cudf::memory_resources mr)
+{
+  return cudf::detail::valid_if(
+    begin, end, [] __device__(size_type count) { return count > 0; }, stream, mr);
+}
 
 /// A group is valid when any of its rows is valid.
 std::pair<rmm::device_buffer, size_type> reduce_group_validity(reduction_context const& ctx,

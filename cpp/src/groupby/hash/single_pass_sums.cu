@@ -9,7 +9,6 @@
 #include <cudf/detail/aggregation/aggregation.cuh>
 #include <cudf/detail/aggregation/aggregation.hpp>
 #include <cudf/detail/iterator.cuh>
-#include <cudf/detail/valid_if.cuh>
 #include <cudf/utilities/error.hpp>
 #include <cudf/utilities/traits.hpp>
 #include <cudf/utilities/type_dispatcher.hpp>
@@ -175,12 +174,8 @@ struct fused_sums_fn {
       auto const nullable =
         !is_intermediate[i] && kinds[i] != aggregation::COUNT_VALID && ctx.values.has_nulls();
       if (nullable && ctx.num_groups > 0) {
-        auto [null_mask, null_count] = cudf::detail::valid_if(
-          counts,
-          counts + ctx.num_groups,
-          [] __device__(size_type count) { return count > 0; },
-          stream,
-          mr);
+        auto [null_mask, null_count] =
+          make_mask_from_counts(counts, counts + ctx.num_groups, stream, mr);
         result->set_null_mask(std::move(null_mask), null_count);
       }
       results.push_back(std::move(result));
@@ -254,8 +249,8 @@ struct fused_minmax_sum_fn {
                     : kinds[i] == aggregation::MAX ? std::move(maximum)
                                                    : std::move(sum);
       if (!is_intermediate[i] && ctx.values.has_nulls() && ctx.num_groups > 0) {
-        auto [null_mask, null_count] = cudf::detail::valid_if(
-          group_valid.begin(), group_valid.end(), cuda::std::identity{}, stream, mr);
+        auto [null_mask, null_count] =
+          make_mask_from_validity(group_valid.begin(), group_valid.end(), stream, mr);
         result->set_null_mask(std::move(null_mask), null_count);
       }
       results.push_back(std::move(result));

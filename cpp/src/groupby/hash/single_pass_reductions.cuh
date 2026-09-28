@@ -16,7 +16,6 @@
 #include <cudf/detail/iterator.cuh>
 #include <cudf/detail/utilities/element_argminmax.cuh>
 #include <cudf/detail/utilities/vector_factories.hpp>
-#include <cudf/detail/valid_if.cuh>
 #include <cudf/dictionary/dictionary_column_view.hpp>
 #include <cudf/reduction/detail/sum_overflow.cuh>
 #include <cudf/types.hpp>
@@ -227,8 +226,8 @@ struct grouped_reduction_fn {
                   valid_value<Result>{identity, false},
                   stream,
                   mr);
-    auto [null_mask, null_count] = cudf::detail::valid_if(
-      group_valid.begin(), group_valid.end(), cuda::std::identity{}, stream, mr);
+    auto [null_mask, null_count] =
+      make_mask_from_validity(group_valid.begin(), group_valid.end(), stream, mr);
     result->set_null_mask(std::move(null_mask), null_count);
     return result;
   }
@@ -409,8 +408,8 @@ struct grouped_reductions_fn {
         for (size_type i = 0; i < num_columns; ++i) {
           auto const begin = group_valid.begin() + static_cast<std::size_t>(i) * first.num_groups;
           auto const resources = is_intermediate[i] ? cudf::memory_resources{temp_mr, temp_mr} : mr;
-          auto [mask, null_count] = cudf::detail::valid_if(
-            begin, begin + first.num_groups, cuda::std::identity{}, stream, resources);
+          auto [mask, null_count] =
+            make_mask_from_validity(begin, begin + first.num_groups, stream, resources);
           results[i]->set_null_mask(std::move(mask), null_count);
         }
       }
