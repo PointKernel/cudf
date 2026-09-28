@@ -93,13 +93,14 @@ std::pair<std::unique_ptr<table>, std::vector<aggregation_result>> groupby(
   std::span<aggregation_request const> requests,
   null_policy include_null_keys,
   cuda::stream_ref stream,
-  rmm::device_async_resource_ref mr)
+  cudf::memory_resources mr)
 {
   cudf::detail::result_cache cache(requests.size());
 
   std::unique_ptr<table> unique_keys =
     dispatch_groupby(keys, requests, &cache, cudf::has_nulls(keys), include_null_keys, stream, mr);
 
-  return std::pair(std::move(unique_keys), extract_results(requests, cache, stream, mr));
+  return std::pair(std::move(unique_keys),
+                   extract_results(requests, cache, stream, mr.get_output_mr()));
 }
 }  // namespace cudf::groupby::detail::hash

@@ -17,7 +17,6 @@
 
 #include <cuda/iterator>
 #include <cuda/std/cmath>
-#include <cuda/std/functional>
 #include <cuda/stream>
 #include <thrust/tabulate.h>
 
@@ -136,18 +135,25 @@ std::unique_ptr<column> compute_variance_std(TransformFunc&& transform_fn,
   auto output = make_numeric_column(
     data_type(type_to_id<TargetType>()), size, mask_state::UNALLOCATED, stream, mr.get_output_mr());
 
-  // Since we may have new null rows depending on the group count, we need to generate a new null
-  // mask from scratch.
-  rmm::device_uvector<bool> validity(size, stream, mr.get_temporary_mr());
-
-  auto const out_it =
-    cuda::make_zip_iterator(output->mutable_view().begin<TargetType>(), validity.begin());
-  thrust::tabulate(
-    rmm::exec_policy_nosync(stream, mr.get_temporary_mr()), out_it, out_it + size, transform_fn);
-
-  auto [null_mask, null_count] =
-    cudf::detail::valid_if(validity.begin(), validity.end(), cuda::std::identity{}, stream, mr);
-  if (null_count > 0) { output->set_null_mask(std::move(null_mask), null_count); }
+  // Compute values and validity together. The mask is scratch until its null count is known.
+  auto const begin             = cuda::counting_iterator<size_type>{0};
+  auto const out               = output->mutable_view().begin<TargetType>();
+  auto [null_mask, null_count] = cudf::detail::valid_if(
+    begin,
+    begin + size,
+    [out, transform_fn] __device__(size_type idx) {
+      auto const result = transform_fn(idx);
+      out[idx]          = result.first;
+      return result.second;
+    },
+    stream,
+    cudf::memory_resources{mr.get_temporary_mr(), mr.get_temporary_mr()});
+  if (null_count > 0) {
+    if (mr.get_output_mr() != mr.get_temporary_mr()) {
+      null_mask = rmm::device_buffer{null_mask, stream, mr.get_output_mr()};
+    }
+    output->set_null_mask(std::move(null_mask), null_count);
+  }
 
   return output;
 }

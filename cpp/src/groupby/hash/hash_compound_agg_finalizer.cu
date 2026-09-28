@@ -3,17 +3,18 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+#include "binaryop/compiled/binary_ops.hpp"
+#include "binaryop/compiled/operation.cuh"
 #include "groupby/common/m2_var_std.hpp"
+#include "groupby/common/utils.hpp"
 #include "hash_compound_agg_finalizer.hpp"
-#include "helpers.cuh"
 
+#include <cudf/column/column_factories.hpp>
 #include <cudf/column/column_view.hpp>
 #include <cudf/detail/aggregation/aggregation.hpp>
 #include <cudf/detail/aggregation/result_cache.hpp>
-#include <cudf/detail/binaryop.hpp>
 #include <cudf/detail/gather.hpp>
 #include <cudf/detail/null_mask.hpp>
-#include <cudf/detail/valid_if.cuh>
 #include <cudf/dictionary/dictionary_column_view.hpp>
 #include <cudf/types.hpp>
 
@@ -25,13 +26,11 @@ namespace cudf::groupby::detail::hash {
 
 hash_compound_agg_finalizer::hash_compound_agg_finalizer(column_view const& col,
                                                          cudf::detail::result_cache* cache,
-                                                         bitmask_type const* d_row_bitmask,
                                                          cuda::stream_ref stream,
                                                          cudf::memory_resources mr)
   : col{col},
     input_type{is_dictionary(col.type()) ? dictionary_column_view(col).keys().type() : col.type()},
     cache{cache},
-    d_row_bitmask{d_row_bitmask},
     stream{stream},
     mr{mr}
 {
@@ -107,25 +106,27 @@ void hash_compound_agg_finalizer::operator()<aggregation::MEAN>(aggregation cons
   // Perform division without any null masks, and generate the null mask for the result later.
   // This is because the null mask (if exists) is just needed to be copied from the sum result,
   // and copying is faster than running the `bitmask_and` kernel.
-  auto result =
-    cudf::detail::binary_operation(sum_without_nulls,
-                                   count_result,
-                                   binary_operator::DIV,
-                                   cudf::detail::target_type(input_type, aggregation::MEAN),
-                                   stream,
-                                   mr.get_output_mr());
+  auto result = make_fixed_width_column(cudf::detail::target_type(input_type, aggregation::MEAN),
+                                        sum_result.size(),
+                                        mask_state::UNALLOCATED,
+                                        stream,
+                                        mr.get_output_mr());
+  if (result->size() > 0) {
+    auto out = result->mutable_view();
+    cudf::binops::compiled::apply_binary_op<cudf::binops::compiled::ops::Div>(
+      out, sum_without_nulls, count_result, false, false, stream, mr.get_temporary_mr());
+  }
   // SUM result only has nulls if it is an input aggregation, not intermediate-only aggregation.
   if (sum_result.has_nulls()) {
     result->set_null_mask(cudf::detail::copy_bitmask(sum_result, stream, mr.get_output_mr()),
                           sum_result.null_count());
   } else if (col.has_nulls()) {  // SUM aggregation is only intermediate result, thus it is
                                  // forced to be non-nullable
-    auto [null_mask, null_count] = cudf::detail::valid_if(
-      count_result.begin<size_type>(),
-      count_result.end<size_type>(),
-      [] __device__(size_type const count) -> bool { return count > 0; },
-      stream,
-      cudf::memory_resources{mr.get_temporary_mr(), mr.get_temporary_mr()});
+    auto [null_mask, null_count] =
+      make_mask_from_counts(count_result.begin<size_type>(),
+                            count_result.end<size_type>(),
+                            stream,
+                            cudf::memory_resources{mr.get_temporary_mr(), mr.get_temporary_mr()});
     if (null_count > 0) {
       result->set_null_mask(rmm::device_buffer{null_mask, stream, mr.get_output_mr()}, null_count);
     }

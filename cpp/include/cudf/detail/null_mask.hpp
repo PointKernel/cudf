@@ -52,11 +52,14 @@ void set_null_mask(bitmask_type* bitmask,
  * @param stop Index of the last bit to count (exclusive).
  * @param stream CUDA stream used for device memory operations and kernel launches.
  * @return The number of non-zero bits in the specified range.
+ * @param temp_mr Resource used for temporary device allocations
  */
-cudf::size_type count_set_bits(bitmask_type const* bitmask,
-                               size_type start,
-                               size_type stop,
-                               cuda::stream_ref stream);
+cudf::size_type count_set_bits(
+  bitmask_type const* bitmask,
+  size_type start,
+  size_type stop,
+  cuda::stream_ref stream,
+  rmm::device_async_resource_ref temp_mr = cudf::get_current_device_resource_ref());
 
 /**
  * @brief Given a bitmask, counts the number of unset (0) bits in the range
@@ -71,11 +74,14 @@ cudf::size_type count_set_bits(bitmask_type const* bitmask,
  * @param stop Index of the last bit to count (exclusive).
  * @param stream CUDA stream used for device memory operations and kernel launches.
  * @return The number of zero bits in the specified range.
+ * @param temp_mr Resource used for temporary device allocations
  */
-cudf::size_type count_unset_bits(bitmask_type const* bitmask,
-                                 size_type start,
-                                 size_type stop,
-                                 cuda::stream_ref stream);
+cudf::size_type count_unset_bits(
+  bitmask_type const* bitmask,
+  size_type start,
+  size_type stop,
+  cuda::stream_ref stream,
+  rmm::device_async_resource_ref temp_mr = cudf::get_current_device_resource_ref());
 
 /**
  * @brief Given a bitmask, counts the number of set (1) bits in every range
@@ -126,21 +132,27 @@ std::vector<size_type> segmented_count_unset_bits(bitmask_type const* bitmask,
  * @param[in] stop Index of the last bit to count (exclusive).
  * @param[in] stream CUDA stream used for device memory operations and kernel launches.
  * @return The number of valid elements in the specified range.
+ * @param temp_mr Resource used for temporary device allocations
  */
-cudf::size_type valid_count(bitmask_type const* bitmask,
-                            size_type start,
-                            size_type stop,
-                            cuda::stream_ref stream);
+cudf::size_type valid_count(
+  bitmask_type const* bitmask,
+  size_type start,
+  size_type stop,
+  cuda::stream_ref stream,
+  rmm::device_async_resource_ref temp_mr = cudf::get_current_device_resource_ref());
 
 /**
  * @copydoc null_count(bitmask_type const* bitmask, size_type start, size_type stop)
  *
  * @param stream Stream view on which to allocate resources and queue execution.
+ * @param temp_mr Resource used for temporary device allocations
  */
-cudf::size_type null_count(bitmask_type const* bitmask,
-                           size_type start,
-                           size_type stop,
-                           cuda::stream_ref stream);
+cudf::size_type null_count(
+  bitmask_type const* bitmask,
+  size_type start,
+  size_type stop,
+  cuda::stream_ref stream,
+  rmm::device_async_resource_ref temp_mr = cudf::get_current_device_resource_ref());
 
 /**
  * @copydoc cudf::segmented_valid_count
@@ -187,7 +199,7 @@ std::pair<rmm::device_buffer, size_type> bitmask_and(host_span<bitmask_type cons
                                                      host_span<size_type const> masks_begin_bits,
                                                      size_type mask_size_bits,
                                                      cuda::stream_ref stream,
-                                                     rmm::device_async_resource_ref mr);
+                                                     cudf::memory_resources mr);
 
 /**
  * @copydoc cudf::bitmask_and
@@ -196,7 +208,7 @@ std::pair<rmm::device_buffer, size_type> bitmask_and(host_span<bitmask_type cons
  */
 std::pair<rmm::device_buffer, size_type> bitmask_and(table_view const& view,
                                                      cuda::stream_ref stream,
-                                                     rmm::device_async_resource_ref mr);
+                                                     cudf::memory_resources mr);
 
 /**
  * @copydoc cudf::segmented_bitmask_and

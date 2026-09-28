@@ -15,6 +15,7 @@
 #include <cudf_test/type_lists.hpp>
 
 #include <cudf/aggregation.hpp>
+#include <cudf/detail/groupby.hpp>
 #include <cudf/groupby.hpp>
 #include <cudf/sorting.hpp>
 
@@ -610,4 +611,86 @@ TEST_F(groupby_key_shape_test, BatchedNullableSumUsesOutputAndTemporaryResources
     }
   }
   harness.expect_no_live_allocations(stream);
+}
+
+// Keep the current resource distinct from both explicitly supplied resources: a
+// fallback to current must fail, even when output and temporary accounting looks right.
+TEST_F(groupby_key_shape_test, ExplicitResourcesForCompoundAndFusedAggregations)
+{
+  auto const stream = cudf::test::get_default_stream();
+  cudf::test::fixed_width_column_wrapper<int32_t> keys_a{{0, 0, 1, 1, 2, 2},
+                                                         {true, true, true, true, false, true}};
+  cudf::test::fixed_width_column_wrapper<int32_t> keys_b{{0, 0, 0, 0, 0, 0},
+                                                         {true, true, true, true, true, false}};
+  cudf::test::fixed_width_column_wrapper<int32_t> values{1, 3, 2, 4, 5, 6};
+  cudf::test::fixed_width_column_wrapper<int32_t> null_values{
+    {1, 3, 2, 4, 5, 6}, {true, true, false, false, true, true}};
+  cudf::test::structs_column_wrapper nested_keys{{keys_a, keys_b},
+                                                 {true, true, true, true, false, true}};
+  cudf::test::strings_column_wrapper string_keys{{"a", "a", "b", "b", "c", "c"},
+                                                 {true, true, true, true, false, true}};
+  std::vector<cudf::table_view> key_tables{cudf::table_view{{keys_a, keys_b}},
+                                           cudf::table_view{{nested_keys}},
+                                           cudf::table_view{{string_keys}}};
+  for (auto const& keys : key_tables) {
+    for (bool nullable : {false, true}) {
+      for (int mode = 0; mode < 4; ++mode) {
+        SCOPED_TRACE(::testing::Message() << "nullable=" << nullable << " mode=" << mode);
+        auto const input = nullable ? cudf::column_view(null_values) : cudf::column_view(values);
+        std::vector<cudf::groupby::aggregation_request> requests(1);
+        requests[0].values = input;
+        auto& aggs         = requests[0].aggregations;
+        if (mode == 0) {
+          aggs.push_back(cudf::make_mean_aggregation<cudf::groupby_aggregation>());
+          aggs.push_back(cudf::make_variance_aggregation<cudf::groupby_aggregation>());
+          aggs.push_back(cudf::make_std_aggregation<cudf::groupby_aggregation>());
+          aggs.push_back(cudf::make_m2_aggregation<cudf::groupby_aggregation>());
+        } else if (mode == 1) {
+          aggs.push_back(cudf::make_min_aggregation<cudf::groupby_aggregation>());
+          aggs.push_back(cudf::make_max_aggregation<cudf::groupby_aggregation>());
+          aggs.push_back(cudf::make_sum_aggregation<cudf::groupby_aggregation>());
+        } else if (mode == 2) {
+          aggs.push_back(cudf::make_argmin_aggregation<cudf::groupby_aggregation>());
+          aggs.push_back(cudf::make_argmax_aggregation<cudf::groupby_aggregation>());
+          aggs.push_back(cudf::make_product_aggregation<cudf::groupby_aggregation>());
+        } else {
+          aggs.push_back(cudf::make_sum_overflow_aggregation<cudf::groupby_aggregation>());
+        }
+        auto expected = cudf::groupby::detail::hash::groupby(
+          keys, requests, cudf::null_policy::EXCLUDE, stream, this->mr());
+        auto harness = cudf::test::memory_resource_test_harness{this->mr()};
+        {
+          auto result = [&] {
+            auto scope  = harness.fail_on_current_device_resource_use();
+            auto result = cudf::groupby::detail::hash::groupby(
+              keys, requests, cudf::null_policy::EXCLUDE, stream, harness.resources());
+            harness.synchronize(stream);
+            return result;
+          }();
+          auto output_bytes = result.first->alloc_size();
+          for (auto const& column : result.second[0].results) {
+            output_bytes += column->alloc_size();
+          }
+          harness.expect_resource_usage(output_bytes,
+                                        {cudf::test::output_allocation_expectation::EXACT,
+                                         cudf::test::temporary_allocation_expectation::SOME},
+                                        stream);
+          auto actual_keys = result.first->view();
+          std::vector<cudf::column_view> actual_views(actual_keys.begin(), actual_keys.end());
+          auto expected_keys = expected.first->view();
+          std::vector<cudf::column_view> expected_views(expected_keys.begin(), expected_keys.end());
+          for (auto const& column : result.second[0].results) {
+            actual_views.push_back(column->view());
+          }
+          for (auto const& column : expected.second[0].results) {
+            expected_views.push_back(column->view());
+          }
+          auto actual_sorted   = cudf::sort(cudf::table_view{actual_views}, {}, {}, stream);
+          auto expected_sorted = cudf::sort(cudf::table_view{expected_views}, {}, {}, stream);
+          CUDF_TEST_EXPECT_TABLES_EQUAL(expected_sorted->view(), actual_sorted->view());
+        }
+        harness.expect_no_live_allocations(stream);
+      }
+    }
+  }
 }

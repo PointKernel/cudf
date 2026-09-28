@@ -734,6 +734,7 @@ add_library(
   src/filling/repeat.cu
   src/filling/sequence.cu
   src/groupby/common/m2_var_std.cu
+  src/groupby/common/null_mask.cu
   src/groupby/common/utils.cpp
   src/groupby/groupby.cu
   src/groupby/hash/compute_groupby.cu

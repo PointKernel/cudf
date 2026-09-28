@@ -413,7 +413,7 @@ std::pair<column_view, temporary_nullable_data> push_down_nulls_no_sanitize(
 
   // Function to rewrite child null mask.
   auto const child_with_new_mask = [&](auto const& child_idx) {
-    auto child = structs_view.get_sliced_child(child_idx, stream);
+    auto child = structs_view.get_sliced_child(child_idx, stream, mr);
 
     // If struct is not nullable, child null mask is retained. NOOP.
     if (not structs_view.nullable()) { return child; }
@@ -438,7 +438,7 @@ std::pair<column_view, temporary_nullable_data> push_down_nulls_no_sanitize(
                                                               std::vector<size_type>{0, 0},
                                                               child.offset() + child.size(),
                                                               stream,
-                                                              mr);
+                                                              cudf::memory_resources{mr, mr});
       ret_nullable_data.new_null_masks.push_back(std::move(new_mask));
       return std::pair{
         reinterpret_cast<bitmask_type const*>(ret_nullable_data.new_null_masks.back().data()),
@@ -621,9 +621,9 @@ std::pair<column_view, temporary_nullable_data> push_down_nulls(column_view cons
   auto output = push_down_nulls_no_sanitize(input, stream, mr);
 
   if (auto const output_view = output.first;
-      cudf::detail::has_nonempty_nulls(output_view, stream)) {
+      cudf::detail::has_nonempty_nulls(output_view, stream, mr)) {
     output.second.new_columns.emplace_back(
-      cudf::detail::purge_nonempty_nulls(output_view, stream, mr));
+      cudf::detail::purge_nonempty_nulls(output_view, stream, cudf::memory_resources{mr, mr}));
     output.first = output.second.new_columns.back()->view();
 
     // Don't need the temp null mask anymore, as we will create a new column.

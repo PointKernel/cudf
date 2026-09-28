@@ -100,8 +100,6 @@ auto extract_hash_groupby_aggs(std::span<aggregation_request const> requests,
 
 /// The keys grouped by the HashCSR build.
 struct grouped_keys {
-  size_type num_groups;
-  size_type num_grouped_rows;
   rmm::device_uvector<size_type> key_rows;       ///< One representative input row per group
   rmm::device_uvector<size_type> group_offsets;  ///< `num_groups + 1` offsets into `grouped_rows`
   rmm::device_uvector<size_type> grouped_rows;   ///< Input rows reordered so groups are contiguous
@@ -309,10 +307,7 @@ grouped_keys group_keys(size_type num_rows,
   }
 
   if (!need_grouped_rows) {
-    auto const num_groups = static_cast<size_type>(key_rows.size());
-    return {num_groups,
-            0,
-            std::move(key_rows),
+    return {std::move(key_rows),
             rmm::device_uvector<size_type>{0, stream, mr.get_output_mr()},
             rmm::device_uvector<size_type>{0, stream, mr.get_output_mr()}};
   }
@@ -347,8 +342,7 @@ grouped_keys group_keys(size_type num_rows,
       }};
     thrust::sequence(
       policy, singleton_outputs, singleton_outputs + group_offsets.size(), size_type{0});
-    return {
-      num_groups, num_rows, std::move(key_rows), std::move(group_offsets), std::move(grouped_rows)};
+    return {std::move(key_rows), std::move(group_offsets), std::move(grouped_rows)};
   }
 
   auto const slot_rows = slots.begin();
@@ -383,11 +377,7 @@ grouped_keys group_keys(size_type num_rows,
   launch_hash_csr_fill_kernel(
     num_rows, positions.data(), slot_counts.data(), grouped_rows.data(), stream);
 
-  return {num_groups,
-          num_grouped_rows,
-          std::move(key_rows),
-          std::move(group_offsets),
-          std::move(grouped_rows)};
+  return {std::move(key_rows), std::move(group_offsets), std::move(grouped_rows)};
 }
 
 }  // namespace
@@ -460,8 +450,7 @@ std::unique_ptr<table> compute_groupby(table_view const& keys,
     // Requested M2 results must be cached on the output resource before VARIANCE or STD asks
     // for an intermediate M2, regardless of the order of requests on a shared values column.
     for (auto const& request : requests) {
-      auto const finalizer =
-        hash_compound_agg_finalizer(request.values, cache, row_bitmask, stream, mr);
+      auto const finalizer = hash_compound_agg_finalizer(request.values, cache, stream, mr);
       for (auto const& agg : request.aggregations) {
         if (agg->kind == aggregation::M2) {
           cudf::detail::aggregation_dispatcher(agg->kind, finalizer, *agg);
@@ -474,14 +463,14 @@ std::unique_ptr<table> compute_groupby(table_view const& keys,
 
       // The finalizers only combine the single-pass results with linear transformations such as
       // addition/multiplication (e.g. for variance/stddev); they do not aggregate further.
-      auto const finalizer = hash_compound_agg_finalizer(col, cache, row_bitmask, stream, mr);
+      auto const finalizer = hash_compound_agg_finalizer(col, cache, stream, mr);
       for (auto&& agg : agg_v) {
         if (agg->kind == aggregation::VARIANCE || agg->kind == aggregation::STD) {
           // Explicit M2 outputs were finalized above. Any missing M2 is only an intermediate
           // for this ordinary groupby; the shared finalizer also serves streaming groupby.
           auto const m2_agg = make_m2_aggregation();
           auto const m2_finalizer =
-            hash_compound_agg_finalizer(col, cache, row_bitmask, stream, temporary_resources);
+            hash_compound_agg_finalizer(col, cache, stream, temporary_resources);
           cudf::detail::aggregation_dispatcher(m2_agg->kind, m2_finalizer, *m2_agg);
         }
         cudf::detail::aggregation_dispatcher(agg->kind, finalizer, *agg);

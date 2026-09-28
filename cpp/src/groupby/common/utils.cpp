@@ -6,6 +6,7 @@
 #include "groupby/common/utils.hpp"
 
 #include <cudf/copying.hpp>
+#include <cudf/detail/null_mask.hpp>
 #include <cudf/null_mask.hpp>
 #include <cudf/utilities/memory_resource.hpp>
 
@@ -27,7 +28,7 @@ std::pair<rmm::device_buffer, bitmask_type const*> compute_row_bitmask(table_vie
     auto ptr = static_cast<bitmask_type const*>(buf.data());
     return {std::move(buf), ptr};
   }
-  auto [buf, null_count] = cudf::bitmask_and(keys, stream, output_mr);
+  auto [buf, null_count] = cudf::detail::bitmask_and(keys, stream, mr);
   if (null_count == 0) { return {rmm::device_buffer{0, stream, output_mr}, nullptr}; }
   return {std::move(buf), static_cast<bitmask_type const*>(buf.data())};
 }

@@ -44,26 +44,10 @@
 
 namespace cudf::groupby::detail::hash {
 
-/// Reads a fixed-width element, going through the keys when the column is a dictionary.
-template <typename T>
-struct value_accessor {
-  column_device_view col;
-  bool is_dictionary;
-
-  __device__ T operator()(size_type row) const
-  {
-    if (is_dictionary) {
-      auto const keys = col.child(dictionary_column_view::keys_column_index);
-      return keys.element<T>(static_cast<size_type>(col.element<dictionary32>(row)));
-    }
-    return col.element<T>(row);
-  }
-};
-
 template <typename T>
 value_accessor<T> reduction_context::accessor() const
 {
-  return {d_values, is_dictionary(values.type())};
+  return value_accessor<T>{d_values};
 }
 
 /// Maps a grouped position to the value of the input row at that position, substituting
@@ -238,7 +222,11 @@ struct grouped_reduction_fn {
                                      cuda::stream_ref stream,
                                      cudf::memory_resources mr) const
   {
-    auto result = make_size_type_column(ctx, stream, mr);
+    auto result = make_fixed_width_column(data_type{type_to_id<size_type>()},
+                                          ctx.num_groups,
+                                          mask_state::UNALLOCATED,
+                                          stream,
+                                          mr.get_output_mr());
     if (ctx.num_groups == 0) { return result; }
 
     // The grouped rows are the input row indices themselves, so reducing them with the

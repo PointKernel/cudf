@@ -11,5 +11,6 @@ template void apply_binary_op<ops::Add>(mutable_column_view&,
                                         column_view const&,
                                         bool is_lhs_scalar,
                                         bool is_rhs_scalar,
-                                        cuda::stream_ref);
+                                        cuda::stream_ref,
+                                        rmm::device_async_resource_ref);
 }

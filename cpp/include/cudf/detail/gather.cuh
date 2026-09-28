@@ -451,12 +451,12 @@ struct column_gatherer_impl<struct_view> {
     // Gathering needs to operate on the sliced children since they need to take into account the
     // offset of the parent structs column.
     std::vector<cudf::column_view> sliced_children;
-    std::transform(cuda::counting_iterator<cudf::size_type>{0},
-                   cuda::counting_iterator{column.num_children()},
-                   std::back_inserter(sliced_children),
-                   [&stream, structs_view = structs_column_view{column}](auto const idx) {
-                     return structs_view.get_sliced_child(idx, stream);
-                   });
+    std::transform(
+      cuda::counting_iterator<cudf::size_type>{0},
+      cuda::counting_iterator{column.num_children()},
+      std::back_inserter(sliced_children),
+      [&stream, temp_mr = mr.get_temporary_mr(), structs_view = structs_column_view{column}](
+        auto const idx) { return structs_view.get_sliced_child(idx, stream, temp_mr); });
 
     std::vector<std::unique_ptr<cudf::column>> output_struct_members;
     std::transform(sliced_children.begin(),

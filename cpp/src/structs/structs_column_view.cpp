@@ -19,22 +19,29 @@ column_view structs_column_view::parent() const { return *this; }
 
 column_view structs_column_view::get_sliced_child(int index, cuda::stream_ref stream) const
 {
+  return get_sliced_child(index, stream, cudf::get_current_device_resource_ref());
+}
+
+column_view structs_column_view::get_sliced_child(int index,
+                                                  cuda::stream_ref stream,
+                                                  rmm::device_async_resource_ref temp_mr) const
+{
   std::vector<column_view> children;
   children.reserve(child(index).num_children());
   for (size_type i = 0; i < child(index).num_children(); i++) {
     children.push_back(child(index).child(i));
   }
 
-  return column_view{
-    child(index).type(),
-    size(),
-    child(index).head<uint8_t>(),
-    child(index).null_mask(),
-    child(index).null_count()
-      ? cudf::detail::null_count(child(index).null_mask(), offset(), offset() + size(), stream)
-      : 0,
-    offset(),
-    children};
+  return column_view{child(index).type(),
+                     size(),
+                     child(index).head<uint8_t>(),
+                     child(index).null_mask(),
+                     child(index).null_count()
+                       ? cudf::detail::null_count(
+                           child(index).null_mask(), offset(), offset() + size(), stream, temp_mr)
+                       : 0,
+                     offset(),
+                     children};
 }
 
 }  // namespace cudf
