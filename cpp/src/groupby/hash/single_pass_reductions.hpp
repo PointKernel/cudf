@@ -53,13 +53,10 @@ struct reduction_context {
 };
 
 // Shared host helpers are defined only in the frontend, keeping their reduction kernels unique.
-std::pair<rmm::device_buffer, size_type> reduce_group_validity(reduction_context const& ctx,
-                                                               cuda::stream_ref stream,
-                                                               cudf::memory_resources mr);
-void set_group_null_mask(column& result,
-                         reduction_context const& ctx,
-                         cuda::stream_ref stream,
-                         cudf::memory_resources mr);
+size_type count_group_nulls(bitmask_type const* mask,
+                            size_type num_groups,
+                            cuda::stream_ref stream,
+                            rmm::device_async_resource_ref temp_mr);
 std::unique_ptr<column> count_groups(reduction_context const& ctx,
                                      bool valid_only,
                                      cuda::stream_ref stream,

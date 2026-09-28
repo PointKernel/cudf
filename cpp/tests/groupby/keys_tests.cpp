@@ -694,3 +694,68 @@ TEST_F(groupby_key_shape_test, ExplicitResourcesForCompoundAndFusedAggregations)
     }
   }
 }
+
+TEST_F(groupby_key_shape_test, FusedValidityAcrossReductionBoundaries)
+{
+  // Adjacent groups share mask words; sizes cross warp, block, and long-segment boundaries.
+  std::vector<cudf::size_type> const sizes{1, 31, 32, 33, 255, 256, 257, 4097};
+  constexpr cudf::size_type num_groups = 65;
+  std::vector<int32_t> keys;
+  std::vector<int64_t> values;
+  std::vector<bool> valid;
+  std::vector<cudf::size_type> minima, maxima;
+  std::vector<int64_t> sums;
+  std::vector<bool> group_valid;
+  for (cudf::size_type group = 0; group < num_groups; ++group) {
+    auto const size  = sizes[group % sizes.size()];
+    auto const start = static_cast<cudf::size_type>(keys.size());
+    int64_t sum{0};
+    for (cudf::size_type row = 0; row < size; ++row) {
+      // All-null, all-valid, and only-the-last-row-valid groups exercise partial merging.
+      bool const is_valid = group % 3 == 1 || (group % 3 == 2 && row == size - 1);
+      keys.push_back(group);
+      values.push_back(row + 1);
+      valid.push_back(is_valid);
+      if (is_valid) { sum += row + 1; }
+    }
+    minima.push_back(group % 3 == 1 ? start : start + size - 1);
+    maxima.push_back(start + size - 1);
+    sums.push_back(sum);
+    group_valid.push_back(group % 3 != 0);
+  }
+  cudf::test::fixed_width_column_wrapper<int32_t> key_column(keys.begin(), keys.end());
+  cudf::test::fixed_width_column_wrapper<int64_t> value_column(
+    values.begin(), values.end(), valid.begin());
+  auto const group_ids = cuda::counting_iterator<cudf::size_type>{0};
+  cudf::test::fixed_width_column_wrapper<int32_t> expected_keys(group_ids, group_ids + num_groups);
+  cudf::test::fixed_width_column_wrapper<cudf::size_type> expected_min(
+    minima.begin(), minima.end(), group_valid.begin());
+  cudf::test::fixed_width_column_wrapper<cudf::size_type> expected_max(
+    maxima.begin(), maxima.end(), group_valid.begin());
+  cudf::test::fixed_width_column_wrapper<int64_t> expected_sum(sums.begin(), sums.end());
+  auto const no_overflow = cuda::make_constant_iterator(false);
+  cudf::test::fixed_width_column_wrapper<bool> expected_flags(no_overflow,
+                                                              no_overflow + num_groups);
+  std::vector<std::unique_ptr<cudf::column>> children;
+  children.push_back(expected_sum.release());
+  children.push_back(expected_flags.release());
+  auto [mask, null_count] =
+    cudf::test::detail::make_null_mask(group_valid.begin(), group_valid.end());
+  auto expected_overflow =
+    cudf::create_structs_hierarchy(num_groups, std::move(children), null_count, std::move(mask));
+  test_single_agg(key_column,
+                  value_column,
+                  expected_keys,
+                  expected_min,
+                  cudf::make_argmin_aggregation<cudf::groupby_aggregation>());
+  test_single_agg(key_column,
+                  value_column,
+                  expected_keys,
+                  expected_max,
+                  cudf::make_argmax_aggregation<cudf::groupby_aggregation>());
+  test_single_agg(key_column,
+                  value_column,
+                  expected_keys,
+                  *expected_overflow,
+                  cudf::make_sum_overflow_aggregation<cudf::groupby_aggregation>());
+}

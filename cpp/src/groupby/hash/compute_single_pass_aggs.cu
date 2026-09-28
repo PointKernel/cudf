@@ -50,49 +50,19 @@
 
 namespace cudf::groupby::detail::hash {
 
-/// A group is valid when any of its rows is valid.
-std::pair<rmm::device_buffer, size_type> reduce_group_validity(reduction_context const& ctx,
-                                                               cuda::stream_ref stream,
-                                                               cudf::memory_resources mr)
+// Count only the group bits; padding remains valid after atomic mask updates.
+size_type count_group_nulls(bitmask_type const* mask,
+                            size_type num_groups,
+                            cuda::stream_ref stream,
+                            rmm::device_async_resource_ref temp_mr)
 {
-  auto null_mask =
-    cudf::create_null_mask(ctx.num_groups, mask_state::ALL_VALID, stream, mr.get_output_mr());
-  if (ctx.num_groups == 0) { return {std::move(null_mask), 0}; }
-
-  auto const mask   = static_cast<bitmask_type*>(null_mask.data());
-  auto const output = cuda::tabulate_output_iterator{
-    [mask] __device__(cuda::std::ptrdiff_t group, bool valid) -> void {
-      // Different groups may share a mask word, so updates must be atomic.
-      if (!valid) { cudf::clear_bit(mask, static_cast<size_type>(group)); }
-    }};
-  reduce_groups(ctx.grouped,
-                cuda::make_permutation_iterator(cudf::detail::make_validity_iterator(ctx.d_values),
-                                                ctx.grouped.rows.begin()),
-                output,
-                cuda::std::logical_or<bool>{},
-                false,
-                stream,
-                mr);
-
-  // Padding stays valid, so only group bits contribute to this count.
-  auto const null_count = thrust::transform_reduce(
-    rmm::exec_policy_nosync(stream, mr.get_temporary_mr()),
+  return thrust::transform_reduce(
+    rmm::exec_policy_nosync(stream, temp_mr),
     mask,
-    mask + cudf::num_bitmask_words(ctx.num_groups),
+    mask + cudf::num_bitmask_words(num_groups),
     [] __device__(bitmask_type word) -> size_type { return __popc(~word); },
     size_type{0},
     cuda::std::plus<size_type>{});
-  return {std::move(null_mask), null_count};
-}
-
-void set_group_null_mask(column& result,
-                         reduction_context const& ctx,
-                         cuda::stream_ref stream,
-                         cudf::memory_resources mr)
-{
-  if (!ctx.nullable || ctx.num_groups == 0) { return; }
-  auto [null_mask, null_count] = reduce_group_validity(ctx, stream, mr);
-  result.set_null_mask(std::move(null_mask), null_count);
 }
 
 std::unique_ptr<column> count_groups(reduction_context const& ctx,
