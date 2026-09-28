@@ -128,7 +128,10 @@ void hash_compound_agg_finalizer::operator()<aggregation::MEAN>(aggregation cons
                             stream,
                             cudf::memory_resources{mr.get_temporary_mr(), mr.get_temporary_mr()});
     if (null_count > 0) {
-      result->set_null_mask(rmm::device_buffer{null_mask, stream, mr.get_output_mr()}, null_count);
+      result->set_null_mask(
+        cuda::device_buffer<std::byte>{
+          stream, mr.get_output_mr(), null_mask.begin(), null_mask.end()},
+        null_count);
     }
   }
   cache->add_result(col, agg, std::move(result));

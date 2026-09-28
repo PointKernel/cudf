@@ -257,7 +257,7 @@ struct grouped_reduction_fn {
                              ctx.nullable ? mask_state::ALL_VALID : mask_state::UNALLOCATED,
                              stream,
                              mr.get_output_mr());
-    auto const mask = static_cast<bitmask_type*>(null_mask.data());
+    auto const mask = reinterpret_cast<bitmask_type*>(null_mask.data());
     reduce(cuda::tabulate_output_iterator{
       [out, mask, values = ctx.d_values] __device__(cuda::std::ptrdiff_t group, size_type row) {
         out[group] = row;
@@ -289,13 +289,13 @@ struct grouped_reduction_fn {
                                                   mask_state::UNALLOCATED,
                                                   stream,
                                                   mr.get_output_mr());
-    rmm::device_buffer null_mask{0, stream, mr.get_output_mr()};
+    auto null_mask = cudf::create_null_mask(0, mask_state::UNALLOCATED, stream, mr.get_output_mr());
     size_type null_count{0};
     if (ctx.num_groups > 0) {
       if (ctx.nullable) {
         null_mask =
           cudf::create_null_mask(ctx.num_groups, mask_state::ALL_VALID, stream, mr.get_output_mr());
-        auto const mask   = static_cast<bitmask_type*>(null_mask.data());
+        auto const mask   = reinterpret_cast<bitmask_type*>(null_mask.data());
         auto const values = cudf::detail::make_counting_transform_iterator(
           0,
           grouped_sum_overflow_fn<Source, true>{

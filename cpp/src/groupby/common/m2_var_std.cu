@@ -150,7 +150,8 @@ std::unique_ptr<column> compute_variance_std(TransformFunc&& transform_fn,
     cudf::memory_resources{mr.get_temporary_mr(), mr.get_temporary_mr()});
   if (null_count > 0) {
     if (mr.get_output_mr() != mr.get_temporary_mr()) {
-      null_mask = rmm::device_buffer{null_mask, stream, mr.get_output_mr()};
+      null_mask = cuda::device_buffer<std::byte>{
+        stream, mr.get_output_mr(), null_mask.begin(), null_mask.end()};
     }
     output->set_null_mask(std::move(null_mask), null_count);
   }
