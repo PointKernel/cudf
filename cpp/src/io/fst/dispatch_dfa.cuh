@@ -1,5 +1,5 @@
 /*
- * SPDX-FileCopyrightText: Copyright (c) 2022-2026, NVIDIA CORPORATION.
+ * SPDX-FileCopyrightText: Copyright (c) 2022-2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
 #pragma once
@@ -7,7 +7,12 @@
 #include "agent_dfa.cuh"
 #include "in_reg_array.cuh"
 
-#include <cub/cub.cuh>
+#include <cudf/utilities/error.hpp>
+
+#include <cub/agent/single_pass_scan_operators.cuh>
+#include <cub/device/device_scan.cuh>
+#include <cub/util_debug.cuh>
+#include <cub/util_device.cuh>
 #include <cuda/functional>
 
 #include <cstdint>

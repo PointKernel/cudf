@@ -1,13 +1,14 @@
 /*
- * SPDX-FileCopyrightText: Copyright (c) 2022-2025, NVIDIA CORPORATION.
+ * SPDX-FileCopyrightText: Copyright (c) 2022-2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
 #pragma once
 
-#include <cudf/detail/utilities/integer_utils.hpp>
 #include <cudf/types.hpp>
 
-#include <cub/cub.cuh>
+#include <cuda/bit>
+#include <cuda/cmath>
+#include <cuda/std/bit>
 
 #include <cstdint>
 
@@ -28,7 +29,7 @@ class MultiFragmentInRegArray {
  private:
   /// Minimum number of bits required to represent all values from [0, MAX_ITEM_VALUE]
   static constexpr uint32_t MIN_BITS_PER_ITEM =
-    (MAX_ITEM_VALUE == 0) ? 1 : cub::Log2<(MAX_ITEM_VALUE + 1)>::VALUE;
+    (MAX_ITEM_VALUE == 0) ? 1 : cuda::std::bit_width(MAX_ITEM_VALUE);
 
   /// Number of bits that each fragment can store
   static constexpr uint32_t NUM_BITS_PER_FRAGMENT = sizeof(BackingFragmentT) * 8;
@@ -38,42 +39,11 @@ class MultiFragmentInRegArray {
 
   /// The number of bits per item per fragment to be a power of two to avoid costly integer
   /// multiplication
-  static constexpr uint32_t BITS_PER_FRAG_ITEM =
-    0x01U << (cub::Log2<(AVAIL_BITS_PER_FRAG_ITEM + 1)>::VALUE - 1);
+  static constexpr uint32_t BITS_PER_FRAG_ITEM = cuda::std::bit_floor(AVAIL_BITS_PER_FRAG_ITEM);
 
   // The total number of fragments required to store all the items
   static constexpr uint32_t FRAGMENTS_PER_ITEM =
-    cudf::util::div_rounding_up_safe(MIN_BITS_PER_ITEM, BITS_PER_FRAG_ITEM);
-
-  //------------------------------------------------------------------------------
-  // HELPER FUNCTIONS
-  //------------------------------------------------------------------------------
-  /**
-   * @brief Returns the \p num_bits bits starting at \p bit_start
-   */
-  CUDF_HOST_DEVICE [[nodiscard]] uint32_t bfe(uint32_t const& data,
-                                              uint32_t bit_start,
-                                              uint32_t num_bits) const
-  {
-    uint32_t const MASK = (1 << num_bits) - 1;
-    return (data >> bit_start) & MASK;
-  }
-
-  /**
-   * @brief Replaces the \p num_bits bits in \p data starting from \p bit_start with the lower \p
-   * num_bits from \p bits.
-   */
-  CUDF_HOST_DEVICE void bfi(uint32_t& data,
-                            uint32_t bits,
-                            uint32_t bit_start,
-                            uint32_t num_bits) const
-  {
-    uint32_t x      = bits << bit_start;
-    uint32_t y      = data;
-    uint32_t MASK_X = ((1 << num_bits) - 1) << bit_start;
-    uint32_t MASK_Y = ~MASK_X;
-    data            = (y & MASK_Y) | (x & MASK_X);
-  }
+    cuda::ceil_div(MIN_BITS_PER_ITEM, BITS_PER_FRAG_ITEM);
 
   BackingFragmentT data[FRAGMENTS_PER_ITEM];
 
@@ -86,7 +56,7 @@ class MultiFragmentInRegArray {
     uint32_t val = 0;
 
     for (uint32_t i = 0; i < FRAGMENTS_PER_ITEM; ++i) {
-      val = val | bfe(data[i], index * BITS_PER_FRAG_ITEM, BITS_PER_FRAG_ITEM)
+      val = val | cuda::bitfield_extract(data[i], index * BITS_PER_FRAG_ITEM, BITS_PER_FRAG_ITEM)
                     << (i * BITS_PER_FRAG_ITEM);
     }
     return val;
@@ -95,8 +65,12 @@ class MultiFragmentInRegArray {
   CUDF_HOST_DEVICE void Set(uint32_t index, uint32_t value)
   {
     for (uint32_t i = 0; i < FRAGMENTS_PER_ITEM; ++i) {
-      uint32_t frag_bits = bfe(value, i * BITS_PER_FRAG_ITEM, BITS_PER_FRAG_ITEM);
-      bfi(data[i], frag_bits, index * BITS_PER_FRAG_ITEM, BITS_PER_FRAG_ITEM);
+      uint32_t frag_bits =
+        cuda::bitfield_extract(value, i * BITS_PER_FRAG_ITEM, BITS_PER_FRAG_ITEM);
+      data[i] = cuda::bitfield_insert(data[i],
+                                      static_cast<BackingFragmentT>(frag_bits),
+                                      index * BITS_PER_FRAG_ITEM,
+                                      BITS_PER_FRAG_ITEM);
     }
   }
 

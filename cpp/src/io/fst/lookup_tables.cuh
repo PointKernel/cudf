@@ -10,7 +10,7 @@
 
 #include <cudf/types.hpp>
 
-#include <cub/cub.cuh>
+#include <cub/util_type.cuh>
 #include <cuda/std/iterator>
 
 #include <algorithm>
