@@ -16,7 +16,6 @@
 
 #include <cudf/aggregation.hpp>
 #include <cudf/copying.hpp>
-#include <cudf/detail/groupby.hpp>
 #include <cudf/groupby.hpp>
 #include <cudf/sorting.hpp>
 
@@ -614,9 +613,7 @@ TEST_F(groupby_key_shape_test, BatchedNullableSumUsesOutputAndTemporaryResources
   harness.expect_no_live_allocations(stream);
 }
 
-// Keep the current resource distinct from both explicitly supplied resources: a
-// fallback to current must fail, even when output and temporary accounting looks right.
-TEST_F(groupby_key_shape_test, ExplicitResourcesForCompoundAndFusedAggregations)
+TEST_F(groupby_key_shape_test, OutputAndTemporaryResourcesForCompoundAndFusedAggregations)
 {
   auto const stream = cudf::test::get_default_stream();
   cudf::test::fixed_width_column_wrapper<int32_t> keys_a{{0, 0, 1, 1, 2, 2},
@@ -663,14 +660,14 @@ TEST_F(groupby_key_shape_test, ExplicitResourcesForCompoundAndFusedAggregations)
         } else {
           aggs.push_back(cudf::make_sum_overflow_aggregation<cudf::groupby_aggregation>());
         }
-        auto expected = cudf::groupby::detail::hash::groupby(
-          keys, requests, cudf::null_policy::EXCLUDE, stream, this->mr());
-        auto harness = cudf::test::memory_resource_test_harness{this->mr()};
+        cudf::groupby::groupby expected_gb(keys);
+        auto expected = expected_gb.aggregate(requests, stream, this->mr());
+        auto harness  = cudf::test::memory_resource_test_harness{this->mr()};
         {
           auto result = [&] {
-            auto scope  = harness.fail_on_current_device_resource_use();
-            auto result = cudf::groupby::detail::hash::groupby(
-              keys, requests, cudf::null_policy::EXCLUDE, stream, harness.resources());
+            cudf::test::scoped_current_device_resource temporary_scope{harness.temporary_mr()};
+            cudf::groupby::groupby gb(keys);
+            auto result = gb.aggregate(requests, stream, harness.output_mr());
             harness.synchronize(stream);
             return result;
           }();

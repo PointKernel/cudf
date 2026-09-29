@@ -28,7 +28,7 @@ namespace groupby::detail::hash {
 bool can_use_hash_groupby(std::span<aggregation_request const> requests);
 
 // Hash-based groupby
-CUDF_EXPORT std::pair<std::unique_ptr<table>, std::vector<aggregation_result>> groupby(
+std::pair<std::unique_ptr<table>, std::vector<aggregation_result>> groupby(
   table_view const& keys,
   std::span<aggregation_request const> requests,
   null_policy include_null_keys,
