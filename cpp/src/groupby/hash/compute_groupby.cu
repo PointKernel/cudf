@@ -398,7 +398,7 @@ std::unique_ptr<table> compute_groupby(table_view const& keys,
 
   [[maybe_unused]] auto [row_bitmask_data, row_bitmask] =
     skip_rows_with_nulls
-      ? cudf::groupby::detail::compute_row_bitmask(keys, stream, temporary_resources)
+      ? cudf::groupby::detail::compute_row_bitmask(keys, stream)
       : std::pair<cuda::device_buffer<std::byte>, bitmask_type const*>{
           cudf::create_null_mask(0, mask_state::UNALLOCATED, stream, temp_mr), nullptr};
 

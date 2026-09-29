@@ -849,9 +849,8 @@ std::shared_ptr<preprocessed_table> preprocessed_table::create(
 {
   check_eq_compatibility(t);
 
-  auto [null_pushed_table, nullable_data] =
-    structs::detail::push_down_nulls(t, stream, cudf::memory_resources{temp_mr, temp_mr});
-  auto struct_offset_removed_table = remove_struct_child_offsets(null_pushed_table);
+  auto [null_pushed_table, nullable_data] = structs::detail::push_down_nulls(t, stream, temp_mr);
+  auto struct_offset_removed_table        = remove_struct_child_offsets(null_pushed_table);
   auto verticalized_t =
     std::get<0>(decompose_structs(struct_offset_removed_table, decompose_lists_column::YES));
 

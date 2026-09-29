@@ -171,7 +171,6 @@ bool is_supported_operation(data_type out, data_type lhs, data_type rhs, binary_
  * @param is_lhs_scalar true if @p lhs is a single element column representing a scalar
  * @param is_rhs_scalar true if @p rhs is a single element column representing a scalar
  * @param stream CUDA stream used for device memory operations
- * @param mr Memory resources used for device views and algorithm workspace
  */
 template <class BinaryOperator>
 void apply_binary_op(mutable_column_view& out,
@@ -179,8 +178,7 @@ void apply_binary_op(mutable_column_view& out,
                      column_view const& rhs,
                      bool is_lhs_scalar,
                      bool is_rhs_scalar,
-                     cuda::stream_ref stream,
-                     cudf::memory_resources mr = cudf::get_current_device_resource_ref());
+                     cuda::stream_ref stream);
 /**
  * @brief Deploys single type or double type dispatcher that runs equality operation on each element
  * of @p lhs and @p rhs columns.

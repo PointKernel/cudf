@@ -11,6 +11,5 @@ template void apply_binary_op<ops::NullLogicalAnd>(mutable_column_view&,
                                                    column_view const&,
                                                    bool is_lhs_scalar,
                                                    bool is_rhs_scalar,
-                                                   cuda::stream_ref,
-                                                   cudf::memory_resources);
+                                                   cuda::stream_ref);
 }  // namespace cudf::binops::compiled

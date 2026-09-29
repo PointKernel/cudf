@@ -6,12 +6,10 @@
 #include "binary_ops.cuh"
 
 namespace cudf::binops::compiled {
-
 template void apply_binary_op<ops::Div>(mutable_column_view&,
                                         column_view const&,
                                         column_view const&,
                                         bool is_lhs_scalar,
                                         bool is_rhs_scalar,
-                                        cuda::stream_ref,
-                                        cudf::memory_resources);
-}  // namespace cudf::binops::compiled
+                                        cuda::stream_ref);
+}

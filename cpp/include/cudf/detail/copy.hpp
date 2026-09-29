@@ -247,11 +247,8 @@ std::unique_ptr<scalar> get_element(column_view const& input,
  * @copydoc cudf::has_nonempty_nulls
  *
  * @param stream CUDA stream used for device memory operations and kernel launches.
- * @param mr Memory resources used for temporary device allocations
  */
-bool has_nonempty_nulls(column_view const& input,
-                        cuda::stream_ref stream,
-                        cudf::memory_resources mr = cudf::get_current_device_resource_ref());
+bool has_nonempty_nulls(column_view const& input, cuda::stream_ref stream);
 
 /**
  * @copydoc cudf::may_have_nonempty_nulls
@@ -267,7 +264,7 @@ bool may_have_nonempty_nulls(column_view const& input, cuda::stream_ref stream);
  */
 std::unique_ptr<column> purge_nonempty_nulls(column_view const& input,
                                              cuda::stream_ref stream,
-                                             cudf::memory_resources mr);
+                                             rmm::device_async_resource_ref mr);
 
 }  // namespace detail
 }  // namespace CUDF_EXPORT cudf

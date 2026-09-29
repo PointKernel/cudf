@@ -12,15 +12,13 @@
 #include <cudf/utilities/traits.hpp>
 #include <cudf/utilities/type_dispatcher.hpp>
 
-#include <rmm/device_uvector.hpp>
 #include <rmm/exec_policy.hpp>
 
 #include <cuda/iterator>
 #include <cuda/std/cmath>
+#include <cuda/std/functional>
 #include <cuda/stream>
 #include <thrust/tabulate.h>
-
-#include <utility>
 
 namespace cudf::groupby::detail {
 
@@ -46,10 +44,9 @@ struct m2_functor {
                 SumType const* sum,
                 CountType const* count,
                 size_type size,
-                cuda::stream_ref stream,
-                cudf::memory_resources mr) const noexcept
+                cuda::stream_ref stream) const noexcept
   {
-    thrust::tabulate(rmm::exec_policy_nosync(stream, mr.get_temporary_mr()),
+    thrust::tabulate(rmm::exec_policy_nosync(stream, cudf::get_current_device_resource_ref()),
                      target,
                      target + size,
                      [sum_sqr, sum, count] __device__(size_type const idx) {
@@ -67,8 +64,7 @@ struct m2_functor {
                   column_view const& sum_sqr,
                   column_view const& sum,
                   column_view const& count,
-                  cuda::stream_ref stream,
-                  cudf::memory_resources mr) const noexcept  //
+                  cuda::stream_ref stream) const noexcept  //
     requires(is_m2_supported<Source>())
   {
     using Target     = cudf::detail::target_type_t<Source, aggregation::M2>;
@@ -83,8 +79,7 @@ struct m2_functor {
              sum.begin<SumType>(),
              count.begin<CountType>(),
              target.size(),
-             stream,
-             mr);
+             stream);
   }
 };
 
@@ -95,15 +90,14 @@ std::unique_ptr<column> compute_m2(data_type source_type,
                                    column_view const& sum,
                                    column_view const& count,
                                    cuda::stream_ref stream,
-                                   cudf::memory_resources mr)
+                                   rmm::device_async_resource_ref mr)
 {
   auto output = make_numeric_column(cudf::detail::target_type(source_type, aggregation::M2),
                                     sum.size(),
                                     mask_state::UNALLOCATED,
                                     stream,
-                                    mr.get_output_mr());
-  type_dispatcher(
-    source_type, m2_functor{}, output->mutable_view(), sum_sqr, sum, count, stream, mr);
+                                    mr);
+  type_dispatcher(source_type, m2_functor{}, output->mutable_view(), sum_sqr, sum, count, stream);
   return output;
 }
 
@@ -130,31 +124,25 @@ template <typename TargetType, typename TransformFunc>
 std::unique_ptr<column> compute_variance_std(TransformFunc&& transform_fn,
                                              size_type size,
                                              cuda::stream_ref stream,
-                                             cudf::memory_resources mr)
+                                             rmm::device_async_resource_ref mr)
 {
   auto output = make_numeric_column(
-    data_type(type_to_id<TargetType>()), size, mask_state::UNALLOCATED, stream, mr.get_output_mr());
+    data_type(type_to_id<TargetType>()), size, mask_state::UNALLOCATED, stream, mr);
 
-  // Compute values and validity together. The mask is scratch until its null count is known.
-  auto const begin             = cuda::counting_iterator<size_type>{0};
-  auto const out               = output->mutable_view().begin<TargetType>();
-  auto [null_mask, null_count] = cudf::detail::valid_if(
-    begin,
-    begin + size,
-    [out, transform_fn] __device__(size_type idx) {
-      auto const result = transform_fn(idx);
-      out[idx]          = result.first;
-      return result.second;
-    },
-    stream,
-    cudf::memory_resources{mr.get_temporary_mr(), mr.get_temporary_mr()});
-  if (null_count > 0) {
-    if (mr.get_output_mr() != mr.get_temporary_mr()) {
-      null_mask = cuda::device_buffer<std::byte>{
-        stream, mr.get_output_mr(), null_mask.begin(), null_mask.end()};
-    }
-    output->set_null_mask(std::move(null_mask), null_count);
-  }
+  // Since we may have new null rows depending on the group count, we need to generate a new null
+  // mask from scratch.
+  rmm::device_uvector<bool> validity(size, stream);
+
+  auto const out_it =
+    cuda::make_zip_iterator(output->mutable_view().begin<TargetType>(), validity.begin());
+  thrust::tabulate(rmm::exec_policy_nosync(stream, cudf::get_current_device_resource_ref()),
+                   out_it,
+                   out_it + size,
+                   transform_fn);
+
+  auto [null_mask, null_count] =
+    cudf::detail::valid_if(validity.begin(), validity.end(), cuda::std::identity{}, stream, mr);
+  if (null_count > 0) { output->set_null_mask(std::move(null_mask), null_count); }
 
   return output;
 }
@@ -165,7 +153,7 @@ std::unique_ptr<column> compute_variance(column_view const& m2,
                                          column_view const& count,
                                          size_type ddof,
                                          cuda::stream_ref stream,
-                                         cudf::memory_resources mr)
+                                         rmm::device_async_resource_ref mr)
 {
   check_input_types(m2, count);
 
@@ -184,7 +172,7 @@ std::unique_ptr<column> compute_std(column_view const& m2,
                                     column_view const& count,
                                     size_type ddof,
                                     cuda::stream_ref stream,
-                                    cudf::memory_resources mr)
+                                    rmm::device_async_resource_ref mr)
 {
   check_input_types(m2, count);
 

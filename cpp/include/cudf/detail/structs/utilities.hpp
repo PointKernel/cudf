@@ -259,7 +259,7 @@ class flattened_table {
  *         to be kept alive.
  */
 [[nodiscard]] std::pair<column_view, temporary_nullable_data> push_down_nulls(
-  column_view const& input, cuda::stream_ref stream, cudf::memory_resources mr);
+  column_view const& input, cuda::stream_ref stream, rmm::device_async_resource_ref mr);
 
 /**
  * @brief Push down nulls from columns of the input table into their children columns, using
@@ -286,7 +286,7 @@ class flattened_table {
  *         to be kept alive.
  */
 [[nodiscard]] std::pair<table_view, temporary_nullable_data> push_down_nulls(
-  table_view const& input, cuda::stream_ref stream, cudf::memory_resources mr);
+  table_view const& input, cuda::stream_ref stream, rmm::device_async_resource_ref mr);
 
 /**
  * @brief Checks if a column or any of its children is a struct column with structs that are null.

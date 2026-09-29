@@ -675,10 +675,14 @@ TEST_F(groupby_key_shape_test, OutputAndTemporaryResourcesForCompoundAndFusedAgg
           for (auto const& column : result.second[0].results) {
             output_bytes += column->alloc_size();
           }
-          harness.expect_resource_usage(output_bytes,
-                                        {cudf::test::output_allocation_expectation::EXACT,
-                                         cudf::test::temporary_allocation_expectation::SOME},
-                                        stream);
+          // The existing variance/std helpers may discard masks allocated on the output resource.
+          auto const output_expectation =
+            mode == 0 ? cudf::test::output_allocation_expectation::AT_LEAST_LIVE
+                      : cudf::test::output_allocation_expectation::EXACT;
+          harness.expect_resource_usage(
+            output_bytes,
+            {output_expectation, cudf::test::temporary_allocation_expectation::SOME},
+            stream);
           auto actual_keys = result.first->view();
           std::vector<cudf::column_view> actual_views(actual_keys.begin(), actual_keys.end());
           auto expected_keys = expected.first->view();

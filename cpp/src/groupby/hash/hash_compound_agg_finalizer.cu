@@ -114,7 +114,7 @@ void hash_compound_agg_finalizer::operator()<aggregation::MEAN>(aggregation cons
   if (result->size() > 0) {
     auto out = result->mutable_view();
     cudf::binops::compiled::apply_binary_op<cudf::binops::compiled::ops::Div>(
-      out, sum_without_nulls, count_result, false, false, stream, mr);
+      out, sum_without_nulls, count_result, false, false, stream);
   }
   // SUM result only has nulls if it is an input aggregation, not intermediate-only aggregation.
   if (sum_result.has_nulls()) {
@@ -150,7 +150,8 @@ void hash_compound_agg_finalizer::operator()<aggregation::M2>(aggregation const&
   auto const sum_result     = cache->get_result(col, *sum_agg);
   auto const count_result   = cache->get_result(col, *count_agg);
 
-  auto output = compute_m2(input_type, sum_sqr_result, sum_result, count_result, stream, mr);
+  auto output =
+    compute_m2(input_type, sum_sqr_result, sum_result, count_result, stream, mr.get_output_mr());
   cache->add_result(col, agg, std::move(output));
 }
 
@@ -170,7 +171,8 @@ void finalize_var_std(hash_compound_agg_finalizer const& finalizer,
   auto const m2_result    = finalizer.cache->get_result(finalizer.col, *m2_agg);
   auto const count_result = finalizer.cache->get_result(finalizer.col, *count_agg);
 
-  auto output = compute_fn(m2_result, count_result, ddof, finalizer.stream, finalizer.mr);
+  auto output =
+    compute_fn(m2_result, count_result, ddof, finalizer.stream, finalizer.mr.get_output_mr());
   finalizer.cache->add_result(finalizer.col, agg, std::move(output));
 }
 
