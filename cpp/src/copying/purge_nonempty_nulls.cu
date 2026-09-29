@@ -28,8 +28,9 @@ bool type_may_have_nonempty_nulls(cudf::type_id const& type)
 /// Check if the (STRING/LIST) column has any null rows with non-zero length.
 bool has_nonempty_null_rows(cudf::column_view const& input,
                             cuda::stream_ref stream,
-                            rmm::device_async_resource_ref temp_mr)
+                            cudf::memory_resources mr)
 {
+  auto const temp_mr = mr.get_temporary_mr();
   if (not input.has_nulls()) { return false; }  // No nulls => no dirty rows.
 
   if ((input.size() == input.null_count()) && (input.num_children() == 0)) { return false; }
@@ -47,7 +48,7 @@ bool has_nonempty_null_rows(cudf::column_view const& input,
 
   auto const row_begin = cuda::counting_iterator<cudf::size_type>{0};
   auto const row_end   = row_begin + input.size();
-  return cudf::detail::count_if(row_begin, row_end, is_dirty_row, stream, temp_mr) > 0;
+  return cudf::detail::count_if(row_begin, row_end, is_dirty_row, stream, mr) > 0;
 }
 
 }  // namespace
@@ -57,7 +58,7 @@ bool has_nonempty_null_rows(cudf::column_view const& input,
  */
 bool has_nonempty_nulls(cudf::column_view const& input,
                         cuda::stream_ref stream,
-                        rmm::device_async_resource_ref temp_mr)
+                        cudf::memory_resources mr)
 {
   auto const type = input.type().id();
 
@@ -66,14 +67,14 @@ bool has_nonempty_nulls(cudf::column_view const& input,
   // For types with variable-length rows, check if any rows are "dirty".
   // A dirty row is a null row with non-zero length.
   if ((type == type_id::STRING || type == type_id::LIST) &&
-      has_nonempty_null_rows(input, stream, temp_mr)) {
+      has_nonempty_null_rows(input, stream, mr)) {
     return true;
   }
 
   // For complex types, check if child columns need purging.
   if ((type == type_id::STRUCT || type == type_id::LIST) &&
-      std::any_of(input.child_begin(), input.child_end(), [stream, temp_mr](auto const& child) {
-        return cudf::detail::has_nonempty_nulls(child, stream, temp_mr);
+      std::any_of(input.child_begin(), input.child_end(), [stream, mr](auto const& child) {
+        return cudf::detail::has_nonempty_nulls(child, stream, mr);
       })) {
     return true;
   }

@@ -206,22 +206,22 @@ void reduce_by_key_async(KeysInputIterator keys_begin,
  * @param init Initial value for the reduction
  * @param reduce_op Binary reduction operator
  * @param stream CUDA stream to use
- * @param temp_mr Resource used for temporary device allocations
+ * @param mr Memory resources used for temporary device allocations
  * @return The reduction result
  */
 template <typename TransformationOp,
           typename ReductionOp,
           typename InputIterator,
           typename OutputType = cuda::std::iter_value_t<InputIterator>>
-OutputType transform_reduce(
-  InputIterator begin,
-  InputIterator end,
-  TransformationOp transform_op,
-  OutputType init,
-  ReductionOp reduce_op,
-  cuda::stream_ref stream,
-  rmm::device_async_resource_ref temp_mr = cudf::get_current_device_resource_ref())
+OutputType transform_reduce(InputIterator begin,
+                            InputIterator end,
+                            TransformationOp transform_op,
+                            OutputType init,
+                            ReductionOp reduce_op,
+                            cuda::stream_ref stream,
+                            cudf::memory_resources mr = cudf::get_current_device_resource_ref())
 {
+  auto const temp_mr   = mr.get_temporary_mr();
   auto const num_items = cuda::std::distance(begin, end);
 
   // Device scalar to store the result
@@ -330,16 +330,15 @@ bool none_of(InputIterator begin, InputIterator end, TransformOp op, cuda::strea
  * @param end Device-accessible iterator to end of input values
  * @param predicate Unary predicate that returns true for elements to count
  * @param stream CUDA stream to use
- * @param temp_mr Resource used for temporary device allocations
+ * @param mr Memory resources used for temporary device allocations
  * @return The count of elements satisfying the predicate
  */
 template <typename Predicate, typename InputIterator>
-cuda::std::size_t count_if(
-  InputIterator begin,
-  InputIterator end,
-  Predicate predicate,
-  cuda::stream_ref stream,
-  rmm::device_async_resource_ref temp_mr = cudf::get_current_device_resource_ref())
+cuda::std::size_t count_if(InputIterator begin,
+                           InputIterator end,
+                           Predicate predicate,
+                           cuda::stream_ref stream,
+                           cudf::memory_resources mr = cudf::get_current_device_resource_ref())
 {
   // Transform each element to 0 or 1 based on predicate, then sum
   auto transform_op = [predicate] __device__(auto const& val) -> cuda::std::size_t {
@@ -347,7 +346,7 @@ cuda::std::size_t count_if(
   };
 
   return transform_reduce(
-    begin, end, transform_op, cuda::std::size_t{0}, cuda::std::plus<>{}, stream, temp_mr);
+    begin, end, transform_op, cuda::std::size_t{0}, cuda::std::plus<>{}, stream, mr);
 }
 
 }  // namespace cudf::detail

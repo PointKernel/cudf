@@ -1,5 +1,5 @@
 /*
- * SPDX-FileCopyrightText: Copyright (c) 2021-2026, NVIDIA CORPORATION.
+ * SPDX-FileCopyrightText: Copyright (c) 2021-2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
 
@@ -7,11 +7,14 @@
 #include <cudf_test/column_utilities.hpp>
 #include <cudf_test/column_wrapper.hpp>
 #include <cudf_test/iterator_utilities.hpp>
+#include <cudf_test/memory_resource_utilities.hpp>
 #include <cudf_test/table_utilities.hpp>
 #include <cudf_test/type_lists.hpp>
 
+#include <cudf/copying.hpp>
 #include <cudf/detail/structs/utilities.hpp>
 #include <cudf/null_mask.hpp>
+#include <cudf/structs/structs_column_view.hpp>
 #include <cudf/utilities/default_stream.hpp>
 #include <cudf/utilities/memory_resource.hpp>
 
@@ -22,6 +25,30 @@ template <typename T>
 using lists = cudf::test::lists_column_wrapper<T, int32_t>;
 
 struct StructUtilitiesTest : cudf::test::BaseFixture {};
+
+TEST_F(StructUtilitiesTest, SlicedChildUsesExplicitTemporaryResource)
+{
+  auto const stream = cudf::get_default_stream();
+  cudf::test::fixed_width_column_wrapper<int32_t> child{{0, 1, 2, 3, 4, 5},
+                                                        {true, false, true, false, true, true}};
+  cudf::test::structs_column_wrapper parent{{child}};
+  auto const sliced = cudf::slice(parent, {1, 5}).front();
+  auto harness      = cudf::test::memory_resource_test_harness{this->mr()};
+  {
+    auto scope = harness.fail_on_current_device_resource_use();
+    auto const result =
+      cudf::structs_column_view{sliced}.get_sliced_child(0, stream, harness.resources());
+    EXPECT_EQ(4, result.size());
+    EXPECT_EQ(1, result.offset());
+    EXPECT_EQ(2, result.null_count());
+    harness.synchronize(stream);
+  }
+  harness.expect_resource_usage(0,
+                                {cudf::test::output_allocation_expectation::EXACT,
+                                 cudf::test::temporary_allocation_expectation::SOME},
+                                stream);
+  harness.expect_no_live_allocations(stream);
+}
 
 template <typename T>
 struct TypedStructUtilitiesTest : StructUtilitiesTest {};

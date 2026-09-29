@@ -266,8 +266,7 @@ struct grouped_reduction_fn {
         }
       }});
     if (ctx.nullable) {
-      auto const null_count =
-        count_group_nulls(mask, ctx.num_groups, stream, mr.get_temporary_mr());
+      auto const null_count = count_group_nulls(mask, ctx.num_groups, stream, mr);
       result->set_null_mask(std::move(null_mask), null_count);
     }
     return result;
@@ -316,7 +315,7 @@ struct grouped_reduction_fn {
           valid_value<accumulator>{accumulator{}, false},
           stream,
           mr);
-        null_count = count_group_nulls(mask, ctx.num_groups, stream, mr.get_temporary_mr());
+        null_count = count_group_nulls(mask, ctx.num_groups, stream, mr);
       } else {
         auto const values = cudf::detail::make_counting_transform_iterator(
           0,

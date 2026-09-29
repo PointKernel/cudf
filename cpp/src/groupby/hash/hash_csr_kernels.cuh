@@ -70,7 +70,8 @@ struct hash_set_ref {
                                                                size_type& representative) const
   {
     representative = cudf::detail::CUDF_SIZE_TYPE_SENTINEL;
-    auto slot      = static_cast<cuda::std::uint32_t>(hash_value % capacity);
+    // Multiply-high reduces the hash to any capacity without division or modulo.
+    auto slot = __umulhi(__brev(hash_value), capacity);
     for (cuda::std::uint32_t step = 0; step < max_probes; ++step) {
       auto slot_ref = cuda::atomic_ref<slot_type, cuda::thread_scope_device>{slots[slot]};
       auto current  = slot_ref.load(cuda::memory_order_relaxed);

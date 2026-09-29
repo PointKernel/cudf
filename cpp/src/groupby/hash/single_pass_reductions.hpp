@@ -56,7 +56,7 @@ struct reduction_context {
 size_type count_group_nulls(bitmask_type const* mask,
                             size_type num_groups,
                             cuda::stream_ref stream,
-                            rmm::device_async_resource_ref temp_mr);
+                            cudf::memory_resources mr);
 std::unique_ptr<column> count_groups(reduction_context const& ctx,
                                      bool valid_only,
                                      cuda::stream_ref stream,

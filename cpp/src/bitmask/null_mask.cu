@@ -476,8 +476,9 @@ std::vector<size_type> batch_count_set_bits(
   size_type start,
   size_type stop,
   cuda::stream_ref stream,
-  rmm::device_async_resource_ref tmp_mr = cudf::get_current_device_resource_ref())
+  cudf::memory_resources mr = cudf::get_current_device_resource_ref())
 {
+  auto const tmp_mr = mr.get_temporary_mr();
   CUDF_EXPECTS(start >= 0 and start <= stop, "Invalid bit range.", std::invalid_argument);
 
   auto const num_bitmasks      = bitmasks.size();
@@ -522,11 +523,11 @@ size_type count_set_bits(bitmask_type const* bitmask,
                          size_type start,
                          size_type stop,
                          cuda::stream_ref stream,
-                         rmm::device_async_resource_ref temp_mr)
+                         cudf::memory_resources mr)
 {
   CUDF_EXPECTS(bitmask != nullptr, "Invalid bitmask.");
   auto const bitmasks = std::vector<bitmask_type const*>{bitmask};
-  return detail::batch_count_set_bits(bitmasks, start, stop, stream, temp_mr).front();
+  return detail::batch_count_set_bits(bitmasks, start, stop, stream, mr).front();
 }
 
 // Count zero bits in the specified range
@@ -534,9 +535,9 @@ size_type count_unset_bits(bitmask_type const* bitmask,
                            size_type start,
                            size_type stop,
                            cuda::stream_ref stream,
-                           rmm::device_async_resource_ref temp_mr)
+                           cudf::memory_resources mr)
 {
-  auto const num_set_bits   = detail::count_set_bits(bitmask, start, stop, stream, temp_mr);
+  auto const num_set_bits   = detail::count_set_bits(bitmask, start, stop, stream, mr);
   auto const total_num_bits = stop - start;
   return total_num_bits - num_set_bits;
 }
@@ -546,13 +547,13 @@ size_type valid_count(bitmask_type const* bitmask,
                       size_type start,
                       size_type stop,
                       cuda::stream_ref stream,
-                      rmm::device_async_resource_ref temp_mr)
+                      cudf::memory_resources mr)
 {
   if (bitmask == nullptr) {
     CUDF_EXPECTS(start >= 0 and start <= stop, "Invalid bit range.");
     return stop - start;
   }
-  return detail::count_set_bits(bitmask, start, stop, stream, temp_mr);
+  return detail::count_set_bits(bitmask, start, stop, stream, mr);
 }
 
 // Count null elements in the specified range of a validity bitmask
@@ -560,9 +561,9 @@ size_type null_count(bitmask_type const* bitmask,
                      size_type start,
                      size_type stop,
                      cuda::stream_ref stream,
-                     rmm::device_async_resource_ref temp_mr)
+                     cudf::memory_resources mr)
 {
-  auto const valid_count = detail::valid_count(bitmask, start, stop, stream, temp_mr);
+  auto const valid_count = detail::valid_count(bitmask, start, stop, stream, mr);
   auto const size        = stop - start;
   return size - valid_count;
 }

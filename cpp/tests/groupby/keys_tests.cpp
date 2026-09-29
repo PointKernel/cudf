@@ -15,6 +15,7 @@
 #include <cudf_test/type_lists.hpp>
 
 #include <cudf/aggregation.hpp>
+#include <cudf/copying.hpp>
 #include <cudf/detail/groupby.hpp>
 #include <cudf/groupby.hpp>
 #include <cudf/sorting.hpp>
@@ -629,16 +630,22 @@ TEST_F(groupby_key_shape_test, ExplicitResourcesForCompoundAndFusedAggregations)
                                                  {true, true, true, true, false, true}};
   cudf::test::strings_column_wrapper string_keys{{"a", "a", "b", "b", "c", "c"},
                                                  {true, true, true, true, false, true}};
+  cudf::test::structs_column_wrapper nested_string_keys{{string_keys, keys_a},
+                                                        {true, false, true, true, true, true}};
+  // A sliced nullable string child exercises null counting and nonempty-null sanitization.
+  auto const sliced_nested_keys = cudf::slice(nested_string_keys, {1, 5}).front();
   std::vector<cudf::table_view> key_tables{cudf::table_view{{keys_a, keys_b}},
                                            cudf::table_view{{nested_keys}},
-                                           cudf::table_view{{string_keys}}};
+                                           cudf::table_view{{string_keys}},
+                                           cudf::table_view{{nested_string_keys}},
+                                           cudf::table_view{{sliced_nested_keys}}};
   for (auto const& keys : key_tables) {
     for (bool nullable : {false, true}) {
       for (int mode = 0; mode < 4; ++mode) {
         SCOPED_TRACE(::testing::Message() << "nullable=" << nullable << " mode=" << mode);
         auto const input = nullable ? cudf::column_view(null_values) : cudf::column_view(values);
         std::vector<cudf::groupby::aggregation_request> requests(1);
-        requests[0].values = input;
+        requests[0].values = cudf::slice(input, {0, keys.num_rows()}).front();
         auto& aggs         = requests[0].aggregations;
         if (mode == 0) {
           aggs.push_back(cudf::make_mean_aggregation<cudf::groupby_aggregation>());

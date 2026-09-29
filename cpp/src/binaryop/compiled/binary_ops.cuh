@@ -245,9 +245,10 @@ void apply_binary_op(mutable_column_view& out,
                      bool is_lhs_scalar,
                      bool is_rhs_scalar,
                      cuda::stream_ref stream,
-                     rmm::device_async_resource_ref temp_mr)
+                     cudf::memory_resources mr)
 {
-  auto common_dtype = get_common_type(out.type(), lhs.type(), rhs.type());
+  auto const temp_mr = mr.get_temporary_mr();
+  auto common_dtype  = get_common_type(out.type(), lhs.type(), rhs.type());
 
   auto lhsd = column_device_view::create(lhs, stream, temp_mr);
   auto rhsd = column_device_view::create(rhs, stream, temp_mr);

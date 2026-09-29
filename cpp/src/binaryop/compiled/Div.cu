@@ -13,5 +13,5 @@ template void apply_binary_op<ops::Div>(mutable_column_view&,
                                         bool is_lhs_scalar,
                                         bool is_rhs_scalar,
                                         cuda::stream_ref,
-                                        rmm::device_async_resource_ref);
+                                        cudf::memory_resources);
 }  // namespace cudf::binops::compiled

@@ -233,7 +233,7 @@ size_type inplace_bitmask_binop(
   host_span<size_type const> masks_begin_bits,
   size_type mask_size_bits,
   cuda::stream_ref stream,
-  rmm::device_async_resource_ref temp_mr = cudf::get_current_device_resource_ref());
+  cudf::memory_resources mr = cudf::get_current_device_resource_ref());
 
 template <typename Binop>
 rmm::device_uvector<size_type> inplace_segmented_bitmask_binop(
@@ -274,7 +274,7 @@ std::pair<cuda::device_buffer<std::byte>, size_type> bitmask_binop(
                        masks_begin_bits,
                        mask_size_bits,
                        stream,
-                       mr.get_temporary_mr());
+                       mr);
 
   return std::pair(std::move(dest_mask), null_count);
 }
@@ -349,8 +349,9 @@ size_type inplace_bitmask_binop(Binop op,
                                 host_span<size_type const> masks_begin_bits,
                                 size_type mask_size_bits,
                                 cuda::stream_ref stream,
-                                rmm::device_async_resource_ref temp_mr)
+                                cudf::memory_resources mr)
 {
+  auto const temp_mr = mr.get_temporary_mr();
   CUDF_EXPECTS(
     std::all_of(masks_begin_bits.begin(), masks_begin_bits.end(), [](auto b) { return b >= 0; }),
     "Invalid range.");

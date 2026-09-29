@@ -92,12 +92,12 @@ class structs_column_view : public column_view {
    * @brief Returns a sliced child, using the supplied resource for null-count workspace.
    * @param index Child index
    * @param stream CUDA stream used for device operations
-   * @param temp_mr Resource used for temporary device allocations
+   * @param mr Memory resources used for temporary device allocations
    * @return The child sliced relative to the parent
    */
   [[nodiscard]] column_view get_sliced_child(int index,
                                              cuda::stream_ref stream,
-                                             rmm::device_async_resource_ref temp_mr) const;
+                                             cudf::memory_resources mr) const;
 
 };  // class structs_column_view;
 /** @} */  // end of group

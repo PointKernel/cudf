@@ -54,8 +54,9 @@ namespace cudf::groupby::detail::hash {
 size_type count_group_nulls(bitmask_type const* mask,
                             size_type num_groups,
                             cuda::stream_ref stream,
-                            rmm::device_async_resource_ref temp_mr)
+                            cudf::memory_resources mr)
 {
+  auto const temp_mr = mr.get_temporary_mr();
   return thrust::transform_reduce(
     rmm::exec_policy_nosync(stream, temp_mr),
     mask,
