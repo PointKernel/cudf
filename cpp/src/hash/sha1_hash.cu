@@ -6,14 +6,15 @@
 #include "sha_hash.cuh"
 
 #include <cudf/column/column.hpp>
-#include <cudf/scalar/scalar.hpp>
+#include <cudf/detail/nvtx/ranges.hpp>
+#include <cudf/hashing/detail/hashing.hpp>
 #include <cudf/table/table_view.hpp>
-#include <cudf/utilities/memory_resource.hpp>
 
-#include <rmm/exec_policy.hpp>
+#include <rmm/resource_ref.hpp>
 
-#include <cuda/stream>
+#include <cuda/stream_ref>
 
+#include <cstdint>
 #include <memory>
 
 namespace cudf {

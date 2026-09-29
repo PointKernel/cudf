@@ -10,6 +10,9 @@
 #include <cuda/std/cmath>
 #include <cuda/std/limits>
 
+#include <cstdint>
+#include <cstring>
+
 namespace cudf::hashing::detail {
 
 /**
