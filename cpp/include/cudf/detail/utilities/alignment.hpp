@@ -1,11 +1,11 @@
 /*
- * SPDX-FileCopyrightText: Copyright (c) 2020-2026, NVIDIA CORPORATION.
+ * SPDX-FileCopyrightText: Copyright (c) 2020-2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
 
 #pragma once
 
-#include <memory>
+#include <cuda/memory>
 
 namespace cudf {
 namespace detail {
@@ -21,14 +21,7 @@ namespace detail {
 template <typename T>
 T* align_ptr_for_type(void* destination)
 {
-  constexpr std::size_t bytes_needed{sizeof(T)};
-  constexpr std::size_t alignment{alignof(T)};
-
-  // pad the allocation for aligning the first pointer
-  auto padded_bytes_needed = bytes_needed + (alignment - 1);
-  // std::align captures last argument by reference and modifies it, but we don't want it modified
-  return reinterpret_cast<T*>(
-    std::align(alignment, bytes_needed, destination, padded_bytes_needed));
+  return static_cast<T*>(cuda::align_up(destination, alignof(T)));
 }
 
 }  // namespace detail

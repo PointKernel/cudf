@@ -441,6 +441,7 @@ ConfigureTest(
 # * utilities tests -------------------------------------------------------------------------------
 ConfigureTest(
   UTILITIES_TEST
+  utilities_tests/alignment_tests.cpp
   utilities_tests/batched_memcpy_tests.cu
   utilities_tests/batched_memset_tests.cu
   utilities_tests/column_debug_tests.cpp
