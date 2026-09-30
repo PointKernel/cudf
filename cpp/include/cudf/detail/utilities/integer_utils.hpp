@@ -75,6 +75,8 @@ CUDF_HOST_DEVICE constexpr S round_up_safe(S number_to_round, S modulus)
 /**
  * @brief Rounds `number_to_round` down to the last multiple of modulus
  *
+ * @deprecated Use `cuda::round_down` from `<cuda/cmath>` instead.
+ *
  * @tparam S type to return
  * @param number_to_round number that is being rounded
  * @param modulus value to which to round
@@ -84,6 +86,7 @@ CUDF_HOST_DEVICE constexpr S round_up_safe(S number_to_round, S modulus)
  * `modulus` is positive and does not check for overflow.
  */
 template <typename S>
+[[deprecated("Use cuda::round_down from <cuda/cmath> instead.")]]
 CUDF_HOST_DEVICE constexpr S round_down_safe(S number_to_round, S modulus) noexcept
 {
   return cuda::round_down(number_to_round, modulus);
@@ -91,6 +94,8 @@ CUDF_HOST_DEVICE constexpr S round_down_safe(S number_to_round, S modulus) noexc
 
 /**
  * @brief Rounds `number_to_round` up to the next multiple of modulus
+ *
+ * @deprecated Use `cuda::round_up` from `<cuda/cmath>` instead.
  *
  * @tparam S type to return
  * @param number_to_round number that is being rounded
@@ -101,6 +106,7 @@ CUDF_HOST_DEVICE constexpr S round_down_safe(S number_to_round, S modulus) noexc
  * `modulus` is positive. The rounded result must be representable in `S`.
  */
 template <typename S>
+[[deprecated("Use cuda::round_up from <cuda/cmath> instead.")]]
 CUDF_HOST_DEVICE constexpr S round_up_unsafe(S number_to_round, S modulus) noexcept
 {
   return cuda::round_up(number_to_round, modulus);
