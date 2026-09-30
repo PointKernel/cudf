@@ -1,5 +1,5 @@
 /*
- * SPDX-FileCopyrightText: Copyright (c) 2019-2025, NVIDIA CORPORATION.
+ * SPDX-FileCopyrightText: Copyright (c) 2019-2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
 
@@ -36,7 +36,6 @@ constexpr CUDF_HOST_DEVICE inline std::size_t size_in_bits()
 /**
  * @addtogroup utility_bitmask
  * @{
- * @file
  */
 
 /**
@@ -94,7 +93,7 @@ CUDF_HOST_DEVICE inline void clear_bit_unsafe(bitmask_type* bitmask, size_type b
 /**
  * @brief Indicates whether the specified bit is set to `1`
  *
- * @param bitmask The bitmask containing the bit to clear
+ * @param bitmask The bitmask containing the bit to test
  * @param bit_index Index of the bit to test
  * @return true The specified bit is `1`
  * @return false  The specified bit is `0`
@@ -182,6 +181,7 @@ __device__ inline void set_bit(bitmask_type* bitmask, size_type bit_index)
 
  * This function is thread-safe.
  *
+ * @param bitmask The bitmask to modify
  * @param bit_index  Index of the bit to clear
  */
 __device__ inline void clear_bit(bitmask_type* bitmask, size_type bit_index)

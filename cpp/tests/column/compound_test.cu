@@ -1,5 +1,5 @@
 /*
- * SPDX-FileCopyrightText: Copyright (c) 2019-2026, NVIDIA CORPORATION.
+ * SPDX-FileCopyrightText: Copyright (c) 2019-2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
 
@@ -15,7 +15,7 @@
 #include <rmm/device_uvector.hpp>
 #include <rmm/exec_policy.hpp>
 
-#include <thrust/iterator/counting_iterator.h>
+#include <cuda/iterator>
 #include <thrust/logical.h>
 #include <thrust/sequence.h>
 
@@ -88,25 +88,26 @@ TEST_F(CompoundColumnTest, ChildrenLevel1)
   children.emplace_back(std::move(child2));
   children.emplace_back(std::move(child3));
 
-  auto parent = std::make_unique<cudf::column>(cudf::data_type{cudf::type_id::STRING},
-                                               100,
-                                               rmm::device_buffer{},
-                                               rmm::device_buffer{},
-                                               0,
-                                               std::move(children));
+  auto parent =
+    std::make_unique<cudf::column>(cudf::data_type{cudf::type_id::STRING},
+                                   100,
+                                   rmm::device_buffer{},
+                                   cudf::create_null_mask(0, cudf::mask_state::UNALLOCATED),
+                                   0,
+                                   std::move(children));
 
   {
     auto column = cudf::column_device_view::create(parent->view());
     EXPECT_TRUE(thrust::any_of(rmm::exec_policy_nosync(cudf::get_default_stream()),
-                               thrust::make_counting_iterator<int32_t>(0),
-                               thrust::make_counting_iterator<int32_t>(100),
+                               cuda::counting_iterator<int32_t>{0},
+                               cuda::counting_iterator<int32_t>{100},
                                checker_for_level1<cudf::column_device_view>{*column}));
   }
   {
     auto column = cudf::mutable_column_device_view::create(parent->mutable_view());
     EXPECT_TRUE(thrust::any_of(rmm::exec_policy_nosync(cudf::get_default_stream()),
-                               thrust::make_counting_iterator<int32_t>(0),
-                               thrust::make_counting_iterator<int32_t>(100),
+                               cuda::counting_iterator<int32_t>{0},
+                               cuda::counting_iterator<int32_t>{100},
                                checker_for_level1<cudf::mutable_column_device_view>{*column}));
   }
 }
@@ -170,41 +171,44 @@ TEST_F(CompoundColumnTest, ChildrenLevel2)
   gchildren2.emplace_back(std::move(gchild22));
   gchildren2.emplace_back(std::move(gchild23));
 
-  auto children1 = std::make_unique<cudf::column>(cudf::data_type{cudf::type_id::STRING},
-                                                  100,
-                                                  rmm::device_buffer{},
-                                                  rmm::device_buffer{},
-                                                  0,
-                                                  std::move(gchildren1));
-  auto children2 = std::make_unique<cudf::column>(cudf::data_type{cudf::type_id::STRING},
-                                                  100,
-                                                  rmm::device_buffer{},
-                                                  rmm::device_buffer{},
-                                                  0,
-                                                  std::move(gchildren2));
+  auto children1 =
+    std::make_unique<cudf::column>(cudf::data_type{cudf::type_id::STRING},
+                                   100,
+                                   rmm::device_buffer{},
+                                   cudf::create_null_mask(0, cudf::mask_state::UNALLOCATED),
+                                   0,
+                                   std::move(gchildren1));
+  auto children2 =
+    std::make_unique<cudf::column>(cudf::data_type{cudf::type_id::STRING},
+                                   100,
+                                   rmm::device_buffer{},
+                                   cudf::create_null_mask(0, cudf::mask_state::UNALLOCATED),
+                                   0,
+                                   std::move(gchildren2));
 
   std::vector<std::unique_ptr<cudf::column>> children;
   children.emplace_back(std::move(children1));
   children.emplace_back(std::move(children2));
-  auto parent = std::make_unique<cudf::column>(cudf::data_type{cudf::type_id::STRING},
-                                               100,
-                                               rmm::device_buffer{},
-                                               rmm::device_buffer{},
-                                               0,
-                                               std::move(children));
+  auto parent =
+    std::make_unique<cudf::column>(cudf::data_type{cudf::type_id::STRING},
+                                   100,
+                                   rmm::device_buffer{},
+                                   cudf::create_null_mask(0, cudf::mask_state::UNALLOCATED),
+                                   0,
+                                   std::move(children));
 
   {
     auto column = cudf::column_device_view::create(parent->view());
     EXPECT_TRUE(thrust::any_of(rmm::exec_policy_nosync(cudf::get_default_stream()),
-                               thrust::make_counting_iterator<int32_t>(0),
-                               thrust::make_counting_iterator<int32_t>(100),
+                               cuda::counting_iterator<int32_t>{0},
+                               cuda::counting_iterator<int32_t>{100},
                                checker_for_level2<cudf::column_device_view>{*column}));
   }
   {
     auto column = cudf::mutable_column_device_view::create(parent->mutable_view());
     EXPECT_TRUE(thrust::any_of(rmm::exec_policy_nosync(cudf::get_default_stream()),
-                               thrust::make_counting_iterator<int32_t>(0),
-                               thrust::make_counting_iterator<int32_t>(100),
+                               cuda::counting_iterator<int32_t>{0},
+                               cuda::counting_iterator<int32_t>{100},
                                checker_for_level2<cudf::mutable_column_device_view>{*column}));
   }
 }

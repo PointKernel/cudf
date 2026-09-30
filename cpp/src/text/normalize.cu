@@ -1,5 +1,5 @@
 /*
- * SPDX-FileCopyrightText: Copyright (c) 2020-2026, NVIDIA CORPORATION.
+ * SPDX-FileCopyrightText: Copyright (c) 2020-2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
 
@@ -14,6 +14,7 @@
 #include <cudf/detail/iterator.cuh>
 #include <cudf/detail/null_mask.hpp>
 #include <cudf/detail/nvtx/ranges.hpp>
+#include <cudf/detail/utilities/cuda_memcpy.hpp>
 #include <cudf/detail/utilities/grid_1d.cuh>
 #include <cudf/detail/utilities/integer_utils.hpp>
 #include <cudf/sorting.hpp>
@@ -28,18 +29,20 @@
 
 #include <nvtext/normalize.hpp>
 
-#include <rmm/cuda_stream_view.hpp>
-
-#include <cub/cub.cuh>
+#include <cub/block/block_store.cuh>
+#include <cub/device/device_segmented_reduce.cuh>
+#include <cuda/buffer>
 #include <cuda/functional>
+#include <cuda/iterator>
 #include <cuda/std/iterator>
+#include <cuda/stream>
 #include <thrust/binary_search.h>
 #include <thrust/execution_policy.h>
 #include <thrust/for_each.h>
-#include <thrust/functional.h>
 #include <thrust/remove.h>
 #include <thrust/transform_reduce.h>
 
+#include <array>
 #include <limits>
 
 namespace nvtext {
@@ -105,7 +108,7 @@ __device__ int8_t cp_to_utf8(uint32_t codepoint, char* out)
 
 // detail API
 std::unique_ptr<cudf::column> normalize_spaces(cudf::strings_column_view const& strings,
-                                               rmm::cuda_stream_view stream,
+                                               cuda::stream_ref stream,
                                                rmm::device_async_resource_ref mr)
 {
   if (strings.is_empty()) return cudf::make_empty_column(cudf::data_type{cudf::type_id::STRING});
@@ -130,25 +133,21 @@ std::unique_ptr<cudf::column> normalize_spaces(cudf::strings_column_view const& 
  * Build the code point metadata table in device memory
  * using the vector pieces from codepoint_metadata.ah
  */
-rmm::device_uvector<codepoint_metadata_type> get_codepoint_metadata(rmm::cuda_stream_view stream)
+rmm::device_uvector<codepoint_metadata_type> get_codepoint_metadata(cuda::stream_ref stream)
 {
   auto table_vector = rmm::device_uvector<codepoint_metadata_type>(codepoint_metadata_size, stream);
   auto table        = table_vector.data();
-  thrust::fill(rmm::exec_policy_nosync(stream),
+  thrust::fill(rmm::exec_policy_nosync(stream, cudf::get_current_device_resource_ref()),
                table + cp_section1_end,
                table + codepoint_metadata_size,
                codepoint_metadata_default_value);
-  CUDF_CUDA_TRY(cudaMemcpyAsync(table,
-                                codepoint_metadata,
-                                cp_section1_end * sizeof(codepoint_metadata[0]),  // 1st section
-                                cudaMemcpyDefault,
-                                stream.value()));
-  CUDF_CUDA_TRY(cudaMemcpyAsync(
-    table + cp_section2_begin,
-    cp_metadata_917505_917999,
-    (cp_section2_end - cp_section2_begin + 1) * sizeof(codepoint_metadata[0]),  // 2nd section
-    cudaMemcpyDefault,
-    stream.value()));
+  auto dsts  = std::array<void*, 2>{table, table + cp_section2_begin};
+  auto srcs  = std::array<void const*, 2>{codepoint_metadata, cp_metadata_917505_917999};
+  auto sizes = std::array<std::size_t, 2>{
+    cp_section1_end * sizeof(codepoint_metadata[0]),
+    (cp_section2_end - cp_section2_begin + 1) * sizeof(codepoint_metadata[0])};
+  CUDF_CUDA_TRY(
+    cudf::detail::memcpy_batch_async(dsts.data(), srcs.data(), sizes.data(), 2, stream));
   return table_vector;
 }
 
@@ -158,37 +157,27 @@ rmm::device_uvector<codepoint_metadata_type> get_codepoint_metadata(rmm::cuda_st
  * Build the aux code point data table in device memory
  * using the vector pieces from codepoint_metadata.ah
  */
-rmm::device_uvector<aux_codepoint_data_type> get_aux_codepoint_data(rmm::cuda_stream_view stream)
+rmm::device_uvector<aux_codepoint_data_type> get_aux_codepoint_data(cuda::stream_ref stream)
 {
   auto table_vector = rmm::device_uvector<aux_codepoint_data_type>(aux_codepoint_data_size, stream);
   auto table        = table_vector.data();
-  thrust::fill(rmm::exec_policy_nosync(stream),
+  thrust::fill(rmm::exec_policy_nosync(stream, cudf::get_current_device_resource_ref()),
                table + aux_section1_end,
                table + aux_codepoint_data_size,
                aux_codepoint_default_value);
-  CUDF_CUDA_TRY(cudaMemcpyAsync(table,
-                                aux_codepoint_data,
-                                aux_section1_end * sizeof(aux_codepoint_data[0]),  // 1st section
-                                cudaMemcpyDefault,
-                                stream.value()));
-  CUDF_CUDA_TRY(cudaMemcpyAsync(
-    table + aux_section2_begin,
-    aux_cp_data_44032_55203,
-    (aux_section2_end - aux_section2_begin + 1) * sizeof(aux_codepoint_data[0]),  // 2nd section
-    cudaMemcpyDefault,
-    stream.value()));
-  CUDF_CUDA_TRY(cudaMemcpyAsync(
-    table + aux_section3_begin,
-    aux_cp_data_70475_71099,
-    (aux_section3_end - aux_section3_begin + 1) * sizeof(aux_codepoint_data[0]),  // 3rd section
-    cudaMemcpyDefault,
-    stream.value()));
-  CUDF_CUDA_TRY(cudaMemcpyAsync(
-    table + aux_section4_begin,
-    aux_cp_data_119134_119232,
-    (aux_section4_end - aux_section4_begin + 1) * sizeof(aux_codepoint_data[0]),  // 4th section
-    cudaMemcpyDefault,
-    stream.value()));
+  auto dsts = std::array<void*, 4>{
+    table, table + aux_section2_begin, table + aux_section3_begin, table + aux_section4_begin};
+  auto srcs  = std::array<void const*, 4>{aux_codepoint_data,
+                                          aux_cp_data_44032_55203,
+                                          aux_cp_data_70475_71099,
+                                          aux_cp_data_119134_119232};
+  auto sizes = std::array<std::size_t, 4>{
+    aux_section1_end * sizeof(aux_codepoint_data[0]),
+    (aux_section2_end - aux_section2_begin + 1) * sizeof(aux_codepoint_data[0]),
+    (aux_section3_end - aux_section3_begin + 1) * sizeof(aux_codepoint_data[0]),
+    (aux_section4_end - aux_section4_begin + 1) * sizeof(aux_codepoint_data[0])};
+  CUDF_CUDA_TRY(
+    cudf::detail::memcpy_batch_async(dsts.data(), srcs.data(), sizes.data(), 4, stream));
   return table_vector;
 }
 
@@ -197,7 +186,7 @@ rmm::device_uvector<aux_codepoint_data_type> get_aux_codepoint_data(rmm::cuda_st
 // external APIs
 
 std::unique_ptr<cudf::column> normalize_spaces(cudf::strings_column_view const& input,
-                                               rmm::cuda_stream_view stream,
+                                               cuda::stream_ref stream,
                                                rmm::device_async_resource_ref mr)
 {
   CUDF_FUNC_RANGE();
@@ -232,7 +221,7 @@ struct character_normalizer::character_normalizer_impl {
 
 character_normalizer::character_normalizer(bool do_lower_case,
                                            cudf::strings_column_view const& special_tokens,
-                                           rmm::cuda_stream_view stream,
+                                           cuda::stream_ref stream,
                                            rmm::device_async_resource_ref)
 {
   auto cp_metadata = nvtext::detail::get_codepoint_metadata(stream);
@@ -262,7 +251,7 @@ character_normalizer::~character_normalizer() {}
 std::unique_ptr<character_normalizer> create_character_normalizer(
   bool do_lower_case,
   cudf::strings_column_view const& special_tokens,
-  rmm::cuda_stream_view stream,
+  cuda::stream_ref stream,
   rmm::device_async_resource_ref mr)
 {
   CUDF_FUNC_RANGE();
@@ -283,6 +272,7 @@ namespace {
  * @param d_normalized The normalized set of UTF-8 characters; 3 uints per input byte
  * @param total_count Number of bytes represented by d_normalized; len(d_normalized)/3
  * @param special_tokens Tokens to check against
+ * @param do_lower_case Whether to convert text to lower case
  */
 CUDF_KERNEL void special_tokens_kernel(uint32_t* d_normalized,
                                        int64_t total_count,
@@ -298,7 +288,7 @@ CUDF_KERNEL void special_tokens_kernel(uint32_t* d_normalized,
   if (match == end) { return; }
   char candidate[8];
   auto const ch_begin =
-    thrust::transform_iterator(begin, [](auto v) { return static_cast<char>(v); });
+    cuda::transform_iterator(begin, [](auto v) { return static_cast<char>(v); });
   auto const ch_end = ch_begin + cuda::std::distance(begin, match + 1);
   auto last         = thrust::copy_if(
     thrust::seq, ch_begin, ch_end, candidate, [](auto c) { return c != 0 && c != ' '; });
@@ -413,7 +403,7 @@ rmm::device_uvector<cudf::size_type> compute_sizes(cudf::device_span<uint32_t co
                                                    OffsetType offsets,
                                                    int64_t offset,
                                                    cudf::size_type size,
-                                                   rmm::cuda_stream_view stream)
+                                                   cuda::stream_ref stream)
 {
   auto output_sizes = rmm::device_uvector<cudf::size_type>(size, stream);
 
@@ -422,13 +412,12 @@ rmm::device_uvector<cudf::size_type> compute_sizes(cudf::device_span<uint32_t co
   // counts the non-zero bytes in the d_data array
   auto d_in = cudf::detail::make_counting_transform_iterator(
     0, cuda::proclaim_return_type<cudf::size_type>([d_data] __device__(auto idx) {
-      idx = idx * MAX_NEW_CHARS;
       // transform function counts number of non-zero bytes in uint32_t value
       auto tfn = [](uint32_t v) -> cudf::size_type {
         return ((v & 0xFF) > 0) + ((v & 0xFF00) > 0) + ((v & 0xFF0000) > 0) +
                ((v & 0xFF000000) > 0);
       };
-      auto const begin = d_data + idx;
+      auto const begin = d_data + (static_cast<int64_t>(idx) * MAX_NEW_CHARS);
       auto const end   = begin + MAX_NEW_CHARS;
       return thrust::transform_reduce(thrust::seq, begin, end, tfn, 0, cuda::std::plus{});
     }));
@@ -438,20 +427,22 @@ rmm::device_uvector<cudf::size_type> compute_sizes(cudf::device_span<uint32_t co
   auto temp  = std::size_t{0};
   if (offset == 0) {
     cub::DeviceSegmentedReduce::Sum(
-      nullptr, temp, d_in, d_out, size, offsets, offsets + 1, stream.value());
-    auto d_temp = rmm::device_buffer{temp, stream};
+      nullptr, temp, d_in, d_out, size, offsets, offsets + 1, stream.get());
+    auto d_temp = cuda::device_buffer<std::byte>{
+      stream, cudf::get_current_device_resource_ref(), temp, cuda::no_init};
     cub::DeviceSegmentedReduce::Sum(
-      d_temp.data(), temp, d_in, d_out, size, offsets, offsets + 1, stream.value());
+      d_temp.data(), temp, d_in, d_out, size, offsets, offsets + 1, stream.get());
   } else {
     // offsets need to be normalized for segmented-reduce to work efficiently
-    auto offsets_itr = thrust::transform_iterator(
+    auto offsets_itr = cuda::transform_iterator(
       offsets,
       cuda::proclaim_return_type<int64_t>([offset] __device__(auto o) { return o - offset; }));
     cub::DeviceSegmentedReduce::Sum(
-      nullptr, temp, d_in, d_out, size, offsets_itr, offsets_itr + 1, stream.value());
-    auto d_temp = rmm::device_buffer{temp, stream};
+      nullptr, temp, d_in, d_out, size, offsets_itr, offsets_itr + 1, stream.get());
+    auto d_temp = cuda::device_buffer<std::byte>{
+      stream, cudf::get_current_device_resource_ref(), temp, cuda::no_init};
     cub::DeviceSegmentedReduce::Sum(
-      d_temp.data(), temp, d_in, d_out, size, offsets_itr, offsets_itr + 1, stream.value());
+      d_temp.data(), temp, d_in, d_out, size, offsets_itr, offsets_itr + 1, stream.get());
   }
 
   return output_sizes;
@@ -463,7 +454,7 @@ OutputIterator remove_copy_safe(InputIterator first,
                                 InputIterator last,
                                 OutputIterator result,
                                 T const& value,
-                                rmm::cuda_stream_view stream)
+                                cuda::stream_ref stream)
 {
   auto const copy_size = std::min(static_cast<std::size_t>(std::distance(first, last)),
                                   static_cast<std::size_t>(std::numeric_limits<int>::max()));
@@ -472,15 +463,20 @@ OutputIterator remove_copy_safe(InputIterator first,
   while (itr != last) {
     auto const copy_end =
       static_cast<std::size_t>(std::distance(itr, last)) <= copy_size ? last : itr + copy_size;
-    result = thrust::remove_copy(rmm::exec_policy_nosync(stream), itr, copy_end, result, value);
-    itr    = copy_end;
+    result =
+      thrust::remove_copy(rmm::exec_policy_nosync(stream, cudf::get_current_device_resource_ref()),
+                          itr,
+                          copy_end,
+                          result,
+                          value);
+    itr = copy_end;
   }
   return result;
 }
 
 // handles ranges above int32 max
 template <typename Iterator, typename T>
-Iterator remove_safe(Iterator first, Iterator last, T const& value, rmm::cuda_stream_view stream)
+Iterator remove_safe(Iterator first, Iterator last, T const& value, cuda::stream_ref stream)
 {
   auto const size = std::min(static_cast<std::size_t>(std::distance(first, last)),
                              static_cast<std::size_t>(std::numeric_limits<int>::max()));
@@ -489,8 +485,9 @@ Iterator remove_safe(Iterator first, Iterator last, T const& value, rmm::cuda_st
   auto itr    = first;
   while (itr != last) {
     auto end = static_cast<std::size_t>(std::distance(itr, last)) <= size ? last : itr + size;
-    result   = thrust::remove(rmm::exec_policy_nosync(stream), itr, end, value);
-    itr      = end;
+    result   = thrust::remove(
+      rmm::exec_policy_nosync(stream, cudf::get_current_device_resource_ref()), itr, end, value);
+    itr = end;
   }
   return result;
 }
@@ -498,7 +495,7 @@ Iterator remove_safe(Iterator first, Iterator last, T const& value, rmm::cuda_st
 
 std::unique_ptr<cudf::column> normalize_characters(cudf::strings_column_view const& input,
                                                    character_normalizer const& normalizer,
-                                                   rmm::cuda_stream_view stream,
+                                                   cuda::stream_ref stream,
                                                    rmm::device_async_resource_ref mr)
 {
   if (input.is_empty()) { return cudf::make_empty_column(cudf::data_type{cudf::type_id::STRING}); }
@@ -517,21 +514,23 @@ std::unique_ptr<cudf::column> normalize_characters(cudf::strings_column_view con
   auto const& parameters = normalizer._impl;
 
   auto d_normalized = rmm::device_uvector<uint32_t>(max_new_char_total, stream);
-  data_normalizer_kernel<<<grid.num_blocks, grid.num_threads_per_block, 0, stream.value()>>>(
+  data_normalizer_kernel<<<grid.num_blocks, grid.num_threads_per_block, 0, stream.get()>>>(
     d_input_chars,
     chars_size,
     parameters->cp_metadata.data(),
     parameters->aux_table.data(),
     parameters->do_lower_case,
     d_normalized.data());
+  CUDF_CUDA_TRY(cudaGetLastError());
 
   // This removes space added around any special tokens in the form of [ttt].
   // An alternate approach is to do a multi-replace of '[ ttt ]' with '[ttt]' right
   // before returning the output strings column.
   auto const special_tokens = parameters->get_special_tokens();
   if (!special_tokens.empty()) {
-    special_tokens_kernel<<<grid.num_blocks, grid.num_threads_per_block, 0, stream.value()>>>(
+    special_tokens_kernel<<<grid.num_blocks, grid.num_threads_per_block, 0, stream.get()>>>(
       d_normalized.data(), chars_size, special_tokens, parameters->do_lower_case);
+    CUDF_CUDA_TRY(cudaGetLastError());
   }
 
   // Use segmented-reduce over the non-zero codepoints to get the size of the output rows
@@ -547,9 +546,7 @@ std::unique_ptr<cudf::column> normalize_characters(cudf::strings_column_view con
   // create output chars by calling remove_copy(0) on the bytes in d_normalized
   auto chars       = rmm::device_uvector<char>(total_size, stream, mr);
   auto const begin = reinterpret_cast<char const*>(d_normalized.begin());
-  // the remove() above speeds up the remove_copy() by roughly 10%
-  auto const end =
-    reinterpret_cast<char const*>(remove_safe(d_normalized.begin(), d_normalized.end(), 0, stream));
+  auto const end   = reinterpret_cast<char const*>(d_normalized.end());
   remove_copy_safe(begin, end, chars.data(), 0, stream);
 
   return cudf::make_strings_column(input.size(),
@@ -563,7 +560,7 @@ std::unique_ptr<cudf::column> normalize_characters(cudf::strings_column_view con
 
 std::unique_ptr<cudf::column> normalize_characters(cudf::strings_column_view const& input,
                                                    character_normalizer const& normalizer,
-                                                   rmm::cuda_stream_view stream,
+                                                   cuda::stream_ref stream,
                                                    rmm::device_async_resource_ref mr)
 {
   CUDF_FUNC_RANGE();

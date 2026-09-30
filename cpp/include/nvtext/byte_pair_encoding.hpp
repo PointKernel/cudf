@@ -1,5 +1,5 @@
 /*
- * SPDX-FileCopyrightText: Copyright (c) 2022-2026, NVIDIA CORPORATION.
+ * SPDX-FileCopyrightText: Copyright (c) 2022-2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
 #pragma once
@@ -18,12 +18,11 @@ namespace CUDF_EXPORT nvtext {
  * @addtogroup nvtext_tokenize
  * @{
  * @file
+ * @brief APIs for byte pair encoding (BPE) tokenization of strings columns.
  */
 
 /**
  * @brief The table of merge pairs for the BPE encoder.
- *
- * @deprecated Since 26.04
  *
  * To create an instance, call @ref nvtext::load_merge_pairs
  */
@@ -38,7 +37,7 @@ struct bpe_merge_pairs {
    * @param mr Device memory resource used to allocate the device memory
    */
   bpe_merge_pairs(std::unique_ptr<cudf::column>&& input,
-                  rmm::cuda_stream_view stream      = cudf::get_default_stream(),
+                  cuda::stream_ref stream           = cudf::get_default_stream(),
                   rmm::device_async_resource_ref mr = cudf::get_current_device_resource_ref());
 
   /**
@@ -49,7 +48,7 @@ struct bpe_merge_pairs {
    * @param mr Device memory resource used to allocate the device memory
    */
   bpe_merge_pairs(cudf::strings_column_view const& input,
-                  rmm::cuda_stream_view stream      = cudf::get_default_stream(),
+                  cuda::stream_ref stream           = cudf::get_default_stream(),
                   rmm::device_async_resource_ref mr = cudf::get_current_device_resource_ref());
 
   ~bpe_merge_pairs();
@@ -62,8 +61,6 @@ struct bpe_merge_pairs {
 
 /**
  * @brief Create a nvtext::bpe_merge_pairs from a strings column
- *
- * @deprecated Since 26.04
  *
  * The input column should contain a unique pair of strings per line separated by
  * a single space. An incorrect format or non-unique entries will result in
@@ -87,15 +84,13 @@ struct bpe_merge_pairs {
  * @param mr Memory resource to allocate any returned objects
  * @return A nvtext::bpe_merge_pairs object
  */
-[[deprecated]] std::unique_ptr<bpe_merge_pairs> load_merge_pairs(
+std::unique_ptr<bpe_merge_pairs> load_merge_pairs(
   cudf::strings_column_view const& merge_pairs,
-  rmm::cuda_stream_view stream      = cudf::get_default_stream(),
+  cuda::stream_ref stream           = cudf::get_default_stream(),
   rmm::device_async_resource_ref mr = cudf::get_current_device_resource_ref());
 
 /**
  * @brief Byte pair encode the input strings.
- *
- * @deprecated Since 26.04
  *
  * The encoding algorithm rebuilds each string by matching substrings
  * in the `merge_pairs` table and iteratively removing the minimum ranked pair
@@ -121,11 +116,11 @@ struct bpe_merge_pairs {
  * @param mr Memory resource to allocate any returned objects.
  * @return An encoded column of strings.
  */
-[[deprecated]] std::unique_ptr<cudf::column> byte_pair_encoding(
+std::unique_ptr<cudf::column> byte_pair_encoding(
   cudf::strings_column_view const& input,
   bpe_merge_pairs const& merges_pairs,
   cudf::string_scalar const& separator = cudf::string_scalar(" "),
-  rmm::cuda_stream_view stream         = cudf::get_default_stream(),
+  cuda::stream_ref stream              = cudf::get_default_stream(),
   rmm::device_async_resource_ref mr    = cudf::get_current_device_resource_ref());
 
 /** @} */  // end of group

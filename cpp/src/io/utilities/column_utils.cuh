@@ -1,5 +1,5 @@
 /*
- * SPDX-FileCopyrightText: Copyright (c) 2021-2026, NVIDIA CORPORATION.
+ * SPDX-FileCopyrightText: Copyright (c) 2021-2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
 
@@ -13,11 +13,11 @@
 #include <cudf/types.hpp>
 #include <cudf/utilities/span.hpp>
 
-#include <rmm/cuda_stream_view.hpp>
 #include <rmm/exec_policy.hpp>
 
+#include <cuda/iterator>
+#include <cuda/stream>
 #include <thrust/for_each.h>
-#include <thrust/iterator/counting_iterator.h>
 
 namespace cudf {
 namespace io {
@@ -41,15 +41,15 @@ template <typename ColumnDescriptor>
 rmm::device_uvector<column_device_view> create_leaf_column_device_views(
   typename cudf::device_span<ColumnDescriptor> col_desc,
   table_device_view const& parent_table_device_view,
-  rmm::cuda_stream_view stream)
+  cuda::stream_ref stream)
 {
   rmm::device_uvector<column_device_view> leaf_column_views(parent_table_device_view.num_columns(),
                                                             stream);
   auto leaf_columns = cudf::device_span<column_device_view>{leaf_column_views};
 
-  auto iter = thrust::make_counting_iterator<size_type>(0);
+  auto iter = cuda::counting_iterator<size_type>{0};
   thrust::for_each(
-    rmm::exec_policy_nosync(stream),
+    rmm::exec_policy_nosync(stream, cudf::get_current_device_resource_ref()),
     iter,
     iter + parent_table_device_view.num_columns(),
     [col_desc, parent_col_view = parent_table_device_view, leaf_columns] __device__(
@@ -69,7 +69,7 @@ rmm::device_uvector<column_device_view> create_leaf_column_device_views(
         col = child;
       }
       // Store leaf_column to device storage
-      column_device_view* leaf_col_ptr = leaf_columns.begin() + index;
+      column_device_view* leaf_col_ptr = leaf_columns.data() + index;
       *leaf_col_ptr                    = col;
       col_desc[index].leaf_column      = leaf_col_ptr;
     });

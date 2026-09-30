@@ -1,4 +1,4 @@
-# SPDX-FileCopyrightText: Copyright (c) 2018-2025, NVIDIA CORPORATION.
+# SPDX-FileCopyrightText: Copyright (c) 2018-2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 schema_version: 1
 
@@ -7,7 +7,7 @@ context:
   minor_version: ${{ (version | split("."))[:2] | join(".") }}
   cuda_version: ${{ (env.get("RAPIDS_CUDA_VERSION") | split("."))[:2] | join(".") }}
   cuda_major: '${{ (env.get("RAPIDS_CUDA_VERSION") | split("."))[0] }}'
-  date_string: '${{ env.get("RAPIDS_DATE_STRING") }}'
+  datetime_string: '${{ env.get("RAPIDS_DATETIME_STRING") }}'
   head_rev: '${{ git.head_rev(".")[:8] }}'
 
 recipe:
@@ -32,10 +32,15 @@ cache:
         cudf_ROOT="$(realpath ./cpp/build)"
         export cudf_ROOT
 
+        cmake_args=
+        for arg in $CMAKE_ARGS; do
+          cmake_args="$cmake_args \"$arg\""
+        done
+
         ./build.sh -n -v \
-            libcudf libcudf_kafka benchmarks tests \
+            libcudf libcudf_kafka libcudf_streaming benchmarks tests \
             --build_metrics --incl_cache_stats --allgpuarch \
-            --cmake-args=\"-DCUDF_ENABLE_ARROW_S3=ON\"
+            --cmake-args="\"-DCUDF_ENABLE_ARROW_S3=ON\" $cmake_args"
       secrets:
         - AWS_ACCESS_KEY_ID
         - AWS_SECRET_ACCESS_KEY
@@ -78,9 +83,13 @@ cache:
       - ${{ stdlib("c") }}
     host:
       - librmm =${{ minor_version }}
+      - librapidsmpf =${{ minor_version }}
       - libkvikio =${{ minor_version }}
+      - cuda-cudart-dev
       - cuda-nvrtc-dev
       - cuda-nvtx-dev
+      - cuda-profiler-api
+      - cuda-sanitizer-api
       - libcurand-dev
       - libnvjitlink-dev
       - if: linux and x86_64
@@ -88,10 +97,11 @@ cache:
           - libcufile-dev
       - cuda-version =${{ cuda_version }}
       - libnvcomp-dev ${{ nvcomp_version }}
+      - croaring ${{ croaring_version }}
       - dlpack ${{ dlpack_version }}
-      - librdkafka ${{ librdkafka_version }}
+      - librdkafka
       - flatbuffers =${{ flatbuffers_version }}
-      - rapids-logger =0.2
+      - rapids-logger =0.3
       - zlib ${{ zlib_version }}
 
 outputs:
@@ -106,7 +116,7 @@ outputs:
           LIB="$PREFIX/lib/libcudf.so"
           test -f "$LIB"
           ./ci/check_symbols.sh "$LIB"
-      string: cuda${{ cuda_major }}_${{ date_string }}_${{ head_rev }}
+      string: cuda${{ cuda_major }}_${{ datetime_string }}_${{ head_rev }}
       dynamic_linking:
         overlinking_behavior: "error"
       prefix_detection:
@@ -119,17 +129,18 @@ outputs:
         - ${{ compiler("c") }}
       host:
         - cuda-version =${{ cuda_version }}
+        - cuda-sanitizer-api
         - libkvikio =${{ minor_version }}
         - librmm =${{ minor_version }}
         - libnvcomp-dev ${{ nvcomp_version }}
         - libnvjitlink-dev
-        - rapids-logger =0.2
+        - rapids-logger =0.3
         - zlib ${{ zlib_version }}
         - cuda-cudart-dev
       run:
         - ${{ pin_compatible("cuda-version", upper_bound="x", lower_bound="x") }}
         - cuda-nvrtc
-        - libnvjitlink >=${{ cuda_version }}
+        - cuda-sanitizer-api
         - if: linux and x86_64
           then:
             - libcufile
@@ -141,7 +152,7 @@ outputs:
         # See https://github.com/rapidsai/build-planning/issues/46
         - libnvcomp-dev ${{ nvcomp_version }}
         - dlpack ${{ dlpack_version }}
-        - rapids-logger =0.2
+        - rapids-logger =0.3
       run_exports:
         - ${{ pin_subpackage("libcudf", upper_bound="x.x") }}
       ignore_run_exports:
@@ -149,18 +160,15 @@ outputs:
           - cuda-cudart
           - cuda-nvrtc
           - cuda-nvtx
+          - cuda-sanitizer-api
           - cuda-version
           - flatbuffers
           - libcufile
           - libcurand
           - libkvikio
-          - libnvjitlink
           - librdkafka
           - libzlib
           - librmm
-    tests:
-      - script:
-        - test -f $PREFIX/include/cudf/column/column.hpp
     about:
       homepage: ${{ load_from_file("python/libcudf/pyproject.toml").project.urls.Homepage }}
       license: ${{ load_from_file("python/libcudf/pyproject.toml").project.license }}
@@ -172,7 +180,7 @@ outputs:
     build:
       script:
         - cmake --install cpp/libcudf_kafka/build
-      string: cuda${{ cuda_major }}_${{ date_string }}_${{ head_rev }}
+      string: cuda${{ cuda_major }}_${{ datetime_string }}_${{ head_rev }}
       dynamic_linking:
         overlinking_behavior: "error"
     requirements:
@@ -180,10 +188,10 @@ outputs:
         - cmake ${{ cmake_version }}
         - ${{ stdlib("c") }}
       host:
-        - librdkafka ${{ librdkafka_version }}
+        - librdkafka
         - ${{ pin_subpackage("libcudf", exact=True) }}
       run:
-        - librdkafka ${{ librdkafka_version }}
+        - librdkafka
         - ${{ pin_subpackage("libcudf", exact=True) }}
       ignore_run_exports:
         by_name:
@@ -200,13 +208,54 @@ outputs:
           - librmm
           - libzlib
           - libnvcomp
-    tests:
-      - script:
-        - test -f $PREFIX/lib/libcudf_kafka.so
     about:
-      homepage: https://rapids.ai/
+      homepage: https://docs.nvidia.com/cudf/
       license: Apache-2.0
       summary: libcudf_kafka library
+
+  - package:
+      name: libcudf-streaming
+      version: ${{ version }}
+    build:
+      script:
+        - cmake --install cpp/libcudf_streaming/build
+      string: cuda${{ cuda_major }}_${{ datetime_string }}_${{ head_rev }}
+      dynamic_linking:
+        overlinking_behavior: "error"
+    requirements:
+      build:
+        - cmake ${{ cmake_version }}
+        - ${{ stdlib("c") }}
+      host:
+        - ${{ pin_subpackage("libcudf", exact=True) }}
+        - librmm =${{ minor_version }}
+        - librapidsmpf =${{ minor_version }}
+        - cuda-version =${{ cuda_version }}
+        - cuda-cudart-dev
+      run:
+        - ${{ pin_subpackage("libcudf", exact=True) }}
+        - librmm =${{ minor_version }}
+        - librapidsmpf =${{ minor_version }}
+        - ${{ pin_compatible("cuda-version", upper_bound="x", lower_bound="x") }}
+      ignore_run_exports:
+        by_name:
+          - cuda-cudart
+          - cuda-nvrtc
+          - cuda-nvtx
+          - cuda-version
+          - flatbuffers
+          - libcudf
+          - libcufile
+          - libcurand
+          - libkvikio
+          - librdkafka
+          - librmm
+          - libzlib
+          - libnvcomp
+    about:
+      homepage: https://docs.nvidia.com/cudf/
+      license: Apache-2.0
+      summary: libcudf-streaming library
 
   - package:
       name: libcudf-example
@@ -244,7 +293,7 @@ outputs:
           SCCACHE_S3_USE_PREPROCESSOR_CACHE_MODE: ${{ env.get("SCCACHE_S3_USE_PREPROCESSOR_CACHE_MODE", default="true") }}
           SCCACHE_S3_USE_SSL: ${{ env.get("SCCACHE_S3_USE_SSL", default="true") }}
           SCCACHE_SERVER_LOG: ${{ env.get("SCCACHE_SERVER_LOG", default="sccache=debug") }}
-          string: cuda${{ cuda_major }}_${{ date_string }}_${{ head_rev }}
+      string: cuda${{ cuda_major }}_${{ datetime_string }}_${{ head_rev }}
       dynamic_linking:
         overlinking_behavior: "error"
     requirements:
@@ -261,6 +310,8 @@ outputs:
         - cuda-version =${{ cuda_version }}
         - cuda-nvtx-dev
         - cuda-cudart-dev
+        - cuda-nvrtc-dev
+        - libnvjitlink-dev
       run:
         - ${{ pin_subpackage("libcudf", exact=True) }}
         - ${{ pin_compatible("cuda-version", upper_bound="x", lower_bound="x") }}
@@ -293,7 +344,7 @@ outputs:
       script:
         - cmake --install cpp/build --component testing
         - cmake --install cpp/libcudf_kafka/build --component testing
-      string: cuda${{ cuda_major }}_${{ date_string }}_${{ head_rev }}
+      string: cuda${{ cuda_major }}_${{ datetime_string }}_${{ head_rev }}
       dynamic_linking:
         overlinking_behavior: "error"
         missing_dso_allowlist:
@@ -308,11 +359,15 @@ outputs:
         - cuda-version =${{ cuda_version }}
         - libcurand-dev
         - cuda-cudart-dev
+        - croaring ${{ croaring_version }}
+        - cuda-profiler-api
+        - cuda-sanitizer-api
       run:
         - ${{ pin_compatible("cuda-version", upper_bound="x", lower_bound="x") }}
         - ${{ pin_subpackage("libcudf", exact=True) }}
         - ${{ pin_subpackage("libcudf_kafka", exact=True) }}
         - libcurand
+        - cuda-sanitizer-api
       ignore_run_exports:
         from_package:
           - libcurand-dev
@@ -320,6 +375,7 @@ outputs:
           - cuda-cudart
           - cuda-nvrtc
           - cuda-nvtx
+          - cuda-sanitizer-api
           - cuda-version
           - flatbuffers
           - libcudf
@@ -334,3 +390,49 @@ outputs:
       homepage: ${{ load_from_file("python/libcudf/pyproject.toml").project.urls.Homepage }}
       license: ${{ load_from_file("python/libcudf/pyproject.toml").project.license }}
       summary: libcudf test & benchmark executables
+
+  - package:
+      name: libcudf-streaming-tests
+      version: ${{ version }}
+    build:
+      script:
+        - cmake --install cpp/libcudf_streaming/build --component testing
+        - cmake --install cpp/libcudf_streaming/build --component benchmarking
+      string: cuda${{ cuda_major }}_${{ datetime_string }}_${{ head_rev }}
+      dynamic_linking:
+        overlinking_behavior: "error"
+    requirements:
+      build:
+        - cmake ${{ cmake_version }}
+        - ${{ stdlib("c") }}
+      host:
+        - ${{ pin_subpackage("libcudf", exact=True) }}
+        - ${{ pin_subpackage("libcudf-streaming", exact=True) }}
+        - librmm =${{ minor_version }}
+        - librapidsmpf =${{ minor_version }}
+        - openmpi >=5.0
+        - cuda-version =${{ cuda_version }}
+        - cuda-cudart-dev
+      run:
+        - ${{ pin_subpackage("libcudf", exact=True) }}
+        - ${{ pin_subpackage("libcudf-streaming", exact=True) }}
+        - librmm =${{ minor_version }}
+        - librapidsmpf =${{ minor_version }}
+        - openmpi >=5.0
+        - ${{ pin_compatible("cuda-version", upper_bound="x", lower_bound="x") }}
+      ignore_run_exports:
+        by_name:
+          - cuda-cudart
+          - cuda-nvrtc
+          - cuda-nvtx
+          - cuda-version
+          - libcudf
+          - libcufile
+          - libcurand
+          - libkvikio
+          - librmm
+          - libnvcomp
+    about:
+      homepage: https://docs.nvidia.com/cudf/
+      license: Apache-2.0
+      summary: libcudf-streaming test & benchmark executables

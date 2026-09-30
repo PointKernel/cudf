@@ -1,5 +1,5 @@
 /*
- * SPDX-FileCopyrightText: Copyright (c) 2023-2025, NVIDIA CORPORATION.
+ * SPDX-FileCopyrightText: Copyright (c) 2023-2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
 
@@ -7,6 +7,7 @@
 
 #include <cudf_test/base_fixture.hpp>
 #include <cudf_test/io_metadata_utilities.hpp>
+#include <cudf_test/iterator_utilities.hpp>
 #include <cudf_test/table_utilities.hpp>
 
 #include <cudf/io/parquet.hpp>
@@ -69,7 +70,7 @@ TEST_F(ParquetChunkedWriterTest, LargeTables)
   cudf::io::chunked_parquet_writer_options args =
     cudf::io::chunked_parquet_writer_options::builder(cudf::io::sink_info{filepath});
   auto md = cudf::io::chunked_parquet_writer(args).write(*table1).write(*table2).close();
-  ASSERT_EQ(md, nullptr);
+  ASSERT_NE(md, nullptr);
 
   cudf::io::parquet_reader_options read_opts =
     cudf::io::parquet_reader_options::builder(cudf::io::source_info{filepath});
@@ -141,8 +142,8 @@ TEST_F(ParquetChunkedWriterTest, Strings)
 
 TEST_F(ParquetChunkedWriterTest, ListColumn)
 {
-  auto valids  = cudf::detail::make_counting_transform_iterator(0, [](auto i) { return i % 2; });
-  auto valids2 = cudf::detail::make_counting_transform_iterator(0, [](auto i) { return i != 3; });
+  auto valids  = cudf::test::iterators::nulls_at_multiples_of(2);
+  auto valids2 = cudf::test::iterators::null_at(3);
 
   using lcw = cudf::test::lists_column_wrapper<int32_t>;
 
@@ -208,11 +209,15 @@ TEST_F(ParquetChunkedWriterTest, ListOfStruct)
   auto struct_2_1 = cudf::test::structs_column_wrapper{{is_human_1, struct_1_1}};
 
   auto list_offsets_column_1 =
-    cudf::test::fixed_width_column_wrapper<cudf::size_type>{0, 2, 3, 3}.release();
+    cudf::test::fixed_width_column_wrapper<int32_t>{0, 2, 3, 3}.release();
   auto num_list_rows_1 = list_offsets_column_1->size() - 1;
 
-  auto list_col_1 = cudf::make_lists_column(
-    num_list_rows_1, std::move(list_offsets_column_1), struct_2_1.release(), 0, {});
+  auto list_col_1 =
+    cudf::make_lists_column(num_list_rows_1,
+                            std::move(list_offsets_column_1),
+                            struct_2_1.release(),
+                            0,
+                            cudf::create_null_mask(0, cudf::mask_state::UNALLOCATED));
 
   auto table_1 = table_view({*list_col_1});
 
@@ -226,11 +231,15 @@ TEST_F(ParquetChunkedWriterTest, ListOfStruct)
   auto struct_2_2 = cudf::test::structs_column_wrapper{{is_human_2, struct_1_2}};
 
   auto list_offsets_column_2 =
-    cudf::test::fixed_width_column_wrapper<cudf::size_type>{0, 1, 2, 3}.release();
+    cudf::test::fixed_width_column_wrapper<int32_t>{0, 1, 2, 3}.release();
   auto num_list_rows_2 = list_offsets_column_2->size() - 1;
 
-  auto list_col_2 = cudf::make_lists_column(
-    num_list_rows_2, std::move(list_offsets_column_2), struct_2_2.release(), 0, {});
+  auto list_col_2 =
+    cudf::make_lists_column(num_list_rows_2,
+                            std::move(list_offsets_column_2),
+                            struct_2_2.release(),
+                            0,
+                            cudf::create_null_mask(0, cudf::mask_state::UNALLOCATED));
 
   auto table_2 = table_view({*list_col_2});
 
@@ -260,8 +269,8 @@ TEST_F(ParquetChunkedWriterTest, ListOfStruct)
 
 TEST_F(ParquetChunkedWriterTest, ListOfStructOfStructOfListOfList)
 {
-  auto valids  = cudf::detail::make_counting_transform_iterator(0, [](auto i) { return i % 2; });
-  auto valids2 = cudf::detail::make_counting_transform_iterator(0, [](auto i) { return i != 3; });
+  auto valids  = cudf::test::iterators::nulls_at_multiples_of(2);
+  auto valids2 = cudf::test::iterators::null_at(3);
 
   using lcw = cudf::test::lists_column_wrapper<int32_t>;
 
@@ -286,11 +295,15 @@ TEST_F(ParquetChunkedWriterTest, ListOfStructOfStructOfListOfList)
   auto struct_2_1 = cudf::test::structs_column_wrapper{{is_human_1, struct_1_1}};
 
   auto list_offsets_column_1 =
-    cudf::test::fixed_width_column_wrapper<cudf::size_type>{0, 2, 3, 4}.release();
+    cudf::test::fixed_width_column_wrapper<int32_t>{0, 2, 3, 4}.release();
   auto num_list_rows_1 = list_offsets_column_1->size() - 1;
 
-  auto list_col_1 = cudf::make_lists_column(
-    num_list_rows_1, std::move(list_offsets_column_1), struct_2_1.release(), 0, {});
+  auto list_col_1 =
+    cudf::make_lists_column(num_list_rows_1,
+                            std::move(list_offsets_column_1),
+                            struct_2_1.release(),
+                            0,
+                            cudf::create_null_mask(0, cudf::mask_state::UNALLOCATED));
 
   auto table_1 = table_view({*list_col_1});
 
@@ -311,12 +324,15 @@ TEST_F(ParquetChunkedWriterTest, ListOfStructOfStructOfListOfList)
   auto is_human_2 = cudf::test::fixed_width_column_wrapper<bool>{{false, false}, {true, false}};
   auto struct_2_2 = cudf::test::structs_column_wrapper{{is_human_2, struct_1_2}};
 
-  auto list_offsets_column_2 =
-    cudf::test::fixed_width_column_wrapper<cudf::size_type>{0, 1, 2}.release();
-  auto num_list_rows_2 = list_offsets_column_2->size() - 1;
+  auto list_offsets_column_2 = cudf::test::fixed_width_column_wrapper<int32_t>{0, 1, 2}.release();
+  auto num_list_rows_2       = list_offsets_column_2->size() - 1;
 
-  auto list_col_2 = cudf::make_lists_column(
-    num_list_rows_2, std::move(list_offsets_column_2), struct_2_2.release(), 0, {});
+  auto list_col_2 =
+    cudf::make_lists_column(num_list_rows_2,
+                            std::move(list_offsets_column_2),
+                            struct_2_2.release(),
+                            0,
+                            cudf::create_null_mask(0, cudf::mask_state::UNALLOCATED));
 
   auto table_2 = table_view({*list_col_2});
 
@@ -412,8 +428,8 @@ TEST_F(ParquetChunkedWriterTest, MismatchedStructure)
 
 TEST_F(ParquetChunkedWriterTest, MismatchedStructureList)
 {
-  auto valids  = cudf::detail::make_counting_transform_iterator(0, [](auto i) { return i % 2; });
-  auto valids2 = cudf::detail::make_counting_transform_iterator(0, [](auto i) { return i != 3; });
+  auto valids  = cudf::test::iterators::nulls_at_multiples_of(2);
+  auto valids2 = cudf::test::iterators::null_at(3);
 
   using lcw = cudf::test::lists_column_wrapper<int32_t>;
 
@@ -555,8 +571,8 @@ TEST_F(ParquetChunkedWriterTest, ForcedNullabilityList)
 {
   srand(31337);
 
-  auto valids  = cudf::detail::make_counting_transform_iterator(0, [](auto i) { return i % 2; });
-  auto valids2 = cudf::detail::make_counting_transform_iterator(0, [](auto i) { return i != 3; });
+  auto valids  = cudf::test::iterators::nulls_at_multiples_of(2);
+  auto valids2 = cudf::test::iterators::null_at(3);
 
   using lcw = cudf::test::lists_column_wrapper<int32_t>;
 

@@ -1,5 +1,5 @@
 /*
- * SPDX-FileCopyrightText: Copyright (c) 2023-2026, NVIDIA CORPORATION.
+ * SPDX-FileCopyrightText: Copyright (c) 2023-2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
 
@@ -9,6 +9,7 @@
 #include <cudf/column/column_factories.hpp>
 #include <cudf/detail/gather.hpp>
 #include <cudf/detail/labeling/label_segments.cuh>
+#include <cudf/null_mask.hpp>
 #include <cudf/reduction/detail/histogram.hpp>
 #include <cudf/structs/structs_column_view.hpp>
 #include <cudf/types.hpp>
@@ -27,7 +28,7 @@ std::unique_ptr<column> build_histogram(column_view const& values,
                                         cudf::device_span<size_type const> group_labels,
                                         std::optional<column_view> const& partial_counts,
                                         size_type num_groups,
-                                        rmm::cuda_stream_view stream,
+                                        cuda::stream_ref stream,
                                         rmm::device_async_resource_ref mr)
 {
   CUDF_EXPECTS(static_cast<size_t>(values.size()) == group_labels.size(),
@@ -50,7 +51,7 @@ std::unique_ptr<column> build_histogram(column_view const& values,
   auto out_table = cudf::detail::gather(labeled_values,
                                         *distinct_indices,
                                         out_of_bounds_policy::DONT_CHECK,
-                                        cudf::detail::negative_index_policy::NOT_ALLOWED,
+                                        cudf::negative_index_policy::NOT_ALLOWED,
                                         stream,
                                         mr);
 
@@ -65,12 +66,15 @@ std::unique_ptr<column> build_histogram(column_view const& values,
   auto out_structs = make_structs_column(static_cast<size_type>(distinct_indices->size()),
                                          std::move(struct_children),
                                          0,
-                                         {},
+                                         cudf::create_null_mask(0, cudf::mask_state::UNALLOCATED),
                                          stream,
                                          mr);
 
-  return make_lists_column(
-    num_groups, std::move(out_offsets), std::move(out_structs), 0, {}, stream, mr);
+  return make_lists_column(num_groups,
+                           std::move(out_offsets),
+                           std::move(out_structs),
+                           0,
+                           cudf::create_null_mask(0, cudf::mask_state::UNALLOCATED));
 }
 
 }  // namespace
@@ -78,7 +82,7 @@ std::unique_ptr<column> build_histogram(column_view const& values,
 std::unique_ptr<column> group_histogram(column_view const& values,
                                         cudf::device_span<size_type const> group_labels,
                                         size_type num_groups,
-                                        rmm::cuda_stream_view stream,
+                                        cuda::stream_ref stream,
                                         rmm::device_async_resource_ref mr)
 {
   // Empty group should be handled before reaching here.
@@ -90,7 +94,7 @@ std::unique_ptr<column> group_histogram(column_view const& values,
 std::unique_ptr<column> group_merge_histogram(column_view const& values,
                                               cudf::device_span<size_type const> group_offsets,
                                               size_type num_groups,
-                                              rmm::cuda_stream_view stream,
+                                              cuda::stream_ref stream,
                                               rmm::device_async_resource_ref mr)
 {
   // Empty group should be handled before reaching here.
@@ -121,7 +125,7 @@ std::unique_ptr<column> group_merge_histogram(column_view const& values,
   // That is equivalent to creating a new lists column (view) from the input lists column
   // with new offsets gathered as below.
   auto new_offsets = rmm::device_uvector<size_type>(num_groups + 1, stream);
-  thrust::gather(rmm::exec_policy_nosync(stream),
+  thrust::gather(rmm::exec_policy_nosync(stream, cudf::get_current_device_resource_ref()),
                  group_offsets.begin(),
                  group_offsets.end(),
                  lists_cv.offsets_begin(),

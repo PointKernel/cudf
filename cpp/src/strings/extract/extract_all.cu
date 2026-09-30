@@ -1,5 +1,5 @@
 /*
- * SPDX-FileCopyrightText: Copyright (c) 2021-2024, NVIDIA CORPORATION.
+ * SPDX-FileCopyrightText: Copyright (c) 2021-2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
 
@@ -18,10 +18,10 @@
 #include <cudf/utilities/default_stream.hpp>
 #include <cudf/utilities/memory_resource.hpp>
 
-#include <rmm/cuda_stream_view.hpp>
 #include <rmm/exec_policy.hpp>
 
-#include <thrust/functional.h>
+#include <cuda/functional>
+#include <cuda/stream>
 #include <thrust/transform_scan.h>
 
 namespace cudf {
@@ -93,7 +93,7 @@ struct extract_fn {
  */
 std::unique_ptr<column> extract_all_record(strings_column_view const& input,
                                            regex_program const& prog,
-                                           rmm::cuda_stream_view stream,
+                                           cuda::stream_ref stream,
                                            rmm::device_async_resource_ref mr)
 {
   auto const strings_count = input.size();
@@ -106,9 +106,10 @@ std::unique_ptr<column> extract_all_record(strings_column_view const& input,
   auto const groups = d_prog->group_counts();
   CUDF_EXPECTS(groups > 0, "extract_all requires group indicators in the regex pattern.");
 
-  // Get the match counts for each string.
+  // Get the match counts for each string, reusing the device program built above
+  // instead of building a second one.
   // This column will become the output lists child offsets column.
-  auto counts   = count_matches(*d_strings, *d_prog, stream, mr);
+  auto counts   = count_matches(*d_strings, *d_prog, strings_count, stream, mr);
   auto d_counts = counts->mutable_view().data<size_type>();
 
   // Compute null output rows
@@ -117,7 +118,7 @@ std::unique_ptr<column> extract_all_record(strings_column_view const& input,
 
   // Return an empty lists column if there are no valid rows
   if (strings_count == null_count) {
-    return cudf::lists::detail::make_empty_lists_column(data_type{type_id::STRING}, stream, mr);
+    return cudf::lists::detail::make_empty_lists_column(data_type{type_id::STRING});
   }
 
   // Convert counts into offsets.
@@ -135,16 +136,11 @@ std::unique_ptr<column> extract_all_record(strings_column_view const& input,
   launch_for_each_kernel(
     extract_fn{*d_strings, d_offsets, indices.data()}, *d_prog, strings_count, stream);
 
-  auto strings_output = make_strings_column(indices.begin(), indices.end(), stream, mr);
+  auto strings_output = cudf::make_strings_column(indices, stream, mr);
 
   // Build the lists column from the offsets and the strings.
-  return make_lists_column(strings_count,
-                           std::move(offsets),
-                           std::move(strings_output),
-                           null_count,
-                           std::move(null_mask),
-                           stream,
-                           mr);
+  return make_lists_column(
+    strings_count, std::move(offsets), std::move(strings_output), null_count, std::move(null_mask));
 }
 
 }  // namespace detail
@@ -153,7 +149,7 @@ std::unique_ptr<column> extract_all_record(strings_column_view const& input,
 
 std::unique_ptr<column> extract_all_record(strings_column_view const& input,
                                            regex_program const& prog,
-                                           rmm::cuda_stream_view stream,
+                                           cuda::stream_ref stream,
                                            rmm::device_async_resource_ref mr)
 {
   CUDF_FUNC_RANGE();

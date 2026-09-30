@@ -1,5 +1,5 @@
 /*
- * SPDX-FileCopyrightText: Copyright (c) 2025, NVIDIA CORPORATION.
+ * SPDX-FileCopyrightText: Copyright (c) 2025-2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
 
@@ -17,10 +17,10 @@
 #include <cudf/utilities/error.hpp>
 #include <cudf/utilities/memory_resource.hpp>
 
-#include <rmm/cuda_stream_view.hpp>
 #include <rmm/exec_policy.hpp>
 
-#include <thrust/iterator/counting_iterator.h>
+#include <cuda/iterator>
+#include <cuda/stream>
 #include <thrust/transform.h>
 
 namespace cudf {
@@ -66,7 +66,7 @@ std::unique_ptr<column> split_part_fn(strings_column_view const& input,
                                       size_type index,
                                       Tokenizer tokenizer,
                                       DelimiterFn delimiter_fn,
-                                      rmm::cuda_stream_view stream,
+                                      cuda::stream_ref stream,
                                       rmm::device_async_resource_ref mr)
 {
   if (input.size() == input.null_count()) {
@@ -80,9 +80,9 @@ std::unique_ptr<column> split_part_fn(strings_column_view const& input,
 
   // get just the indexed value of each element
   auto d_indices = rmm::device_uvector<string_index_pair>(input.size(), stream);
-  thrust::transform(rmm::exec_policy_nosync(stream),
-                    thrust::make_counting_iterator<size_type>(0),
-                    thrust::make_counting_iterator<size_type>(input.size()),
+  thrust::transform(rmm::exec_policy_nosync(stream, cudf::get_current_device_resource_ref()),
+                    cuda::counting_iterator<size_type>{0},
+                    cuda::counting_iterator<size_type>{input.size()},
                     d_indices.begin(),
                     [d_offsets, d_tokens, index] __device__(size_type idx) {
                       auto const offset      = d_offsets[idx];
@@ -91,7 +91,7 @@ std::unique_ptr<column> split_part_fn(strings_column_view const& input,
                                                    : string_index_pair{nullptr, 0};
                     });
 
-  return make_strings_column(d_indices.begin(), d_indices.end(), stream, mr);
+  return cudf::make_strings_column(d_indices, stream, mr);
 }
 
 }  // namespace
@@ -99,7 +99,7 @@ std::unique_ptr<column> split_part_fn(strings_column_view const& input,
 std::unique_ptr<column> split_part(strings_column_view const& input,
                                    string_scalar const& delimiter,
                                    size_type index,
-                                   rmm::cuda_stream_view stream,
+                                   cuda::stream_ref stream,
                                    rmm::device_async_resource_ref mr)
 {
   CUDF_EXPECTS(
@@ -125,7 +125,7 @@ std::unique_ptr<column> split_part(strings_column_view const& input,
 std::unique_ptr<column> split_part(strings_column_view const& input,
                                    string_scalar const& delimiter,
                                    size_type index,
-                                   rmm::cuda_stream_view stream,
+                                   cuda::stream_ref stream,
                                    rmm::device_async_resource_ref mr)
 {
   CUDF_FUNC_RANGE();

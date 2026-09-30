@@ -1,5 +1,5 @@
 /*
- * SPDX-FileCopyrightText: Copyright (c) 2021-2025, NVIDIA CORPORATION.
+ * SPDX-FileCopyrightText: Copyright (c) 2021-2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
 
@@ -12,9 +12,9 @@
 #include <cudf/strings/strings_column_view.hpp>
 #include <cudf/utilities/default_stream.hpp>
 
+#include <cuda/iterator>
 #include <thrust/execution_policy.h>
 #include <thrust/for_each.h>
-#include <thrust/iterator/counting_iterator.h>
 #include <thrust/random.h>
 
 #include <nvbench/nvbench.cuh>
@@ -49,7 +49,7 @@ auto generate_column(cudf::size_type num_rows, cudf::size_type chars_per_row, do
 
   auto engine = thrust::default_random_engine{};
   thrust::for_each_n(thrust::device,
-                     thrust::counting_iterator<cudf::size_type>(0),
+                     cuda::counting_iterator<cudf::size_type>{0},
                      num_rows,
                      url_string_generator{*d_strings, esc_seq_chance, engine});
   return result_col;
@@ -65,7 +65,7 @@ static void bench_url_decode(nvbench::state& state)
   auto input  = cudf::strings_column_view(column->view());
 
   auto stream = cudf::get_default_stream();
-  state.set_cuda_stream(nvbench::make_cuda_stream_view(stream.value()));
+  state.set_cuda_stream(nvbench::make_cuda_stream_view(stream.get()));
   auto const data_size = column->alloc_size();
   state.add_global_memory_reads<nvbench::int8_t>(data_size);
 

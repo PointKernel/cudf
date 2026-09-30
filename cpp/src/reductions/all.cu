@@ -1,5 +1,5 @@
 /*
- * SPDX-FileCopyrightText: Copyright (c) 2019-2026, NVIDIA CORPORATION.
+ * SPDX-FileCopyrightText: Copyright (c) 2019-2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
 
@@ -11,9 +11,8 @@
 #include <cudf/utilities/memory_resource.hpp>
 
 #include <cuda/atomic>
+#include <cuda/iterator>
 #include <thrust/for_each.h>
-#include <thrust/iterator/counting_iterator.h>
-#include <thrust/iterator/transform_iterator.h>
 #include <thrust/reduce.h>
 
 namespace cudf {
@@ -45,7 +44,7 @@ struct all_fn {
 
   template <typename T>
   std::unique_ptr<scalar> operator()(column_view const& input,
-                                     rmm::cuda_stream_view stream,
+                                     cuda::stream_ref stream,
                                      rmm::device_async_resource_ref mr)
     requires(std::is_arithmetic_v<T>)
   {
@@ -54,19 +53,19 @@ struct all_fn {
       auto null_iter = op::min{}.template get_null_replacing_element_transformer<bool>();
       auto pair_iter =
         cudf::dictionary::detail::make_dictionary_pair_iterator<T>(*d_dict, input.has_nulls());
-      return thrust::make_transform_iterator(pair_iter, null_iter);
+      return cuda::transform_iterator(pair_iter, null_iter);
     }();
     auto d_result =
       cudf::detail::device_scalar<int32_t>(1, stream, cudf::get_current_device_resource_ref());
-    thrust::for_each_n(rmm::exec_policy_nosync(stream),
-                       thrust::make_counting_iterator<size_type>(0),
+    thrust::for_each_n(rmm::exec_policy_nosync(stream, cudf::get_current_device_resource_ref()),
+                       cuda::counting_iterator<size_type>{0},
                        input.size(),
                        all_true_fn<decltype(iter)>{iter, d_result.data()});
     return std::make_unique<numeric_scalar<bool>>(d_result.value(stream), true, stream, mr);
   }
   template <typename T>
   std::unique_ptr<scalar> operator()(column_view const&,
-                                     rmm::cuda_stream_view,
+                                     cuda::stream_ref,
                                      rmm::device_async_resource_ref)
     requires(!std::is_arithmetic_v<T>)
   {
@@ -79,7 +78,7 @@ struct all_fn {
 std::unique_ptr<cudf::scalar> all(column_view const& col,
                                   cudf::data_type const output_dtype,
                                   std::optional<std::reference_wrapper<scalar const>> init,
-                                  rmm::cuda_stream_view stream,
+                                  cuda::stream_ref stream,
                                   rmm::device_async_resource_ref mr)
 {
   CUDF_EXPECTS(output_dtype == cudf::data_type(cudf::type_id::BOOL8),

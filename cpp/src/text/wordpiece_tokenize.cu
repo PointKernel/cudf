@@ -1,17 +1,17 @@
 /*
- * SPDX-FileCopyrightText: Copyright (c) 2025-2026, NVIDIA CORPORATION.
+ * SPDX-FileCopyrightText: Copyright (c) 2025-2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
 
 #include <cudf/column/column.hpp>
 #include <cudf/column/column_device_view.cuh>
 #include <cudf/column/column_factories.hpp>
+#include <cudf/detail/algorithms/copy_if.cuh>
 #include <cudf/detail/cuco_helpers.hpp>
 #include <cudf/detail/null_mask.hpp>
 #include <cudf/detail/nvtx/ranges.hpp>
 #include <cudf/detail/offsets_iterator_factory.cuh>
 #include <cudf/detail/sizes_to_offsets_iterator.cuh>
-#include <cudf/detail/utilities/algorithm.cuh>
 #include <cudf/detail/utilities/cuda.cuh>
 #include <cudf/detail/utilities/grid_1d.cuh>
 #include <cudf/hashing/detail/murmurhash3_x86_32.cuh>
@@ -25,19 +25,21 @@
 
 #include <nvtext/wordpiece_tokenize.hpp>
 
-#include <rmm/cuda_stream_view.hpp>
 #include <rmm/mr/polymorphic_allocator.hpp>
 
 #include <cooperative_groups.h>
 #include <cooperative_groups/scan.h>
-#include <cub/cub.cuh>
+#include <cub/device/device_segmented_reduce.cuh>
 #include <cuco/static_map.cuh>
+#include <cuda/buffer>
+#include <cuda/functional>
+#include <cuda/iterator>
 #include <cuda/std/functional>
 #include <cuda/std/iterator>
 #include <cuda/std/limits>
+#include <cuda/stream>
 #include <thrust/execution_policy.h>
 #include <thrust/find.h>
-#include <thrust/iterator/transform_iterator.h>
 #include <thrust/remove.h>
 
 namespace nvtext {
@@ -135,7 +137,8 @@ using sub_vocabulary_map_type = cuco::static_map<cudf::size_type,
 // std::unique_ptr<column_device_view> this helper simplifies the return type in a maintainable way
 using col_device_view = std::invoke_result_t<decltype(&cudf::column_device_view::create),
                                              cudf::column_view,
-                                             rmm::cuda_stream_view>;
+                                             cuda::stream_ref,
+                                             rmm::device_async_resource_ref>;
 
 /**
  * @brief Internal class manages all the data held by the vocabulary object
@@ -169,7 +172,8 @@ namespace {
  * @brief Identifies the column indices as the values in the vocabulary map
  */
 struct key_pair {
-  __device__ auto operator()(cudf::size_type idx) const noexcept
+  __device__ cuco::pair<cudf::size_type, cudf::size_type> operator()(
+    cudf::size_type idx) const noexcept
   {
     return cuco::make_pair(idx, idx);
   }
@@ -208,7 +212,7 @@ struct resolve_unk_id {
 }  // namespace
 
 wordpiece_vocabulary::wordpiece_vocabulary(cudf::strings_column_view const& input,
-                                           rmm::cuda_stream_view stream,
+                                           cuda::stream_ref stream,
                                            rmm::device_async_resource_ref mr)
 {
   CUDF_EXPECTS(not input.is_empty(), "vocabulary must not be empty", std::invalid_argument);
@@ -227,21 +231,21 @@ wordpiece_vocabulary::wordpiece_vocabulary(cudf::strings_column_view const& inpu
     detail::probe_scheme{detail::vocab_hasher{*d_vocabulary}},
     cuco::thread_scope_thread,
     detail::cuco_storage{},
-    rmm::mr::polymorphic_allocator<char>{},
-    stream.value());
+    rmm::mr::polymorphic_allocator<char>{mr},
+    stream.get());
   // the row index is the token id (data value for each key in the map)
   auto iter = cudf::detail::make_counting_transform_iterator(0, key_pair{});
-  vocab_map->insert_async(iter, iter + vocabulary->size(), stream.value());
-  auto const zero_itr = thrust::counting_iterator<cudf::size_type>(0);
+  vocab_map->insert_async(iter, iter + vocabulary->size(), stream.get());
+  auto const zero_itr = cuda::counting_iterator<cudf::size_type>{0};
 
   // get the indices of all the ## prefixed entries
   auto sub_map_indices = rmm::device_uvector<cudf::size_type>(vocabulary->size(), stream);
-  auto const end =
-    cudf::detail::copy_if(zero_itr,
-                          thrust::counting_iterator<cudf::size_type>(sub_map_indices.size()),
-                          sub_map_indices.begin(),
-                          copy_pieces_fn{*d_vocabulary},
-                          stream);
+  auto const end       = cudf::detail::copy_if(
+    zero_itr,
+    cuda::counting_iterator{static_cast<cudf::size_type>(sub_map_indices.size())},
+    sub_map_indices.begin(),
+    copy_pieces_fn{*d_vocabulary},
+    stream);
   sub_map_indices.resize(cuda::std::distance(sub_map_indices.begin(), end), stream);
 
   // build a 2nd map with just the ## prefixed items
@@ -253,16 +257,16 @@ wordpiece_vocabulary::wordpiece_vocabulary(cudf::strings_column_view const& inpu
     detail::sub_probe_scheme{detail::sub_vocab_hasher{*d_vocabulary}},
     cuco::thread_scope_thread,
     detail::cuco_storage{},
-    rmm::mr::polymorphic_allocator<char>{},
-    stream.value());
+    rmm::mr::polymorphic_allocator<char>{mr},
+    stream.get());
   // insert them without the '##' prefix since that is how they will be looked up
-  auto iter_sub = thrust::make_transform_iterator(sub_map_indices.begin(), key_pair{});
-  vocab_sub_map->insert_async(iter_sub, iter_sub + sub_map_indices.size(), stream.value());
+  auto iter_sub = cuda::transform_iterator(sub_map_indices.begin(), key_pair{});
+  vocab_sub_map->insert_async(iter_sub, iter_sub + sub_map_indices.size(), stream.get());
 
   // prefetch the [unk] vocab entry
   auto unk_ids = rmm::device_uvector<cudf::size_type>(2, stream);
   auto d_map   = vocab_map->ref(cuco::op::find);
-  thrust::transform(rmm::exec_policy_nosync(stream),
+  thrust::transform(rmm::exec_policy_nosync(stream, cudf::get_current_device_resource_ref()),
                     zero_itr,
                     zero_itr + unk_ids.size(),
                     unk_ids.begin(),
@@ -282,7 +286,7 @@ wordpiece_vocabulary::~wordpiece_vocabulary() {}
 
 std::unique_ptr<wordpiece_vocabulary> load_wordpiece_vocabulary(
   cudf::strings_column_view const& input,
-  rmm::cuda_stream_view stream,
+  cuda::stream_ref stream,
   rmm::device_async_resource_ref mr)
 {
   CUDF_FUNC_RANGE();
@@ -415,7 +419,6 @@ __device__ cudf::size_type wp_tokenize_fn(cudf::string_view word,
  *
  * @param d_edges The offset to the beginning of each word
  * @param d_chars Pointer to the characters of the input column
- * @param offset Maybe non-zero if the input column has been sliced
  * @param d_map Lookup table for the wp_tokenize_fn utility
  * @param d_sub_map 2nd lookup table for the wp_tokenize_fn utility
  * @param unk_id Unknown token id when a token cannot be resolved
@@ -462,7 +465,7 @@ rmm::device_uvector<cudf::size_type> count_tokens(cudf::size_type const* d_token
                                                   OffsetType offsets,
                                                   int64_t offset,
                                                   cudf::size_type size,
-                                                  rmm::cuda_stream_view stream)
+                                                  cuda::stream_ref stream)
 {
   auto d_counts = rmm::device_uvector<cudf::size_type>(size, stream);
 
@@ -480,10 +483,11 @@ rmm::device_uvector<cudf::size_type> count_tokens(cudf::size_type const* d_token
   auto temp  = std::size_t{0};
   auto d_out = d_counts.data();
   cub::DeviceSegmentedReduce::Sum(
-    nullptr, temp, d_in, d_out, size, d_offsets, d_offsets + 1, stream.value());
-  auto d_temp = rmm::device_buffer{temp, stream};
+    nullptr, temp, d_in, d_out, size, d_offsets, d_offsets + 1, stream.get());
+  auto d_temp = cuda::device_buffer<std::byte>{
+    stream, cudf::get_current_device_resource_ref(), temp, cuda::no_init};
   cub::DeviceSegmentedReduce::Sum(
-    d_temp.data(), temp, d_in, d_out, size, d_offsets, d_offsets + 1, stream.value());
+    d_temp.data(), temp, d_in, d_out, size, d_offsets, d_offsets + 1, stream.get());
 
   return d_counts;
 }
@@ -493,7 +497,7 @@ rmm::device_uvector<cudf::size_type> count_tokens(cudf::size_type const* d_token
  *
  * @param input Input strings column
  * @param first_offset Offset to first row in chars for `input`
- * @param last_offset Offset just past the last row in chars for `input`
+ * @param chars_size Size of the character data for `input`
  * @param vocabulary Vocabulary data needed by the tokenizer
  * @param stream Stream used for device allocations and kernel launches
  * @return The tokens (and non-tokens) for the input
@@ -503,7 +507,7 @@ rmm::device_uvector<cudf::size_type> compute_all_tokens(
   int64_t first_offset,
   int64_t chars_size,
   wordpiece_vocabulary::wordpiece_vocabulary_impl const& vocabulary,
-  rmm::cuda_stream_view stream)
+  cuda::stream_ref stream)
 {
   auto const d_input_chars = input.chars_begin(stream) + first_offset;
 
@@ -511,10 +515,10 @@ rmm::device_uvector<cudf::size_type> compute_all_tokens(
   auto d_edges = rmm::device_uvector<int64_t>(chars_size / 2L, stream);
   // beginning of a word is a non-space preceded by a space
   auto edges_end = cudf::detail::copy_if(
-    thrust::counting_iterator<int64_t>(0),
-    thrust::counting_iterator<int64_t>(chars_size),
+    cuda::counting_iterator<int64_t>{0},
+    cuda::counting_iterator<int64_t>{chars_size},
     d_edges.begin(),
-    [d_input_chars] __device__(auto idx) {
+    [d_input_chars] __device__(auto idx) -> bool {
       if (idx == 0) { return d_input_chars[idx] == ' '; }
       return (d_input_chars[idx] != ' ' && d_input_chars[idx - 1] == ' ');
     },
@@ -535,7 +539,7 @@ rmm::device_uvector<cudf::size_type> compute_all_tokens(
   // merge in the input offsets to identify words starting each row
   auto d_all_edges = [&] {
     auto d_all_edges = rmm::device_uvector<int64_t>(edges_count, stream);
-    thrust::merge(rmm::exec_policy_nosync(stream),
+    thrust::merge(rmm::exec_policy_nosync(stream, cudf::get_current_device_resource_ref()),
                   d_offsets,
                   d_offsets + input.size() + 1,
                   d_edges.begin(),
@@ -551,12 +555,16 @@ rmm::device_uvector<cudf::size_type> compute_all_tokens(
 
   auto d_tokens = rmm::device_uvector<cudf::size_type>(chars_size, stream);
   thrust::uninitialized_fill(
-    rmm::exec_policy_nosync(stream), d_tokens.begin(), d_tokens.end(), no_token);
+    rmm::exec_policy_nosync(stream, cudf::get_current_device_resource_ref()),
+    d_tokens.begin(),
+    d_tokens.end(),
+    no_token);
 
   cudf::detail::grid_1d grid{static_cast<cudf::size_type>(d_all_edges.size()), 512};
   tokenize_all_kernel<decltype(map_ref), decltype(sub_map_ref)>
-    <<<grid.num_blocks, grid.num_threads_per_block, 0, stream.value()>>>(
+    <<<grid.num_blocks, grid.num_threads_per_block, 0, stream.get()>>>(
       d_all_edges, d_input_chars, map_ref, sub_map_ref, unk_id, d_tokens.data());
+  CUDF_CUDA_TRY(cudaGetLastError());
 
   return d_tokens;
 }
@@ -742,7 +750,7 @@ CUDF_KERNEL void tokenize_kernel(cudf::device_span<int64_t const> d_starts,
  *
  * @param input Input strings column
  * @param first_offset Offset to first row in chars for `input`
- * @param last_offset Offset just past the last row in chars for `input`
+ * @param chars_size Size of the character data for `input`
  * @param max_words_per_row Maximum number of words to tokenize in each row
  * @param vocabulary Vocabulary data needed by the tokenizer
  * @param stream Stream used for device allocations and kernel launches
@@ -754,7 +762,7 @@ rmm::device_uvector<cudf::size_type> compute_some_tokens(
   int64_t chars_size,
   cudf::size_type max_words_per_row,
   wordpiece_vocabulary::wordpiece_vocabulary_impl const& vocabulary,
-  rmm::cuda_stream_view stream)
+  cuda::stream_ref stream)
 {
   auto const d_input_chars = input.chars_begin(stream) + first_offset;
 
@@ -762,9 +770,9 @@ rmm::device_uvector<cudf::size_type> compute_some_tokens(
   auto max_word_offsets = rmm::device_uvector<int64_t>(input.size() + 1, stream);
 
   // compute max word counts for each row
-  thrust::transform(rmm::exec_policy_nosync(stream),
-                    thrust::counting_iterator<cudf::size_type>(0),
-                    thrust::counting_iterator<cudf::size_type>(input.size()),
+  thrust::transform(rmm::exec_policy_nosync(stream, cudf::get_current_device_resource_ref()),
+                    cuda::counting_iterator<cudf::size_type>{0},
+                    cuda::counting_iterator<cudf::size_type>{input.size()},
                     max_word_offsets.begin(),
                     cuda::proclaim_return_type<cudf::size_type>(
                       [d_strings = *d_strings, max_words_per_row] __device__(auto idx) {
@@ -774,8 +782,12 @@ rmm::device_uvector<cudf::size_type> compute_some_tokens(
                         return cuda::std::min(max_words_per_row, d_str.size_bytes() / 2);
                       }));
 
-  auto const max_size = cudf::detail::sizes_to_offsets(
-    max_word_offsets.begin(), max_word_offsets.end(), max_word_offsets.begin(), 0, stream);
+  auto const max_size = cudf::detail::sizes_to_offsets(max_word_offsets.begin(),
+                                                       max_word_offsets.end(),
+                                                       max_word_offsets.begin(),
+                                                       0,
+                                                       stream,
+                                                       cudf::get_current_device_resource_ref());
 
   auto start_words = rmm::device_uvector<int64_t>(max_size, stream);
   auto word_sizes  = rmm::device_uvector<cudf::size_type>(max_size, stream);
@@ -785,14 +797,21 @@ rmm::device_uvector<cudf::size_type> compute_some_tokens(
   constexpr cudf::thread_index_type warp_size = cudf::detail::warp_size;
   cudf::detail::grid_1d grid_find{input.size() * warp_size, block_size};
   find_words_kernel<warp_size>
-    <<<grid_find.num_blocks, grid_find.num_threads_per_block, 0, stream.value()>>>(
+    <<<grid_find.num_blocks, grid_find.num_threads_per_block, 0, stream.get()>>>(
       *d_strings, d_input_chars, max_word_offsets.data(), start_words.data(), word_sizes.data());
+  CUDF_CUDA_TRY(cudaGetLastError());
 
   // remove the non-words
-  auto const end = thrust::remove(
-    rmm::exec_policy_nosync(stream), start_words.begin(), start_words.end(), no_word64);
+  auto const end =
+    thrust::remove(rmm::exec_policy_nosync(stream, cudf::get_current_device_resource_ref()),
+                   start_words.begin(),
+                   start_words.end(),
+                   no_word64);
   auto const check =
-    thrust::remove(rmm::exec_policy_nosync(stream), word_sizes.begin(), word_sizes.end(), no_word);
+    thrust::remove(rmm::exec_policy_nosync(stream, cudf::get_current_device_resource_ref()),
+                   word_sizes.begin(),
+                   word_sizes.end(),
+                   no_word);
 
   auto const total_words = static_cast<int64_t>(cuda::std::distance(start_words.begin(), end));
   // this should only trigger if there is a bug in the code above
@@ -807,12 +826,16 @@ rmm::device_uvector<cudf::size_type> compute_some_tokens(
 
   auto d_tokens = rmm::device_uvector<cudf::size_type>(chars_size, stream);
   thrust::uninitialized_fill(
-    rmm::exec_policy_nosync(stream), d_tokens.begin(), d_tokens.end(), no_token);
+    rmm::exec_policy_nosync(stream, cudf::get_current_device_resource_ref()),
+    d_tokens.begin(),
+    d_tokens.end(),
+    no_token);
 
   cudf::detail::grid_1d grid{total_words, 512};
   tokenize_kernel<decltype(map_ref), decltype(sub_map_ref)>
-    <<<grid.num_blocks, grid.num_threads_per_block, 0, stream.value()>>>(
+    <<<grid.num_blocks, grid.num_threads_per_block, 0, stream.get()>>>(
       start_words, word_sizes, d_input_chars, map_ref, sub_map_ref, unk_id, d_tokens.data());
+  CUDF_CUDA_TRY(cudaGetLastError());
 
   return d_tokens;
 }
@@ -822,7 +845,7 @@ rmm::device_uvector<cudf::size_type> compute_some_tokens(
 std::unique_ptr<cudf::column> wordpiece_tokenize(cudf::strings_column_view const& input,
                                                  wordpiece_vocabulary const& vocabulary,
                                                  cudf::size_type max_words_per_row,
-                                                 rmm::cuda_stream_view stream,
+                                                 cuda::stream_ref stream,
                                                  rmm::device_async_resource_ref mr)
 {
   CUDF_EXPECTS(
@@ -830,10 +853,9 @@ std::unique_ptr<cudf::column> wordpiece_tokenize(cudf::strings_column_view const
 
   auto const output_type = cudf::data_type{cudf::type_to_id<cudf::size_type>()};
   if (input.size() == input.null_count()) {
-    return input.has_nulls()
-             ? cudf::lists::detail::make_all_nulls_lists_column(
-                 input.size(), output_type, stream, mr)
-             : cudf::lists::detail::make_empty_lists_column(output_type, stream, mr);
+    return input.has_nulls() ? cudf::lists::detail::make_all_nulls_lists_column(
+                                 input.size(), output_type, stream, mr)
+                             : cudf::lists::detail::make_empty_lists_column(output_type);
   }
 
   auto [first_offset, last_offset] =
@@ -858,23 +880,24 @@ std::unique_ptr<cudf::column> wordpiece_tokenize(cudf::strings_column_view const
   auto tokens =
     cudf::make_numeric_column(output_type, total_count, cudf::mask_state::UNALLOCATED, stream, mr);
   auto output = tokens->mutable_view().begin<cudf::size_type>();
-  thrust::remove_copy(
-    rmm::exec_policy_nosync(stream), d_tokens.begin(), d_tokens.end(), output, no_token);
+  thrust::remove_copy(rmm::exec_policy_nosync(stream, cudf::get_current_device_resource_ref()),
+                      d_tokens.begin(),
+                      d_tokens.end(),
+                      output,
+                      no_token);
 
   return cudf::make_lists_column(input.size(),
                                  std::move(token_offsets),
                                  std::move(tokens),
                                  input.null_count(),
-                                 cudf::detail::copy_bitmask(input.parent(), stream, mr),
-                                 stream,
-                                 mr);
+                                 cudf::detail::copy_bitmask(input.parent(), stream, mr));
 }
 }  // namespace detail
 
 std::unique_ptr<cudf::column> wordpiece_tokenize(cudf::strings_column_view const& input,
                                                  wordpiece_vocabulary const& vocabulary,
                                                  cudf::size_type max_words_per_row,
-                                                 rmm::cuda_stream_view stream,
+                                                 cuda::stream_ref stream,
                                                  rmm::device_async_resource_ref mr)
 {
   CUDF_FUNC_RANGE();

@@ -1,5 +1,5 @@
 /*
- * SPDX-FileCopyrightText: Copyright (c) 2021-2025, NVIDIA CORPORATION.
+ * SPDX-FileCopyrightText: Copyright (c) 2021-2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
 
@@ -24,7 +24,7 @@
 #include <cudf/utilities/error.hpp>
 #include <cudf/utilities/memory_resource.hpp>
 
-#include <rmm/cuda_stream_view.hpp>
+#include <cuda/stream>
 
 #include <memory>
 
@@ -146,10 +146,12 @@ void scan_result_functor::operator()<aggregation::RANK>(aggregation const& agg)
   auto const group_labels_view = column_view(cudf::device_span<size_type const>(group_labels));
   auto const gather_map        = [&]() {
     if (is_presorted()) {  // assumes both keys and values are sorted, Spark does this.
-      return cudf::detail::sequence(group_labels.size(),
-                                    *cudf::make_fixed_width_scalar(size_type{0}, stream),
-                                    stream,
-                                    cudf::get_current_device_resource_ref());
+      return cudf::detail::sequence(
+        group_labels.size(),
+        *cudf::make_fixed_width_scalar(
+          size_type{0}, stream, cudf::get_current_device_resource_ref()),
+        stream,
+        cudf::get_current_device_resource_ref());
     } else {
       auto sort_order = (rank_agg._method == rank_method::FIRST ? cudf::detail::stable_sorted_order
                                                                        : cudf::detail::sorted_order);
@@ -210,8 +212,8 @@ void scan_result_functor::operator()<aggregation::RANK>(aggregation const& agg)
 
 // Sort-based groupby
 std::pair<std::unique_ptr<table>, std::vector<aggregation_result>> groupby::sort_scan(
-  host_span<scan_request const> requests,
-  rmm::cuda_stream_view stream,
+  std::span<scan_request const> requests,
+  cuda::stream_ref stream,
   rmm::device_async_resource_ref mr)
 {
   // We're going to start by creating a cache of results so that aggs that

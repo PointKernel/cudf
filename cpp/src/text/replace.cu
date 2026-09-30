@@ -1,5 +1,5 @@
 /*
- * SPDX-FileCopyrightText: Copyright (c) 2020-2025, NVIDIA CORPORATION.
+ * SPDX-FileCopyrightText: Copyright (c) 2020-2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
 
@@ -21,12 +21,12 @@
 
 #include <nvtext/replace.hpp>
 
-#include <rmm/cuda_stream_view.hpp>
-
 #include <cuda/atomic>
+#include <cuda/iterator>
 #include <cuda/std/functional>
 #include <cuda/std/iterator>
 #include <cuda/std/utility>
+#include <cuda/stream>
 #include <thrust/binary_search.h>
 #include <thrust/execution_policy.h>
 #include <thrust/find.h>
@@ -257,7 +257,7 @@ struct remove_small_tokens_fn : base_token_replacer_fn {
 template <typename ReplacerFn>
 std::unique_ptr<cudf::column> replace_helper(ReplacerFn replacer,
                                              cudf::strings_column_view const& input,
-                                             rmm::cuda_stream_view stream,
+                                             cuda::stream_ref stream,
                                              rmm::device_async_resource_ref mr)
 {
   auto const first_offset = (input.offset() == 0) ? 0L
@@ -265,9 +265,10 @@ std::unique_ptr<cudf::column> replace_helper(ReplacerFn replacer,
                                                       input.offsets(), input.offset(), stream);
   auto const last_offset =
     cudf::strings::detail::get_offset_value(input.offsets(), input.size() + input.offset(), stream);
-  auto const chars_size = last_offset - first_offset;
+  auto const chars_size     = last_offset - first_offset;
+  auto const non_null_count = input.size() - input.null_count();
 
-  if ((chars_size / (input.size() - input.null_count())) < AVG_CHAR_BYTES_THRESHOLD) {
+  if ((non_null_count == 0) || ((chars_size / non_null_count) < AVG_CHAR_BYTES_THRESHOLD)) {
     // this utility calls replacer to build the offsets and chars columns
     auto [offsets_column, chars] =
       cudf::strings::detail::make_strings_children(replacer, input.size(), stream, mr);
@@ -292,26 +293,29 @@ std::unique_ptr<cudf::column> replace_helper(ReplacerFn replacer,
   auto tmp_offsets = rmm::device_uvector<int64_t>(sub_count + input.size() + 1, stream);
   {
     rmm::device_uvector<int64_t> sub_offsets(sub_count, stream);
-    auto const count_itr = thrust::make_counting_iterator<int64_t>(0);
-    thrust::transform(rmm::exec_policy_nosync(stream),
+    auto const count_itr = cuda::counting_iterator<int64_t>{0};
+    thrust::transform(rmm::exec_policy_nosync(stream, cudf::get_current_device_resource_ref()),
                       count_itr,
                       count_itr + sub_count,
                       sub_offsets.data(),
                       sub_offset_fn{input_chars, first_offset, last_offset});
     // remove 0s -- where sub-offset could not be computed
     auto const remove_end =
-      thrust::remove(rmm::exec_policy_nosync(stream), sub_offsets.begin(), sub_offsets.end(), 0L);
+      thrust::remove(rmm::exec_policy_nosync(stream, cudf::get_current_device_resource_ref()),
+                     sub_offsets.begin(),
+                     sub_offsets.end(),
+                     0L);
     sub_count = cuda::std::distance(sub_offsets.begin(), remove_end);
 
     // merge them with input offsets
-    thrust::merge(rmm::exec_policy_nosync(stream),
+    thrust::merge(rmm::exec_policy_nosync(stream, cudf::get_current_device_resource_ref()),
                   input_offsets,
                   input_offsets + input.size() + 1,
                   sub_offsets.begin(),
                   sub_offsets.begin() + sub_count,
                   tmp_offsets.begin());
     tmp_offsets.resize(sub_count + input.size() + 1, stream);
-    stream.synchronize();  // protect against destruction of sub_offsets
+    stream.sync();  // protect against destruction of sub_offsets
   }
 
   // cobble together a column_view of type STRING using the original data and the tmp offsets
@@ -324,7 +328,7 @@ std::unique_ptr<cudf::column> replace_helper(ReplacerFn replacer,
 
   // compute indices to the actual output rows
   auto indices = rmm::device_uvector<cudf::size_type>(tmp_offsets.size(), stream);
-  thrust::upper_bound(rmm::exec_policy_nosync(stream),
+  thrust::upper_bound(rmm::exec_policy_nosync(stream, cudf::get_current_device_resource_ref()),
                       input_offsets,
                       input_offsets + input.size() + 1,
                       tmp_offsets.begin(),
@@ -333,7 +337,10 @@ std::unique_ptr<cudf::column> replace_helper(ReplacerFn replacer,
 
   // initialize the output row sizes
   auto d_sizes = rmm::device_uvector<cudf::size_type>(input.size(), stream);
-  thrust::fill(rmm::exec_policy_nosync(stream), d_sizes.begin(), d_sizes.end(), 0);
+  thrust::fill(rmm::exec_policy_nosync(stream, cudf::get_current_device_resource_ref()),
+               d_sizes.begin(),
+               d_sizes.end(),
+               0);
 
   replacer.d_strings      = *d_tmp_strings;
   replacer.d_indices      = indices.data();
@@ -341,8 +348,8 @@ std::unique_ptr<cudf::column> replace_helper(ReplacerFn replacer,
 
   auto chars = std::get<1>(
     cudf::strings::detail::make_strings_children(replacer, tmp_strings.size(), stream, mr));
-  auto offsets_column = std::get<0>(
-    cudf::strings::detail::make_offsets_child_column(d_sizes.begin(), d_sizes.end(), stream, mr));
+  auto offsets_column =
+    std::get<0>(cudf::strings::detail::make_offsets_child_column(d_sizes, stream, mr));
   return cudf::make_strings_column(input.size(),
                                    std::move(offsets_column),
                                    chars.release(),
@@ -357,7 +364,7 @@ std::unique_ptr<cudf::column> replace_tokens(cudf::strings_column_view const& in
                                              cudf::strings_column_view const& targets,
                                              cudf::strings_column_view const& replacements,
                                              cudf::string_scalar const& delimiter,
-                                             rmm::cuda_stream_view stream,
+                                             cuda::stream_ref stream,
                                              rmm::device_async_resource_ref mr)
 {
   CUDF_EXPECTS(!targets.has_nulls(), "Parameter targets must not have nulls");
@@ -387,7 +394,7 @@ std::unique_ptr<cudf::column> filter_tokens(cudf::strings_column_view const& inp
                                             cudf::size_type min_token_length,
                                             cudf::string_scalar const& replacement,
                                             cudf::string_scalar const& delimiter,
-                                            rmm::cuda_stream_view stream,
+                                            cuda::stream_ref stream,
                                             rmm::device_async_resource_ref mr)
 {
   CUDF_EXPECTS(replacement.is_valid(stream), "Parameter replacement must be valid");
@@ -412,7 +419,7 @@ std::unique_ptr<cudf::column> replace_tokens(cudf::strings_column_view const& in
                                              cudf::strings_column_view const& targets,
                                              cudf::strings_column_view const& replacements,
                                              cudf::string_scalar const& delimiter,
-                                             rmm::cuda_stream_view stream,
+                                             cuda::stream_ref stream,
                                              rmm::device_async_resource_ref mr)
 {
   CUDF_FUNC_RANGE();
@@ -423,7 +430,7 @@ std::unique_ptr<cudf::column> filter_tokens(cudf::strings_column_view const& inp
                                             cudf::size_type min_token_length,
                                             cudf::string_scalar const& replacement,
                                             cudf::string_scalar const& delimiter,
-                                            rmm::cuda_stream_view stream,
+                                            cuda::stream_ref stream,
                                             rmm::device_async_resource_ref mr)
 {
   CUDF_FUNC_RANGE();

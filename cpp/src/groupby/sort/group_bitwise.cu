@@ -1,5 +1,5 @@
 /*
- * SPDX-FileCopyrightText: Copyright (c) 2025-2026, NVIDIA CORPORATION.
+ * SPDX-FileCopyrightText: Copyright (c) 2025-2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
 
@@ -7,18 +7,18 @@
 #include <cudf/column/column_device_view.cuh>
 #include <cudf/column/column_factories.hpp>
 #include <cudf/detail/aggregation/aggregation.cuh>
+#include <cudf/detail/algorithms/reduce.cuh>
 #include <cudf/detail/iterator.cuh>
-#include <cudf/detail/utilities/algorithm.cuh>
 #include <cudf/detail/utilities/device_operators.cuh>
 #include <cudf/detail/valid_if.cuh>
 #include <cudf/utilities/span.hpp>
 #include <cudf/utilities/type_dispatcher.hpp>
 
-#include <rmm/cuda_stream_view.hpp>
 #include <rmm/resource_ref.hpp>
 
+#include <cuda/iterator>
 #include <cuda/std/functional>
-#include <thrust/iterator/discard_iterator.h>
+#include <cuda/stream>
 
 namespace cudf::groupby::detail {
 
@@ -30,7 +30,7 @@ struct bitwise_group_reduction_functor {
                                      column_view const& values,
                                      device_span<size_type const> group_labels,
                                      size_type num_groups,
-                                     rmm::cuda_stream_view stream,
+                                     cuda::stream_ref stream,
                                      rmm::device_async_resource_ref mr) const
 
   {
@@ -42,7 +42,7 @@ struct bitwise_group_reduction_functor {
       cudf::detail::reduce_by_key_async(group_labels.data(),
                                         group_labels.data() + group_labels.size(),
                                         inp_iter,
-                                        thrust::make_discard_iterator(),
+                                        cuda::make_discard_iterator(),
                                         out_iter,
                                         binop,
                                         stream);
@@ -93,7 +93,7 @@ std::unique_ptr<column> group_bitwise(bitwise_op bit_op,
                                       column_view const& values,
                                       device_span<size_type const> group_labels,
                                       size_type num_groups,
-                                      rmm::cuda_stream_view stream,
+                                      cuda::stream_ref stream,
                                       rmm::device_async_resource_ref mr)
 {
   return cudf::type_dispatcher(values.type(),

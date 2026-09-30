@@ -1,5 +1,5 @@
 /*
- * SPDX-FileCopyrightText: Copyright (c) 2019-2026, NVIDIA CORPORATION.
+ * SPDX-FileCopyrightText: Copyright (c) 2019-2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
 
@@ -14,13 +14,13 @@
 #include <cudf/utilities/memory_resource.hpp>
 #include <cudf/utilities/type_dispatcher.hpp>
 
-#include <rmm/cuda_stream_view.hpp>
+#include <rmm/exec_policy.hpp>
 
 #include <cuda/std/bit>
 #include <cuda/std/cmath>
+#include <cuda/std/type_traits>
+#include <cuda/stream>
 #include <thrust/transform.h>
-
-#include <type_traits>
 
 namespace cudf {
 namespace detail {
@@ -179,13 +179,13 @@ struct DeviceFloor {
 struct DeviceAbs {
   template <typename T>
   T __device__ operator()(T data)
-    requires(std::is_signed_v<T>)
+    requires(cuda::std::is_signed_v<T>)
   {
     return cuda::std::abs(data);
   }
   template <typename T>
   T __device__ operator()(T data)
-    requires(!std::is_signed_v<T>)
+    requires(!cuda::std::is_signed_v<T>)
   {
     return data;
   }
@@ -294,7 +294,7 @@ struct fixed_point_negate {
 
 template <typename T, template <typename> typename FixedPointFunctor>
 std::unique_ptr<column> unary_op_with(column_view const& input,
-                                      rmm::cuda_stream_view stream,
+                                      cuda::stream_ref stream,
                                       rmm::device_async_resource_ref mr)
 {
   using Type                     = device_storage_type_t<T>;
@@ -320,7 +320,7 @@ std::unique_ptr<column> unary_op_with(column_view const& input,
     n *= 10;
   }
 
-  thrust::transform(rmm::exec_policy_nosync(stream),
+  thrust::transform(rmm::exec_policy_nosync(stream, cudf::get_current_device_resource_ref()),
                     input.begin<Type>(),
                     input.end<Type>(),
                     out_view.begin<Type>(),
@@ -334,9 +334,9 @@ std::unique_ptr<column> unary_op_with(column_view const& input,
 template <typename OutputType, typename UFN, typename InputIterator>
 std::unique_ptr<cudf::column> transform_fn(InputIterator begin,
                                            InputIterator end,
-                                           rmm::device_buffer&& null_mask,
+                                           cuda::device_buffer<std::byte>&& null_mask,
                                            size_type null_count,
-                                           rmm::cuda_stream_view stream,
+                                           cuda::stream_ref stream,
                                            rmm::device_async_resource_ref mr)
 {
   auto const size = cudf::distance(begin, end);
@@ -344,21 +344,24 @@ std::unique_ptr<cudf::column> transform_fn(InputIterator begin,
   std::unique_ptr<cudf::column> output =
     make_fixed_width_column(data_type{type_to_id<OutputType>()},
                             size,
-                            std::forward<rmm::device_buffer>(null_mask),
+                            std::forward<cuda::device_buffer<std::byte>>(null_mask),
                             null_count,
                             stream,
                             mr);
 
   auto output_view = output->mutable_view();
-  thrust::transform(
-    rmm::exec_policy_nosync(stream), begin, end, output_view.begin<OutputType>(), UFN{});
+  thrust::transform(rmm::exec_policy_nosync(stream, cudf::get_current_device_resource_ref()),
+                    begin,
+                    end,
+                    output_view.begin<OutputType>(),
+                    UFN{});
   output->set_null_count(null_count);
   return output;
 }
 
 template <typename T, typename UFN>
 std::unique_ptr<cudf::column> transform_fn(cudf::column_view const& input,
-                                           rmm::cuda_stream_view stream,
+                                           cuda::stream_ref stream,
                                            rmm::device_async_resource_ref mr)
 {
   return transform_fn<T, UFN>(input.begin<T>(),
@@ -371,7 +374,7 @@ std::unique_ptr<cudf::column> transform_fn(cudf::column_view const& input,
 
 template <typename T, typename UFN>
 std::unique_ptr<cudf::column> transform_fn(cudf::dictionary_column_view const& input,
-                                           rmm::cuda_stream_view stream,
+                                           cuda::stream_ref stream,
                                            rmm::device_async_resource_ref mr)
 {
   auto dictionary_view = cudf::column_device_view::create(input.parent(), stream);
@@ -421,7 +424,7 @@ template <typename UFN, template <typename> typename Supported>
 struct MathOpDispatcher {
   template <typename T>
   std::unique_ptr<cudf::column> operator()(cudf::column_view const& input,
-                                           rmm::cuda_stream_view stream,
+                                           cuda::stream_ref stream,
                                            rmm::device_async_resource_ref mr)
     requires(Supported<T>::is_supported())
   {
@@ -453,7 +456,7 @@ struct BitwiseCountDispatcher {
  public:
   template <typename T>
   std::unique_ptr<cudf::column> operator()(cudf::column_view const& input,
-                                           rmm::cuda_stream_view stream,
+                                           cuda::stream_ref stream,
                                            rmm::device_async_resource_ref mr)
     requires(is_supported<T>())
   {
@@ -495,7 +498,7 @@ struct LogicalOpDispatcher {
  public:
   template <typename T>
   std::unique_ptr<cudf::column> operator()(cudf::column_view const& input,
-                                           rmm::cuda_stream_view stream,
+                                           cuda::stream_ref stream,
                                            rmm::device_async_resource_ref mr)
     requires(is_supported<T>())
   {
@@ -536,7 +539,7 @@ struct FixedPointOpDispatcher {
   template <typename T>
   std::unique_ptr<column> operator()(column_view const& input,
                                      cudf::unary_operator op,
-                                     rmm::cuda_stream_view stream,
+                                     cuda::stream_ref stream,
                                      rmm::device_async_resource_ref mr)
     requires(cudf::is_fixed_point<T>())
   {
@@ -556,7 +559,7 @@ struct FixedPointOpDispatcher {
 
 std::unique_ptr<cudf::column> unary_operation(cudf::column_view const& input,
                                               cudf::unary_operator op,
-                                              rmm::cuda_stream_view stream,
+                                              cuda::stream_ref stream,
                                               rmm::device_async_resource_ref mr)
 {
   if (cudf::is_fixed_point(input.type()))
@@ -654,7 +657,7 @@ std::unique_ptr<cudf::column> unary_operation(cudf::column_view const& input,
 
 std::unique_ptr<cudf::column> unary_operation(cudf::column_view const& input,
                                               cudf::unary_operator op,
-                                              rmm::cuda_stream_view stream,
+                                              cuda::stream_ref stream,
                                               rmm::device_async_resource_ref mr)
 {
   CUDF_FUNC_RANGE();

@@ -1,5 +1,5 @@
 /*
- * SPDX-FileCopyrightText: Copyright (c) 2019-2026, NVIDIA CORPORATION.
+ * SPDX-FileCopyrightText: Copyright (c) 2019-2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
 
@@ -17,12 +17,12 @@
 #include <cudf/utilities/traits.hpp>
 #include <cudf/utilities/type_dispatcher.hpp>
 
-#include <rmm/cuda_stream_view.hpp>
 #include <rmm/exec_policy.hpp>
 
+#include <cuda/iterator>
 #include <cuda/std/iterator>
+#include <cuda/stream>
 #include <thrust/execution_policy.h>
-#include <thrust/iterator/counting_iterator.h>
 #include <thrust/logical.h>
 #include <thrust/transform.h>
 
@@ -86,13 +86,13 @@ struct dispatch_hex_to_integers_fn {
   template <typename IntegerType>
   void operator()(column_device_view const& strings_column,
                   mutable_column_view& output_column,
-                  rmm::cuda_stream_view stream) const
+                  cuda::stream_ref stream) const
     requires(cudf::is_integral_not_bool<IntegerType>())
   {
     auto d_results = output_column.data<IntegerType>();
-    thrust::transform(rmm::exec_policy_nosync(stream),
-                      thrust::make_counting_iterator<size_type>(0),
-                      thrust::make_counting_iterator<size_type>(strings_column.size()),
+    thrust::transform(rmm::exec_policy_nosync(stream, cudf::get_current_device_resource_ref()),
+                      cuda::counting_iterator<size_type>{0},
+                      cuda::counting_iterator<size_type>{strings_column.size()},
                       d_results,
                       hex_to_integer_fn<IntegerType>{strings_column});
   }
@@ -166,7 +166,7 @@ struct integer_to_hex_fn {
 struct dispatch_integers_to_hex_fn {
   template <typename IntegerType>
   std::unique_ptr<column> operator()(column_view const& input,
-                                     rmm::cuda_stream_view stream,
+                                     cuda::stream_ref stream,
                                      rmm::device_async_resource_ref mr) const
     requires(cudf::is_integral_not_bool<IntegerType>())
   {
@@ -195,7 +195,7 @@ struct dispatch_integers_to_hex_fn {
 // This will convert a strings column into any integer column type.
 std::unique_ptr<column> hex_to_integers(strings_column_view const& strings,
                                         data_type output_type,
-                                        rmm::cuda_stream_view stream,
+                                        cuda::stream_ref stream,
                                         rmm::device_async_resource_ref mr)
 {
   size_type strings_count = strings.size();
@@ -217,7 +217,7 @@ std::unique_ptr<column> hex_to_integers(strings_column_view const& strings,
 }
 
 std::unique_ptr<column> is_hex(strings_column_view const& strings,
-                               rmm::cuda_stream_view stream,
+                               cuda::stream_ref stream,
                                rmm::device_async_resource_ref mr)
 {
   auto strings_column = column_device_view::create(strings.parent(), stream);
@@ -230,9 +230,9 @@ std::unique_ptr<column> is_hex(strings_column_view const& strings,
                                      stream,
                                      mr);
   auto d_results = results->mutable_view().data<bool>();
-  thrust::transform(rmm::exec_policy_nosync(stream),
-                    thrust::make_counting_iterator<size_type>(0),
-                    thrust::make_counting_iterator<size_type>(strings.size()),
+  thrust::transform(rmm::exec_policy_nosync(stream, cudf::get_current_device_resource_ref()),
+                    cuda::counting_iterator<size_type>{0},
+                    cuda::counting_iterator<size_type>{strings.size()},
                     d_results,
                     [d_column] __device__(size_type idx) {
                       if (d_column.is_null(idx)) return false;
@@ -255,7 +255,7 @@ std::unique_ptr<column> is_hex(strings_column_view const& strings,
 }
 
 std::unique_ptr<column> integers_to_hex(column_view const& input,
-                                        rmm::cuda_stream_view stream,
+                                        cuda::stream_ref stream,
                                         rmm::device_async_resource_ref mr)
 {
   if (input.is_empty()) { return cudf::make_empty_column(type_id::STRING); }
@@ -267,7 +267,7 @@ std::unique_ptr<column> integers_to_hex(column_view const& input,
 // external API
 std::unique_ptr<column> hex_to_integers(strings_column_view const& strings,
                                         data_type output_type,
-                                        rmm::cuda_stream_view stream,
+                                        cuda::stream_ref stream,
                                         rmm::device_async_resource_ref mr)
 {
   CUDF_FUNC_RANGE();
@@ -275,7 +275,7 @@ std::unique_ptr<column> hex_to_integers(strings_column_view const& strings,
 }
 
 std::unique_ptr<column> is_hex(strings_column_view const& strings,
-                               rmm::cuda_stream_view stream,
+                               cuda::stream_ref stream,
                                rmm::device_async_resource_ref mr)
 {
   CUDF_FUNC_RANGE();
@@ -283,7 +283,7 @@ std::unique_ptr<column> is_hex(strings_column_view const& strings,
 }
 
 std::unique_ptr<column> integers_to_hex(column_view const& input,
-                                        rmm::cuda_stream_view stream,
+                                        cuda::stream_ref stream,
                                         rmm::device_async_resource_ref mr)
 {
   CUDF_FUNC_RANGE();

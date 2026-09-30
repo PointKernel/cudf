@@ -1,5 +1,5 @@
 /*
- * SPDX-FileCopyrightText: Copyright (c) 2022-2025, NVIDIA CORPORATION.
+ * SPDX-FileCopyrightText: Copyright (c) 2022-2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
 
@@ -14,14 +14,15 @@
 #include <cudf_test/testing_main.hpp>
 
 #include <cudf/io/json.hpp>
-#include <cudf/io/types.hpp>
 #include <cudf/scalar/scalar.hpp>
 #include <cudf/utilities/default_stream.hpp>
 #include <cudf/utilities/span.hpp>
 
+#include <cuda/iterator>
 #include <cuda/std/tuple>
-#include <thrust/iterator/zip_iterator.h>
 
+#include <algorithm>
+#include <limits>
 #include <string>
 
 namespace cuio_json = cudf::io::json;
@@ -162,7 +163,7 @@ TEST_F(JsonTest, StackContext)
   stack_context.device_to_host_async(stream);
 
   // Make sure we copied back the stack context
-  stream.synchronize();
+  stream.sync();
 
   std::vector<char> const golden_stack_context{
     '_', '_', '_', '[', '{', '{', '{', '{', '{', '{', '{', '{', '{', '{', '{', '{', '{', '{', '{',
@@ -213,7 +214,7 @@ TEST_F(JsonTest, StackContextUtf8)
   stack_context.device_to_host_async(stream);
 
   // Make sure we copied back the stack context
-  stream.synchronize();
+  stream.sync();
 
   std::vector<char> const golden_stack_context{
     '_', '[', '{', '{', '{', '{', '{', '{', '{', '{', '{', '{', '{', '{', '{', '{', '{',
@@ -281,7 +282,7 @@ TEST_P(JsonDelimiterParamTest, StackContextRecovering)
   stack_context.device_to_host_async(stream);
 
   // Make sure we copied back the stack context
-  stream.synchronize();
+  stream.sync();
 
   // Verify results
   ASSERT_EQ(golden_stack_context.size(), stack_context.size());
@@ -389,7 +390,7 @@ TEST_P(JsonDelimiterParamTest, StackContextRecoveringFuzz)
   stack_context.device_to_host_async(stream);
 
   // Make sure we copied back the stack context
-  stream.synchronize();
+  stream.sync();
 
   ASSERT_EQ(expected_stack_context.size(), stack_context.size());
   CUDF_TEST_EXPECT_VECTOR_EQUAL(expected_stack_context, stack_context, stack_context.size());
@@ -434,6 +435,7 @@ TEST_F(JsonNewlineDelimiterTest, TokenStream)
   // Copy back the number of tokens that were written
   auto const tokens_gpu        = cudf::detail::make_std_vector_async(d_tokens_gpu, stream);
   auto const token_indices_gpu = cudf::detail::make_std_vector_async(d_token_indices_gpu, stream);
+  stream.sync();
 
   // Golden token stream sample
   using token_t = cuio_json::token_t;
@@ -568,6 +570,7 @@ TEST_F(JsonNewlineDelimiterTest, TokenStream2)
   // Copy back the number of tokens that were written
   auto const tokens_gpu        = cudf::detail::make_std_vector_async(d_tokens_gpu, stream);
   auto const token_indices_gpu = cudf::detail::make_std_vector_async(d_token_indices_gpu, stream);
+  stream.sync();
 
   // Golden token stream sample
   using token_t = cuio_json::token_t;
@@ -727,7 +730,7 @@ TEST_P(JsonDelimiterParamTest, RecoveringTokenStream)
   auto const tokens_gpu        = cudf::detail::make_std_vector_async(d_tokens_gpu, stream);
   auto const token_indices_gpu = cudf::detail::make_std_vector_async(d_token_indices_gpu, stream);
 
-  stream.synchronize();
+  stream.sync();
   // Verify the number of tokens matches
   ASSERT_EQ(golden_token_stream.size(), tokens_gpu.size());
   ASSERT_EQ(golden_token_stream.size(), token_indices_gpu.size());
@@ -832,7 +835,7 @@ TEST_F(JsonTest, PostProcessTokenStream)
   auto const stream = cudf::get_default_stream();
   std::vector<token_index_t> offsets(input.size());
   std::vector<cuio_json::PdaTokenT> tokens(input.size());
-  auto token_tuples = thrust::make_zip_iterator(offsets.begin(), tokens.begin());
+  auto token_tuples = cuda::make_zip_iterator(offsets.begin(), tokens.begin());
   thrust::copy(input.cbegin(), input.cend(), token_tuples);
 
   // Initialize device-side test data
@@ -849,6 +852,7 @@ TEST_F(JsonTest, PostProcessTokenStream)
 
   auto const filtered_tokens  = cudf::detail::make_std_vector_async(d_filtered_tokens, stream);
   auto const filtered_indices = cudf::detail::make_std_vector_async(d_filtered_indices, stream);
+  stream.sync();
 
   // Verify the number of tokens matches
   ASSERT_EQ(filtered_tokens.size(), expected_output.size());
@@ -1165,7 +1169,7 @@ TEST_P(JsonDelimiterParamTest, RecoveringTokenStreamNewlineAndDelimiter)
   auto const tokens_gpu        = cudf::detail::make_std_vector_async(d_tokens_gpu, stream);
   auto const token_indices_gpu = cudf::detail::make_std_vector_async(d_token_indices_gpu, stream);
 
-  stream.synchronize();
+  stream.sync();
   // Verify the number of tokens matches
   ASSERT_EQ(golden_token_stream.size(), tokens_gpu.size());
   ASSERT_EQ(golden_token_stream.size(), token_indices_gpu.size());
@@ -1342,7 +1346,7 @@ TEST_P(JsonDelimiterParamTest, RecoveringTokenStreamNewlineAsWSAndDelimiter)
   auto const tokens_gpu        = cudf::detail::make_std_vector_async(d_tokens_gpu, stream);
   auto const token_indices_gpu = cudf::detail::make_std_vector_async(d_token_indices_gpu, stream);
 
-  stream.synchronize();
+  stream.sync();
   // Verify the number of tokens matches
   ASSERT_EQ(golden_token_stream.size(), tokens_gpu.size());
   ASSERT_EQ(golden_token_stream.size(), token_indices_gpu.size());
@@ -1353,6 +1357,93 @@ TEST_P(JsonDelimiterParamTest, RecoveringTokenStreamNewlineAsWSAndDelimiter)
     // Ensure the token category is correct
     EXPECT_EQ(golden_token_stream[i].second, tokens_gpu[i]) << "Mismatch at #" << i;
   }
+}
+
+TEST_F(JsonTest, StringContainingNonAsciiBytes)
+{
+  for (int b : {0x80, 0xA0, 0xC3, 0xE2, 0xF0, 0xFF}) {
+    std::string const expected_cell{static_cast<char>(b)};
+    std::string s{R"({"k":")"};
+    s += expected_cell;
+    s += R"("})";
+    s += '\n';
+    auto const opts = cudf::io::json_reader_options::builder(
+                        cudf::io::source_info{cudf::host_span<std::byte const>{
+                          reinterpret_cast<std::byte const*>(s.data()), s.size()}})
+                        .lines(true)
+                        .build();
+    cudf::io::table_with_metadata tbl;
+    ASSERT_NO_THROW(tbl = cudf::io::read_json(opts)) << "byte 0x" << std::hex << b;
+    ASSERT_EQ(tbl.tbl->num_columns(), 1) << "byte 0x" << std::hex << b;
+    ASSERT_EQ(tbl.tbl->num_rows(), 1) << "byte 0x" << std::hex << b;
+    cudf::test::strings_column_wrapper expected({expected_cell});
+    CUDF_TEST_EXPECT_COLUMNS_EQUAL(tbl.tbl->view().column(0), expected);
+  }
+}
+
+// Rejects unquoted values whose first byte is neither '-' nor a digit.
+TEST_F(JsonTest, RejectsUnquotedValuesWithInvalidLeadingChar)
+{
+  for (char const* bad : {"!", "+", " ", ".", "x", "/"}) {
+    std::string s   = std::string{R"({"k":)"} + bad + "}\n";
+    auto const opts = cudf::io::json_reader_options::builder(cudf::io::source_info{})
+                        .lines(true)
+                        .recovery_mode(cudf::io::json_recovery_mode_t::RECOVER_WITH_NULL)
+                        .strict_validation(true)
+                        .build();
+    cudf::string_scalar const d_scalar(s, true);
+    auto const d_input = cudf::device_span<cuio_json::SymbolT const>{
+      d_scalar.data(), static_cast<size_t>(d_scalar.size())};
+    auto const stream = cudf::get_default_stream();
+    using token_t     = cuio_json::token_t;
+    std::vector<cuio_json::PdaTokenT> tokens{token_t::StructBegin,
+                                             token_t::StructMemberBegin,
+                                             token_t::FieldNameBegin,
+                                             token_t::FieldNameEnd,
+                                             token_t::ValueBegin,
+                                             token_t::ValueEnd,
+                                             token_t::StructMemberEnd,
+                                             token_t::StructEnd,
+                                             token_t::LineEnd};
+    std::vector<cuio_json::SymbolOffsetT> token_indices{0, 0, 1, 3, 5, 6, 6, 6, 7};
+    auto d_tokens = cudf::detail::make_device_uvector_async(
+      tokens, stream, cudf::get_current_device_resource_ref());
+    auto d_token_indices = cudf::detail::make_device_uvector_async(
+      token_indices, stream, cudf::get_current_device_resource_ref());
+
+    cuio_json::detail::validate_token_stream(d_input, d_tokens, d_token_indices, opts, stream);
+    auto const validated_tokens = cudf::detail::make_std_vector_async(d_tokens, stream);
+    stream.sync();
+    EXPECT_NE(std::find(validated_tokens.begin(), validated_tokens.end(), token_t::ErrorBegin),
+              validated_tokens.end())
+      << "value " << bad << " was unexpectedly accepted as a number";
+  }
+}
+
+// Rejects JSON inputs whose nesting depth exceeds the supported maximum.
+TEST_F(JsonTest, NestedInputAboveDepthLimit)
+{
+  std::size_t const depth = std::numeric_limits<int8_t>::max() + std::size_t{1};
+  std::string s(depth, '[');
+  s.append(depth, ']');
+  auto const opts = cudf::io::json_reader_options::builder(
+                      cudf::io::source_info{cudf::host_span<std::byte const>{
+                        reinterpret_cast<std::byte const*>(s.data()), s.size()}})
+                      .build();
+  EXPECT_THROW(cudf::io::read_json(opts), cudf::logic_error);
+}
+
+// Accepts JSON inputs at the maximum supported nesting depth.
+TEST_F(JsonTest, NestedInputAtDepthLimit)
+{
+  std::size_t const depth = std::numeric_limits<int8_t>::max();
+  std::string s(depth, '[');
+  s.append(depth, ']');
+  auto const opts = cudf::io::json_reader_options::builder(
+                      cudf::io::source_info{cudf::host_span<std::byte const>{
+                        reinterpret_cast<std::byte const*>(s.data()), s.size()}})
+                      .build();
+  EXPECT_NO_THROW(cudf::io::read_json(opts));
 }
 
 CUDF_TEST_PROGRAM_MAIN()

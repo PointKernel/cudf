@@ -1,5 +1,5 @@
 /*
- * SPDX-FileCopyrightText: Copyright (c) 2025-2026, NVIDIA CORPORATION.
+ * SPDX-FileCopyrightText: Copyright (c) 2025-2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
 
@@ -17,10 +17,9 @@
 #include <rmm/device_uvector.hpp>
 #include <rmm/exec_policy.hpp>
 
+#include <cuda/iterator>
 #include <cuda/std/limits>
 #include <cuda/std/tuple>
-#include <thrust/iterator/counting_iterator.h>
-#include <thrust/iterator/zip_iterator.h>
 #include <thrust/transform.h>
 
 using doubles_col = cudf::test::fixed_width_column_wrapper<double>;
@@ -40,7 +39,7 @@ struct host_udf_reduction_example : cudf::reduce_host_udf {
     cudf::column_view const& input,
     cudf::data_type output_dtype,
     std::optional<std::reference_wrapper<cudf::scalar const>> init,
-    rmm::cuda_stream_view stream,
+    cuda::stream_ref stream,
     rmm::device_async_resource_ref mr) const override
   {
     return cudf::double_type_dispatcher(
@@ -79,7 +78,7 @@ struct host_udf_reduction_example : cudf::reduce_host_udf {
       cudf::column_view const& input,
       cudf::data_type output_dtype,
       std::optional<std::reference_wrapper<cudf::scalar const>> init,
-      rmm::cuda_stream_view stream,
+      cuda::stream_ref stream,
       rmm::device_async_resource_ref mr) const
     {
       CUDF_EXPECTS(output_dtype == cudf::data_type{cudf::type_to_id<OutputType>()},
@@ -100,8 +99,8 @@ struct host_udf_reduction_example : cudf::reduce_host_udf {
 
       auto const input_dv_ptr = cudf::column_device_view::create(input, stream);
       auto const result       = thrust::transform_reduce(rmm::exec_policy_nosync(stream),
-                                                   thrust::make_counting_iterator(0),
-                                                   thrust::make_counting_iterator(input.size()),
+                                                   cuda::counting_iterator<cudf::size_type>{0},
+                                                   cuda::counting_iterator{input.size()},
                                                    transform_fn{*input_dv_ptr},
                                                    static_cast<OutputType>(init_value),
                                                    cuda::std::plus<>{});
@@ -175,7 +174,7 @@ struct host_udf_segmented_reduction_example : cudf::segmented_reduce_host_udf {
     cudf::data_type output_dtype,
     cudf::null_policy null_handling,
     std::optional<std::reference_wrapper<cudf::scalar const>> init,
-    rmm::cuda_stream_view stream,
+    cuda::stream_ref stream,
     rmm::device_async_resource_ref mr) const override
   {
     return cudf::double_type_dispatcher(input.type(),
@@ -224,7 +223,7 @@ struct host_udf_segmented_reduction_example : cudf::segmented_reduce_host_udf {
       cudf::data_type output_dtype,
       cudf::null_policy null_handling,
       std::optional<std::reference_wrapper<cudf::scalar const>> init,
-      rmm::cuda_stream_view stream,
+      cuda::stream_ref stream,
       rmm::device_async_resource_ref mr) const
     {
       CUDF_EXPECTS(output_dtype == cudf::data_type{cudf::type_to_id<OutputType>()},
@@ -257,9 +256,9 @@ struct host_udf_segmented_reduction_example : cudf::segmented_reduce_host_udf {
 
       thrust::transform(
         rmm::exec_policy_nosync(stream),
-        thrust::make_counting_iterator(0),
-        thrust::make_counting_iterator(num_segments),
-        thrust::make_zip_iterator(output->mutable_view().begin<OutputType>(), valid_idx.begin()),
+        cuda::counting_iterator<cudf::size_type>{0},
+        cuda::counting_iterator{num_segments},
+        cuda::make_zip_iterator(output->mutable_view().begin<OutputType>(), valid_idx.begin()),
         transform_fn{*input_dv_ptr, offsets, static_cast<OutputType>(init_value), null_handling});
 
       auto const valid_idx_cv = cudf::column_view{

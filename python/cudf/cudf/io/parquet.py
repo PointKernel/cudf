@@ -1,4 +1,4 @@
-# SPDX-FileCopyrightText: Copyright (c) 2019-2026, NVIDIA CORPORATION.
+# SPDX-FileCopyrightText: Copyright (c) 2019-2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 from __future__ import annotations
 
@@ -83,7 +83,7 @@ def _plc_write_parquet(
     table,
     filepaths_or_buffers,
     index: bool | None = None,
-    compression: Literal["snappy", "ZSTD", "ZLIB", "LZ4", None] = "snappy",
+    compression: Literal["snappy", "ZSTD", "LZ4", "GZIP", None] = "snappy",
     statistics: Literal["ROWGROUP", "PAGE", "COLUMN", "NONE"] = "ROWGROUP",
     metadata_file_path: str | None = None,
     int96_timestamps: bool = False,
@@ -252,7 +252,7 @@ def _plc_write_parquet(
 def _write_parquet(
     df,
     paths,
-    compression: Literal["snappy", "ZSTD", "ZLIB", "LZ4", None] = "snappy",
+    compression: Literal["snappy", "ZSTD", "LZ4", "GZIP", None] = "snappy",
     index: bool | None = None,
     statistics: Literal["ROWGROUP", "PAGE", "COLUMN", "NONE"] = "ROWGROUP",
     metadata_file_path: str | None = None,
@@ -288,14 +288,18 @@ def _write_parquet(
 ) -> np.ndarray | None:
     if is_list_like(paths) and len(paths) > 1:
         if partitions_info is None:
-            ValueError("partition info is required for multiple paths")
+            raise ValueError("partition info is required for multiple paths")
         elif not is_list_like(partitions_info):
-            ValueError("partition info must be list-like for multiple paths")
+            raise ValueError(
+                "partition info must be list-like for multiple paths"
+            )
         elif not len(paths) == len(partitions_info):
-            ValueError("partitions_info and paths must be of same size")
+            raise ValueError("partitions_info and paths must be of same size")
     if is_list_like(partitions_info) and len(partitions_info) > 1:
         if not is_list_like(paths):
-            ValueError("paths must be list-like when partitions_info provided")
+            raise ValueError(
+                "paths must be list-like when partitions_info provided"
+            )
 
     paths_or_bufs = [
         ioutils.get_writer_filepath_or_buffer(
@@ -348,7 +352,7 @@ def _write_parquet(
 def write_to_dataset(
     df,
     root_path,
-    compression: Literal["snappy", "ZSTD", "ZLIB", "LZ4", None] = "snappy",
+    compression: Literal["snappy", "ZSTD", "LZ4", "GZIP", None] = "snappy",
     filename=None,
     partition_cols=None,
     fs=None,
@@ -401,7 +405,7 @@ def write_to_dataset(
     df : cudf.DataFrame
     root_path : string,
         The root directory of the dataset
-    compression : {'snappy', 'ZSTD', None}, default 'snappy'
+    compression : {'snappy', 'ZSTD', 'LZ4', 'GZIP', None}, default 'snappy'
         Name of the compression to use. Use ``None`` for no compression.
     filename : string, default None
         The file name to use (within each partition directory). If None,
@@ -942,6 +946,7 @@ def read_parquet(
     skip_rows=None,
     allow_mismatched_pq_schemas=False,
     ignore_missing_columns=True,
+    case_sensitive_names=True,
     *args,
     **kwargs,
 ):
@@ -1105,18 +1110,32 @@ def read_parquet(
         skip_rows=skip_rows,
         allow_mismatched_pq_schemas=allow_mismatched_pq_schemas,
         ignore_missing_columns=ignore_missing_columns,
+        case_sensitive_names=case_sensitive_names,
         filters=ast_filter,
         **kwargs,
     )
+    # Build a lookup from (possibly lowered) name -> actual DataFrame column name
+    _key = str.lower if not case_sensitive_names else str
+    col_names = {_key(name): name for name in df._column_names}
+
     # Apply filters row-wise (if any are defined), and return
     if ast_filter is None:
+        if not case_sensitive_names and filters:
+            filters = [
+                [
+                    (col_names[_key(col)], op, val)
+                    for col, op, val in conjunction
+                ]
+                for conjunction in filters
+            ]
         df = _apply_post_filters(df, filters)
 
     if projected_columns:
         # Elements of `projected_columns` may now be in the index.
-        # We must filter these names from our projection
+        # We must filter these names from our projection. For structs,
+        # only the top-level name needs remapping via col_names
         projected_columns = [
-            col for col in projected_columns if col in df._column_names
+            col_names[_key(col.split(".")[0])] for col in projected_columns
         ]
         return df[projected_columns]
     return df
@@ -1238,6 +1257,7 @@ def _parquet_to_frame(
     dataset_kwargs=None,
     nrows=None,
     skip_rows=None,
+    case_sensitive_names=True,
     **kwargs,
 ):
     # If this is not a partitioned read, only need
@@ -1247,6 +1267,7 @@ def _parquet_to_frame(
             paths_or_buffers,
             nrows=nrows,
             skip_rows=skip_rows,
+            case_sensitive_names=case_sensitive_names,
             *args,
             row_groups=row_groups,
             **kwargs,
@@ -1288,6 +1309,7 @@ def _parquet_to_frame(
                 key_paths,
                 *args,
                 row_groups=key_row_groups,
+                case_sensitive_names=case_sensitive_names,
                 **kwargs,
             )
         )
@@ -1296,14 +1318,18 @@ def _parquet_to_frame(
             _len = len(dfs[-1])
             if partition_categories and name in partition_categories:
                 # Build the categorical column from `codes`
+                cat_dtype = CategoricalDtype(
+                    categories=partition_categories[name],
+                    ordered=False,
+                )
                 codes = as_column(
                     partition_categories[name].index(value),
                     length=_len,
+                    dtype=cat_dtype._codes_dtype,
                 )
-                col = codes._with_type_metadata(
-                    CategoricalDtype(
-                        categories=partition_categories[name], ordered=False
-                    )
+                col = ColumnBase.create(
+                    codes.plc_column,
+                    cat_dtype,
                 )
             else:
                 # Not building categorical columns, so
@@ -1319,10 +1345,7 @@ def _parquet_to_frame(
     if len(dfs) > 1:
         # Concatenate dfs and return.
         # Assume we can ignore the index if it has no name.
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore", FutureWarning)
-            res = concat(dfs, ignore_index=dfs[-1].index.name is None)
-        return res
+        return concat(dfs, ignore_index=dfs[-1].index.name is None)
     else:
         return dfs[0]
 
@@ -1338,6 +1361,7 @@ def _read_parquet(
     skip_rows: int | None = None,
     allow_mismatched_pq_schemas: bool = False,
     ignore_missing_columns: bool = True,
+    case_sensitive_names: bool = True,
     filters: plc_expr.Expression | None = None,
     *args,
     **kwargs,
@@ -1375,6 +1399,7 @@ def _read_parquet(
                 .use_pandas_metadata(use_pandas_metadata)
                 .allow_mismatched_pq_schemas(allow_mismatched_pq_schemas)
                 .ignore_missing_columns(ignore_missing_columns)
+                .case_sensitive_names(case_sensitive_names)
                 .build()
             )
             if row_groups is not None:
@@ -1398,27 +1423,27 @@ def _read_parquet(
             column_names = tbl_w_meta.column_names(include_children=False)
             child_names = tbl_w_meta.child_names
             per_file_user_data = tbl_w_meta.per_file_user_data
-            concatenated_columns = tbl_w_meta.tbl.columns()
+            concatenated_columns = tbl_w_meta.tbl.release()
 
             # save memory
             del tbl_w_meta
 
             while reader.has_next():
-                columns = reader.read_chunk().tbl.columns()
+                columns = reader.read_chunk().tbl.release()
                 # Iterate in reverse to avoid O(n²) cost from popping
                 for i in range(len(concatenated_columns) - 1, -1, -1):
                     concatenated_columns[i] = plc.concatenate.concatenate(
                         [concatenated_columns[i], columns.pop()]
                     )
 
-            data = {
-                name: ColumnBase.from_pylibcudf(col)
-                for name, col in zip(
-                    column_names, concatenated_columns, strict=True
-                )
-            }
-            df = DataFrame._from_data(data)
-            ioutils._add_df_col_struct_names(df, child_names)
+            plc_table = plc.Table(concatenated_columns)
+            df = DataFrame.from_pylibcudf(
+                plc_table,
+                metadata={
+                    "columns": column_names,
+                    "child_names": child_names,
+                },
+            )
             df = _process_metadata(
                 df,
                 column_names,
@@ -1443,6 +1468,7 @@ def _read_parquet(
                 .use_pandas_metadata(use_pandas_metadata)
                 .allow_mismatched_pq_schemas(allow_mismatched_pq_schemas)
                 .ignore_missing_columns(ignore_missing_columns)
+                .case_sensitive_names(case_sensitive_names)
                 .build()
             )
             if row_groups is not None:
@@ -1494,7 +1520,7 @@ def to_parquet(
     df,
     path,
     engine="cudf",
-    compression: Literal["snappy", "ZSTD", "ZLIB", "LZ4", None] = "snappy",
+    compression: Literal["snappy", "ZSTD", "LZ4", "GZIP", None] = "snappy",
     index: bool | None = None,
     partition_cols=None,
     partition_file_name=None,
@@ -1648,6 +1674,7 @@ def to_parquet(
             pa_table,
             root_path=path,
             partition_cols=partition_cols,
+            compression=compression,
             *args,
             **kwargs,
         )
@@ -1760,7 +1787,7 @@ class ParquetWriter:
         If ``True``, include a dataframe's index(es) in the file output.
         If ``False``, they will not be written to the file. If ``None``,
         index(es) other than RangeIndex will be saved as columns.
-    compression : {'snappy', None}, default 'snappy'
+    compression : {'snappy', 'ZSTD', 'LZ4', 'GZIP', None}, default 'snappy'
         Name of the compression to use. Use ``None`` for no compression.
     statistics : {'ROWGROUP', 'PAGE', 'COLUMN', 'NONE'}, default 'ROWGROUP'
         Level at which column statistics should be included in file.
@@ -1797,7 +1824,7 @@ class ParquetWriter:
         self,
         filepath_or_buffer,
         index: bool | None = None,
-        compression: Literal["snappy", "ZSTD", "ZLIB", "LZ4", None] = "snappy",
+        compression: Literal["snappy", "ZSTD", "LZ4", "GZIP", None] = "snappy",
         statistics: Literal["ROWGROUP", "PAGE", "COLUMN", "NONE"] = "ROWGROUP",
         row_group_size_bytes: int = int(np.iinfo(np.uint64).max),
         row_group_size_rows: int = 1000000,
@@ -2015,7 +2042,7 @@ class ParquetDatasetWriter:
         If ``True``, include the dataframe's index(es) in the file output.
         If ``False``, they will not be written to the file. If ``None``,
         index(es) other than RangeIndex will be saved as columns.
-    compression : {'snappy', None}, default 'snappy'
+    compression : {'snappy', 'ZSTD', 'LZ4', 'GZIP', None}, default 'snappy'
         Name of the compression to use. Use ``None`` for no compression.
     statistics : {'ROWGROUP', 'PAGE', 'COLUMN', 'NONE'}, default 'ROWGROUP'
         Level at which column statistics should be included in file.
@@ -2074,7 +2101,7 @@ class ParquetDatasetWriter:
         path,
         partition_cols,
         index=None,
-        compression: Literal["snappy", "ZSTD", "ZLIB", "LZ4", None] = "snappy",
+        compression: Literal["snappy", "ZSTD", "LZ4", "GZIP", None] = "snappy",
         statistics: Literal["ROWGROUP", "PAGE", "COLUMN", "NONE"] = "ROWGROUP",
         max_file_size=None,
         file_name_prefix=None,
@@ -2468,6 +2495,13 @@ def _process_metadata(
                 df._data[col].dtype.precision = meta_data_per_column[col][  # type: ignore[union-attr]
                     "metadata"
                 ]["precision"]
+            elif (
+                isinstance(df._data[col].dtype, pd.StringDtype)
+                and col in meta_data_per_column
+                and meta_data_per_column[col]["pandas_type"] == "empty"
+                and meta_data_per_column[col]["numpy_type"] == "object"
+            ):
+                df._data[col] = df._data[col].astype(np.dtype("object"))
 
     # Set the index column
     if index_col is not None and len(index_col) > 0:

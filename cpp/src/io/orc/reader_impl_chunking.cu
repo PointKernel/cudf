@@ -1,5 +1,5 @@
 /*
- * SPDX-FileCopyrightText: Copyright (c) 2024-2025, NVIDIA CORPORATION.
+ * SPDX-FileCopyrightText: Copyright (c) 2024-2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
 
@@ -10,19 +10,22 @@
 #include "io/utilities/hostdevice_span.hpp"
 
 #include <cudf/detail/timezone.hpp>
+#include <cudf/detail/utilities/cuda_memcpy.hpp>
 #include <cudf/detail/utilities/integer_utils.hpp>
 #include <cudf/logger.hpp>
 #include <cudf/utilities/error.hpp>
+#include <cudf/utilities/memory_resource.hpp>
 
 #include <rmm/device_buffer.hpp>
 #include <rmm/exec_policy.hpp>
 
+#include <cuda/iterator>
 #include <cuda/std/iterator>
 #include <thrust/binary_search.h>
-#include <thrust/iterator/transform_iterator.h>
 #include <thrust/scan.h>
 
 #include <algorithm>
+#include <numeric>
 #include <tuple>
 
 namespace cudf::io::orc::detail {
@@ -141,10 +144,10 @@ std::vector<range> find_splits(host_span<T const> cumulative_sizes,
 
   [[maybe_unused]] std::size_t cur_cumulative_rows{0};
 
-  auto const start = thrust::make_transform_iterator(
-    cumulative_sizes.begin(),
-    [&](auto const& size) { return size.size_bytes - cur_cumulative_size; });
-  auto const end = start + cumulative_sizes.size();
+  auto const start = cuda::transform_iterator(cumulative_sizes.begin(), [&](auto const& size) {
+    return size.size_bytes - cur_cumulative_size;
+  });
+  auto const end   = start + cumulative_sizes.size();
 
   while (cur_count < total_count) {
     int64_t split_pos = static_cast<int64_t>(cuda::std::distance(
@@ -250,7 +253,10 @@ void reader_impl::preprocess_file(read_mode mode)
 
     return (has_timestamp_column && !_options.ignore_timezone_in_stripe_footer)
              ? cudf::detail::make_timezone_transition_table(
-                 {}, selected_stripes[0].stripe_footer->writerTimezone, _stream)
+                 {},
+                 selected_stripes[0].stripe_footer->writerTimezone,
+                 _stream,
+                 cudf::get_current_device_resource_ref())
              : std::make_unique<cudf::table>();
   }();
 
@@ -317,8 +323,8 @@ void reader_impl::preprocess_file(read_mode mode)
         column_types.emplace_back(col_type);
       }
 
-      // Map each ORC column to its column.
-      if (col_type == type_id::LIST or col_type == type_id::STRUCT) {
+      // Only nested columns with selected children require child metadata aggregation.
+      if (col.num_children > 0 and (col_type == type_id::LIST or col_type == type_id::STRUCT)) {
         nested_cols.emplace_back(col);
       }
     }
@@ -426,7 +432,7 @@ void reader_impl::preprocess_file(read_mode mode)
 
   // Compute the prefix sum of stripes' data sizes.
   total_stripe_sizes.host_to_device_async(_stream);
-  thrust::inclusive_scan(rmm::exec_policy_nosync(_stream),
+  thrust::inclusive_scan(rmm::exec_policy_nosync(_stream, cudf::get_current_device_resource_ref()),
                          total_stripe_sizes.d_begin(),
                          total_stripe_sizes.d_end(),
                          total_stripe_sizes.d_begin(),
@@ -501,7 +507,7 @@ void reader_impl::load_next_stripe_data(read_mode mode)
       // Instead, it may use some other stream(s) to sync the H->D memcpy.
       // As such, we need to make sure the device buffers in `lvl_stripe_data` are ready first.
       if (!stream_synchronized) {
-        _stream.synchronize();
+        _stream.sync();
         stream_synchronized = true;
       }
       device_read_tasks.emplace_back(
@@ -519,9 +525,10 @@ void reader_impl::load_next_stripe_data(read_mode mode)
     host_read_buffers.emplace_back(fut.get());
     auto* host_buffer = host_read_buffers.back().get();
     CUDF_EXPECTS(host_buffer->size() == expected_size, "Unexpected discrepancy in bytes read.");
-    CUDF_CUDA_TRY(cudaMemcpyAsync(
-      dev_dst, host_buffer->data(), host_buffer->size(), cudaMemcpyDefault, _stream.value()));
+    CUDF_CUDA_TRY(
+      cudf::detail::memcpy_async(dev_dst, host_buffer->data(), host_buffer->size(), _stream));
   }
+  _stream.sync();
 
   for (auto& task : device_read_tasks) {  // if there were device reads
     CUDF_EXPECTS(task.first.get() == task.second, "Unexpected discrepancy in bytes read.");
@@ -697,7 +704,7 @@ void reader_impl::load_next_stripe_data(read_mode mode)
 
   // Compute the prefix sum of stripe data sizes and rows.
   stripe_decomp_sizes.host_to_device_async(_stream);
-  thrust::inclusive_scan(rmm::exec_policy_nosync(_stream),
+  thrust::inclusive_scan(rmm::exec_policy_nosync(_stream, cudf::get_current_device_resource_ref()),
                          stripe_decomp_sizes.d_begin(),
                          stripe_decomp_sizes.d_end(),
                          stripe_decomp_sizes.d_begin(),

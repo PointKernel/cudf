@@ -1,5 +1,5 @@
 /*
- * SPDX-FileCopyrightText: Copyright (c) 2021-2025, NVIDIA CORPORATION.
+ * SPDX-FileCopyrightText: Copyright (c) 2021-2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
 
@@ -443,7 +443,7 @@ TEST_F(JsonPathTests, GetJsonObjectNullInputs)
 {
   {
     std::string str(R"({"a" : "b"})");
-    cudf::test::strings_column_wrapper input({str, str, str, str}, {true, false, true, false});
+    cudf::test::strings_column_wrapper input({str, "", str, ""}, {true, false, true, false});
 
     std::string_view json_path("$.a");
     auto result_raw = cudf::get_json_object(cudf::strings_column_view(input), json_path);
@@ -1042,6 +1042,48 @@ TEST_F(JsonPathTests, QueriesContainingQuotes)
 
   // Set 2
   do_test(R"($.'A)", R"({"B'": 3})");
+}
+
+TEST_F(JsonPathTests, ObjectWithEmptyKey)
+{
+  auto const input = cudf::test::strings_column_wrapper{R"({"":0,"a":1})",
+                                                        R"({"a":1,"":0})",
+                                                        R"({"" : 0, "a" : 1})",
+                                                        R"({"":{"a":9},"a":1})",
+                                                        R"({"":[1,2],"a":1})",
+                                                        R"({"":"s","a":1})"};
+
+  auto const result =
+    cudf::get_json_object(cudf::strings_column_view(input), std::string_view{"$.a"});
+  auto const expected = cudf::test::strings_column_wrapper{"1", "1", "1", "1", "1", "1"};
+  CUDF_TEST_EXPECT_COLUMNS_EQUIVALENT(*result, expected);
+}
+
+// Test that get_json_object creates valid string columns for empty/whitespace JSONPath queries
+TEST_F(JsonPathTests, EmptyPathCreatesValidColumn)
+{
+  auto const input = cudf::test::strings_column_wrapper{R"({"a":"b"})"};
+
+  // Test 1: Empty path should create VALID all-null column
+  {
+    std::string_view json_path("");
+    auto result = cudf::get_json_object(cudf::strings_column_view(input), json_path);
+
+    EXPECT_EQ(result->size(), 1);
+    EXPECT_EQ(result->type().id(), cudf::type_id::STRING);
+    EXPECT_EQ(result->null_count(), 1);
+    EXPECT_GT(result->num_children(), 0);
+  }
+
+  // Test 2: Whitespace path should also create VALID all-null column
+  {
+    std::string_view json_path(" ");
+    auto result = cudf::get_json_object(cudf::strings_column_view(input), json_path);
+
+    EXPECT_EQ(result->size(), 1);
+    EXPECT_EQ(result->null_count(), 1);
+    EXPECT_GT(result->num_children(), 0);
+  }
 }
 
 CUDF_TEST_PROGRAM_MAIN()

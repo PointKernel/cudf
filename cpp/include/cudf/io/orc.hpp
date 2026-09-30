@@ -1,5 +1,5 @@
 /*
- * SPDX-FileCopyrightText: Copyright (c) 2020-2025, NVIDIA CORPORATION.
+ * SPDX-FileCopyrightText: Copyright (c) 2020-2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
 
@@ -19,12 +19,16 @@
 #include <utility>
 #include <vector>
 
+/**
+ * @file
+ * @brief APIs for reading and writing ORC files.
+ */
+
 namespace CUDF_EXPORT cudf {
 namespace io {
 /**
  * @addtogroup io_readers
  * @{
- * @file
  */
 
 constexpr size_t default_stripe_size_bytes   = 64 * 1024 * 1024;  ///< 64MB default orc stripe size
@@ -284,6 +288,16 @@ class orc_reader_options {
   {
     _decimal128_columns = std::move(val);
   }
+
+  /**
+   * @brief Sets whether to ignore writer timezone in the stripe footer.
+   *
+   * @param val Boolean value to enable/disable ignoring writer timezone
+   */
+  void enable_ignore_timezone_in_stripe_footer(bool val)
+  {
+    _ignore_timezone_in_stripe_footer = val;
+  }
 };
 
 /**
@@ -315,7 +329,7 @@ class orc_reader_options_builder {
    */
   orc_reader_options_builder& columns(std::vector<std::string> col_names)
   {
-    options._columns = std::move(col_names);
+    options.set_columns(std::move(col_names));
     return *this;
   }
 
@@ -363,7 +377,7 @@ class orc_reader_options_builder {
    */
   orc_reader_options_builder& use_index(bool use)
   {
-    options._use_index = use;
+    options.enable_use_index(use);
     return *this;
   }
 
@@ -375,7 +389,7 @@ class orc_reader_options_builder {
    */
   orc_reader_options_builder& use_np_dtypes(bool use)
   {
-    options._use_np_dtypes = use;
+    options.enable_use_np_dtypes(use);
     return *this;
   }
 
@@ -387,7 +401,7 @@ class orc_reader_options_builder {
    */
   orc_reader_options_builder& timestamp_type(data_type type)
   {
-    options._timestamp_type = type;
+    options.set_timestamp_type(type);
     return *this;
   }
 
@@ -399,7 +413,7 @@ class orc_reader_options_builder {
    */
   orc_reader_options_builder& decimal128_columns(std::vector<std::string> val)
   {
-    options._decimal128_columns = std::move(val);
+    options.set_decimal128_columns(std::move(val));
     return *this;
   }
 
@@ -411,7 +425,7 @@ class orc_reader_options_builder {
    */
   orc_reader_options_builder& ignore_timezone_in_stripe_footer(bool ignore)
   {
-    options._ignore_timezone_in_stripe_footer = ignore;
+    options.enable_ignore_timezone_in_stripe_footer(ignore);
     return *this;
   }
 
@@ -449,7 +463,7 @@ class orc_reader_options_builder {
  */
 table_with_metadata read_orc(
   orc_reader_options const& options,
-  rmm::cuda_stream_view stream      = cudf::get_default_stream(),
+  cuda::stream_ref stream           = cudf::get_default_stream(),
   rmm::device_async_resource_ref mr = cudf::get_current_device_resource_ref());
 
 /**
@@ -519,7 +533,7 @@ class chunked_orc_reader {
     std::size_t pass_read_limit,
     size_type output_row_granularity,
     orc_reader_options const& options,
-    rmm::cuda_stream_view stream      = cudf::get_default_stream(),
+    cuda::stream_ref stream           = cudf::get_default_stream(),
     rmm::device_async_resource_ref mr = cudf::get_current_device_resource_ref());
 
   /**
@@ -540,7 +554,7 @@ class chunked_orc_reader {
     std::size_t chunk_read_limit,
     std::size_t pass_read_limit,
     orc_reader_options const& options,
-    rmm::cuda_stream_view stream      = cudf::get_default_stream(),
+    cuda::stream_ref stream           = cudf::get_default_stream(),
     rmm::device_async_resource_ref mr = cudf::get_current_device_resource_ref());
 
   /**
@@ -558,7 +572,7 @@ class chunked_orc_reader {
   explicit chunked_orc_reader(
     std::size_t chunk_read_limit,
     orc_reader_options const& options,
-    rmm::cuda_stream_view stream      = cudf::get_default_stream(),
+    cuda::stream_ref stream           = cudf::get_default_stream(),
     rmm::device_async_resource_ref mr = cudf::get_current_device_resource_ref());
 
   /**
@@ -594,7 +608,6 @@ class chunked_orc_reader {
 /**
  * @addtogroup io_writers
  * @{
- * @file
  */
 
 /**
@@ -640,6 +653,8 @@ class orc_writer_options {
   std::shared_ptr<writer_compression_statistics> _compression_stats;
   // Specify whether string dictionaries should be alphabetically sorted
   bool _enable_dictionary_sort = true;
+  // Timezone that the written timestamps are relative to, recorded in the stripe footers
+  std::string _writer_timezone = "UTC";
 
   friend orc_writer_options_builder;
 
@@ -769,6 +784,13 @@ class orc_writer_options {
    */
   [[nodiscard]] bool get_enable_dictionary_sort() const { return _enable_dictionary_sort; }
 
+  /**
+   * @brief Returns the timezone the written timestamps are relative to.
+   *
+   * @return Timezone name
+   */
+  [[nodiscard]] std::string const& get_writer_timezone() const { return _writer_timezone; }
+
   // Setters
 
   /**
@@ -878,6 +900,28 @@ class orc_writer_options {
    * @param val Boolean value to enable/disable
    */
   void set_enable_dictionary_sort(bool val) { _enable_dictionary_sort = val; }
+
+  /**
+   * @brief Sets the timezone that the written timestamps are relative to.
+   *
+   * ORC timestamps are wall-clock values: readers shift them by the difference between the writer's
+   * timezone, recorded in the stripe footers, and their own. libcudf timestamps are UTC instants,
+   * so the default of "UTC" writes them unshifted. Set this to the timezone that gave the values
+   * their meaning to interoperate with writers that record a local timezone, such as Hive and
+   * Spark.
+   *
+   * A non-UTC file is meant for a reader whose timezone matches; it does not round-trip through
+   * the libcudf reader, which has no session timezone and returns the writer's wall clock.
+   *
+   * Timestamp statistics hold the input instants, which is what a reader that honors the recorded
+   * timezone materializes from the data stream.
+   *
+   * An empty name, or one that does not resolve to a timezone file, is rejected by the writer,
+   * not by this setter.
+   *
+   * @param timezone Timezone name, for example "America/Los_Angeles"
+   */
+  void set_writer_timezone(std::string timezone) { _writer_timezone = std::move(timezone); }
 };
 
 /**
@@ -929,7 +973,7 @@ class orc_writer_options_builder {
    */
   orc_writer_options_builder& enable_statistics(statistics_freq val)
   {
-    options._stats_freq = val;
+    options.enable_statistics(val);
     return *this;
   }
 
@@ -977,7 +1021,7 @@ class orc_writer_options_builder {
    */
   orc_writer_options_builder& table(table_view tbl)
   {
-    options._table = tbl;
+    options.set_table(tbl);
     return *this;
   }
 
@@ -989,7 +1033,7 @@ class orc_writer_options_builder {
    */
   orc_writer_options_builder& metadata(table_input_metadata meta)
   {
-    options._metadata = std::move(meta);
+    options.set_metadata(std::move(meta));
     return *this;
   }
 
@@ -1001,7 +1045,7 @@ class orc_writer_options_builder {
    */
   orc_writer_options_builder& key_value_metadata(std::map<std::string, std::string> metadata)
   {
-    options._user_data = std::move(metadata);
+    options.set_key_value_metadata(std::move(metadata));
     return *this;
   }
 
@@ -1014,7 +1058,7 @@ class orc_writer_options_builder {
   orc_writer_options_builder& compression_statistics(
     std::shared_ptr<writer_compression_statistics> const& comp_stats)
   {
-    options._compression_stats = comp_stats;
+    options.set_compression_statistics(comp_stats);
     return *this;
   }
 
@@ -1026,7 +1070,17 @@ class orc_writer_options_builder {
    */
   orc_writer_options_builder& enable_dictionary_sort(bool val)
   {
-    options._enable_dictionary_sort = val;
+    options.set_enable_dictionary_sort(val);
+    return *this;
+  }
+
+  /**
+   * @copydoc orc_writer_options::set_writer_timezone
+   * @return this for chaining
+   */
+  orc_writer_options_builder& writer_timezone(std::string timezone)
+  {
+    options.set_writer_timezone(std::move(timezone));
     return *this;
   }
 
@@ -1055,11 +1109,18 @@ class orc_writer_options_builder {
  *  cudf::io::write_orc(options);
  * @endcode
  *
+ * @note If an exception is thrown during encoding or compression, no data is written to the sink.
+ *
+ * @note Timestamps in the last 999 milliseconds before the UNIX epoch are not representable in ORC;
+ * they are read back one second later, as with the Apache ORC writer (ORC-763, ORC-771).
+ *
  * @param options Settings for controlling reading behavior
  * @param stream CUDA stream used for device memory operations and kernel launches
+ *
+ * @throw cudf::logic_error if the writer timezone is empty or does not resolve to a timezone file
  */
 void write_orc(orc_writer_options const& options,
-               rmm::cuda_stream_view stream = cudf::get_default_stream());
+               cuda::stream_ref stream = cudf::get_default_stream());
 
 /**
  * @brief Builds settings to use for `write_orc_chunked()`.
@@ -1090,6 +1151,8 @@ class chunked_orc_writer_options {
   std::shared_ptr<writer_compression_statistics> _compression_stats;
   // Specify whether string dictionaries should be alphabetically sorted
   bool _enable_dictionary_sort = true;
+  // Timezone that the written timestamps are relative to, recorded in the stripe footers
+  std::string _writer_timezone = "UTC";
 
   friend chunked_orc_writer_options_builder;
 
@@ -1197,6 +1260,13 @@ class chunked_orc_writer_options {
    */
   [[nodiscard]] bool get_enable_dictionary_sort() const { return _enable_dictionary_sort; }
 
+  /**
+   * @brief Returns the timezone the written timestamps are relative to.
+   *
+   * @return Timezone name
+   */
+  [[nodiscard]] std::string const& get_writer_timezone() const { return _writer_timezone; }
+
   // Setters
 
   /**
@@ -1299,6 +1369,11 @@ class chunked_orc_writer_options {
    * @param val Boolean value to enable/disable
    */
   void set_enable_dictionary_sort(bool val) { _enable_dictionary_sort = val; }
+
+  /**
+   * @copydoc orc_writer_options::set_writer_timezone
+   */
+  void set_writer_timezone(std::string timezone) { _writer_timezone = std::move(timezone); }
 };
 
 /**
@@ -1347,7 +1422,7 @@ class chunked_orc_writer_options_builder {
    */
   chunked_orc_writer_options_builder& enable_statistics(statistics_freq val)
   {
-    options._stats_freq = val;
+    options.enable_statistics(val);
     return *this;
   }
 
@@ -1395,7 +1470,7 @@ class chunked_orc_writer_options_builder {
    */
   chunked_orc_writer_options_builder& metadata(table_input_metadata meta)
   {
-    options._metadata = std::move(meta);
+    options.metadata(std::move(meta));
     return *this;
   }
 
@@ -1408,7 +1483,7 @@ class chunked_orc_writer_options_builder {
   chunked_orc_writer_options_builder& key_value_metadata(
     std::map<std::string, std::string> metadata)
   {
-    options._user_data = std::move(metadata);
+    options.set_key_value_metadata(std::move(metadata));
     return *this;
   }
 
@@ -1421,7 +1496,7 @@ class chunked_orc_writer_options_builder {
   chunked_orc_writer_options_builder& compression_statistics(
     std::shared_ptr<writer_compression_statistics> const& comp_stats)
   {
-    options._compression_stats = comp_stats;
+    options.set_compression_statistics(comp_stats);
     return *this;
   }
 
@@ -1433,7 +1508,17 @@ class chunked_orc_writer_options_builder {
    */
   chunked_orc_writer_options_builder& enable_dictionary_sort(bool val)
   {
-    options._enable_dictionary_sort = val;
+    options.set_enable_dictionary_sort(val);
+    return *this;
+  }
+
+  /**
+   * @copydoc chunked_orc_writer_options::set_writer_timezone
+   * @return this for chaining
+   */
+  chunked_orc_writer_options_builder& writer_timezone(std::string timezone)
+  {
+    options.set_writer_timezone(std::move(timezone));
     return *this;
   }
 
@@ -1472,6 +1557,9 @@ class chunked_orc_writer_options_builder {
  *    ...
  *  writer.close();
  * @endcode
+ *
+ * @note Timestamps in the last 999 milliseconds before the UNIX epoch are not representable in ORC;
+ * see `write_orc()` for details.
  */
 class orc_chunked_writer {
  public:
@@ -1491,12 +1579,18 @@ class orc_chunked_writer {
    *
    * @param[in] options options used to write table
    * @param[in] stream CUDA stream used for device memory operations and kernel launches
+   *
+   * @throw cudf::logic_error if the writer timezone is empty or does not resolve to a timezone
+   * file
    */
   orc_chunked_writer(chunked_orc_writer_options const& options,
-                     rmm::cuda_stream_view stream = cudf::get_default_stream());
+                     cuda::stream_ref stream = cudf::get_default_stream());
 
   /**
    * @brief Writes table to output.
+   *
+   * @note If an exception is thrown during encoding or compression, the data from the failing call
+   * is not written to the sink. Data from previous successful calls is unaffected.
    *
    * @param[in] table Table that needs to be written
    * @return returns reference of the class object

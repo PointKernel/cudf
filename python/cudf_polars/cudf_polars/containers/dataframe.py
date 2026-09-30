@@ -1,4 +1,4 @@
-# SPDX-FileCopyrightText: Copyright (c) 2024-2026, NVIDIA CORPORATION & AFFILIATES.
+# SPDX-FileCopyrightText: Copyright (c) 2024-2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
 """A dataframe, with some properties."""
@@ -14,6 +14,7 @@ import pylibcudf as plc
 
 from cudf_polars.containers import Column, DataType
 from cudf_polars.utils import conversion
+from cudf_polars.utils.versions import POLARS_VERSION_LT_138
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Mapping, Sequence, Set
@@ -41,6 +42,11 @@ def _create_polars_column_metadata(
             _create_polars_column_metadata(field.name, field.dtype)
             for field in dtype.fields
         ]
+    elif isinstance(dtype, (pl.List, pl.Array)):
+        children_meta = [
+            plc.interop.ColumnMetadata(name="offsets"),
+            _create_polars_column_metadata("element", dtype.inner),
+        ]
     elif isinstance(dtype, pl.Datetime):
         timezone = dtype.time_zone or timezone
     elif isinstance(dtype, pl.Decimal):
@@ -67,7 +73,7 @@ class _ObjectWithArrowMetadata:
         self.stream = stream
 
     def __arrow_c_array__(
-        self, requested_schema: None = None
+        self, requested_schema: object | None = None
     ) -> tuple[CapsuleType, CapsuleType]:
         return self.obj._to_schema(self.metadata), self.obj._to_host_array(
             stream=self.stream
@@ -88,22 +94,35 @@ class DataFrame:
     columns: list[NamedColumn]
     stream: Stream
 
-    def __init__(self, columns: Iterable[Column], stream: Stream) -> None:
+    def __init__(
+        self, columns: Iterable[Column], stream: Stream, num_rows: int | None = None
+    ) -> None:
         columns = list(columns)
         if any(c.name is None for c in columns):
             raise ValueError("All columns must have a name")
-        self.columns = [cast(NamedColumn, c) for c in columns]
+        self.columns = [cast("NamedColumn", c) for c in columns]
         self.dtypes = [c.dtype for c in self.columns]
         self.column_map = {c.name: c for c in self.columns}
-        self.table = plc.Table([c.obj for c in self.columns])
+        self.table = plc.Table([c.obj for c in self.columns], num_rows=num_rows)
         self.stream = stream
 
     def copy(self) -> Self:
         """Return a shallow copy of self."""
-        return type(self)((c.copy() for c in self.columns), stream=self.stream)
+        return type(self)(
+            (c.copy() for c in self.columns),
+            stream=self.stream,
+            num_rows=self.num_rows,
+        )
 
     def to_polars(self) -> pl.DataFrame:
         """Convert to a polars DataFrame."""
+        if len(self.column_map) == 0:
+            # polars < 1.38 has no DataFrame(height=...) constructor and cannot
+            # represent a zero-column frame with a non-zero row count.
+            if POLARS_VERSION_LT_138:  # pragma: no cover
+                return pl.DataFrame()
+            return pl.DataFrame(height=self.num_rows)
+
         # If the arrow table has empty names, from_arrow produces
         # column_$i. But here we know there is only one such column
         # (by construction) and it should have an empty name.
@@ -118,8 +137,16 @@ class DataFrame:
         table_with_metadata = _ObjectWithArrowMetadata(
             self.table, metadata, self.stream
         )
-        df = pl.DataFrame(table_with_metadata)
-        return df.rename(name_map).with_columns(
+        df = pl.DataFrame(table_with_metadata).rename(name_map)
+        array_dtypes: dict[str, PolarsDataType] = {
+            column.name: column.dtype.polars_type
+            for column in self.columns
+            if isinstance(column.dtype.polars_type, pl.Array)
+        }
+        if array_dtypes:
+            # TODO: Remove this cast when libcudf can export Arrow fixed-size lists.
+            df = df.cast(pl.Schema(array_dtypes), strict=True)
+        return df.with_columns(
             pl.col(c.name).set_sorted(descending=c.order == plc.types.Order.DESCENDING)
             if c.is_sorted
             else pl.col(c.name)
@@ -144,7 +171,12 @@ class DataFrame:
     @cached_property
     def num_rows(self) -> int:
         """Number of rows."""
-        return self.table.num_rows() if self.column_map else 0
+        return self.table.num_rows()
+
+    @cached_property
+    def _size_bytes(self) -> int:
+        """Return the size of the dataframe in bytes."""
+        return sum(c.device_buffer_size() for c in self.table.columns())
 
     @classmethod
     def from_polars(cls, df: pl.DataFrame, stream: Stream) -> Self:
@@ -174,6 +206,7 @@ class DataFrame:
                 )
             ),
             stream=stream,
+            num_rows=plc_table.num_rows(),
         )
 
     @classmethod
@@ -218,6 +251,7 @@ class DataFrame:
                 for c, name, dtype in zip(table.columns(), names, dtypes, strict=True)
             ),
             stream=stream,
+            num_rows=table.num_rows(),
         )
 
     @classmethod
@@ -258,6 +292,8 @@ class DataFrame:
                 for c, kw in zip(table.columns(), header["columns_kwargs"], strict=True)
             ),
             stream=stream,
+            # A zero-column frame's row count is carried by the packed metadata; preserve it.
+            num_rows=table.num_rows(),
         )
 
     def serialize(
@@ -272,7 +308,7 @@ class DataFrame:
 
         To enable dask support, dask serializers must be registered
 
-            >>> from cudf_polars.experimental.dask_serialize import register
+            >>> from cudf_polars.streaming.dask_serialize import register
             >>> register()
 
         Parameters
@@ -331,6 +367,7 @@ class DataFrame:
                 for c, other in zip(self.columns, like.columns, strict=True)
             ),
             stream=self.stream,
+            num_rows=self.num_rows,
         )
 
     def with_columns(
@@ -369,20 +406,31 @@ class DataFrame:
         new = {c.name: c for c in columns}
         if replace_only and not self.column_names_set.issuperset(new.keys()):
             raise ValueError("Cannot replace with non-existing names")
-        return type(self)((self.column_map | new).values(), stream=stream)
+        merged = self.column_map | new
+        # Only pass num_rows for a zero-column result. For results with columns, it
+        # must remain None because HStack(should_broadcast=False) intentionally
+        # produces mismatched column lengths that its Select parent reconciles later.
+        return type(self)(
+            merged.values(),
+            stream=stream,
+            num_rows=self.num_rows if not merged else None,
+        )
 
     def discard_columns(self, names: Set[str]) -> Self:
         """Drop columns by name."""
         return type(self)(
             (column for column in self.columns if column.name not in names),
             stream=self.stream,
+            num_rows=self.num_rows,
         )
 
     def select(self, names: Sequence[str] | Mapping[str, Any]) -> Self:
         """Select columns by name returning DataFrame."""
         try:
             return type(self)(
-                (self.column_map[name] for name in names), stream=self.stream
+                (self.column_map[name] for name in names),
+                stream=self.stream,
+                num_rows=self.num_rows,
             )
         except KeyError as e:
             raise ValueError("Can't select missing names") from e
@@ -392,6 +440,7 @@ class DataFrame:
         return type(self)(
             (c.rename(mapping.get(c.name, c.name)) for c in self.columns),
             stream=self.stream,
+            num_rows=self.num_rows,
         )
 
     def select_columns(self, names: Set[str]) -> list[Column]:
@@ -414,7 +463,7 @@ class DataFrame:
         -------
         Filtered dataframe
         """
-        table = plc.stream_compaction.apply_boolean_mask(
+        table = plc.stream_compaction.apply_retention_mask(
             self.table, mask.obj, stream=self.stream
         )
         return (

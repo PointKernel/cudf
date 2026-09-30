@@ -1,4 +1,4 @@
-# SPDX-FileCopyrightText: Copyright (c) 2024-2025, NVIDIA CORPORATION & AFFILIATES.
+# SPDX-FileCopyrightText: Copyright (c) 2024-2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
 """Conversion of expression nodes to libcudf AST nodes."""
@@ -8,14 +8,14 @@ from __future__ import annotations
 from functools import partial, reduce, singledispatch
 from typing import TYPE_CHECKING, TypeAlias, TypedDict, cast
 
-import polars as pl
+import polars as pl  # noqa: TC002 (used at runtime for pl.datatypes, pl.Series etc.)
 
 import pylibcudf as plc
 from pylibcudf import expressions as plc_expr
 
 from cudf_polars.containers import DataType
 from cudf_polars.dsl import expr
-from cudf_polars.dsl.traversal import CachingVisitor, reuse_if_unchanged
+from cudf_polars.dsl.traversal import CachingVisitor, reuse_if_unchanged, traversal
 from cudf_polars.typing import GenericTransformer
 
 if TYPE_CHECKING:
@@ -76,23 +76,7 @@ UOP_TO_ASTOP = {
     plc.unary.UnaryOperator.NOT: plc_expr.ASTOperator.NOT,
 }
 
-SUPPORTED_STATISTICS_BINOPS = {
-    plc.binaryop.BinaryOperator.EQUAL,
-    plc.binaryop.BinaryOperator.NOT_EQUAL,
-    plc.binaryop.BinaryOperator.LESS,
-    plc.binaryop.BinaryOperator.LESS_EQUAL,
-    plc.binaryop.BinaryOperator.GREATER,
-    plc.binaryop.BinaryOperator.GREATER_EQUAL,
-}
-
-REVERSED_COMPARISON = {
-    plc.binaryop.BinaryOperator.EQUAL: plc.binaryop.BinaryOperator.EQUAL,
-    plc.binaryop.BinaryOperator.NOT_EQUAL: plc.binaryop.BinaryOperator.NOT_EQUAL,
-    plc.binaryop.BinaryOperator.LESS: plc.binaryop.BinaryOperator.GREATER,
-    plc.binaryop.BinaryOperator.LESS_EQUAL: plc.binaryop.BinaryOperator.GREATER_EQUAL,
-    plc.binaryop.BinaryOperator.GREATER: plc.binaryop.BinaryOperator.LESS,
-    plc.binaryop.BinaryOperator.GREATER_EQUAL: plc.binaryop.BinaryOperator.LESS_EQUAL,
-}
+_DECIMAL_IDS = {plc.TypeId.DECIMAL32, plc.TypeId.DECIMAL64, plc.TypeId.DECIMAL128}
 
 
 class ASTState(TypedDict):
@@ -194,28 +178,26 @@ def _(node: expr.BinOp, self: Transformer) -> plc_expr.Expression:
                 )
             ),
         )
-    if self.state["for_parquet"]:
-        op1_col, op2_col = (isinstance(op, expr.Col) for op in node.children)
-        if op1_col ^ op2_col:
-            op: plc.binaryop.BinaryOperator = node.op
-            if op not in SUPPORTED_STATISTICS_BINOPS:
-                raise NotImplementedError(
-                    f"Parquet filter binop with column doesn't support {node.op!r}"
-                )
-            op1, op2 = node.children
-            if op2_col:
-                (op1, op2) = (op2, op1)
-                op = REVERSED_COMPARISON[op]
-            if not isinstance(op2, expr.Literal):
-                raise NotImplementedError(
-                    "Parquet filter binops must have form 'col binop literal'"
-                )
-            return plc_expr.Operation(BINOP_TO_ASTOP[op], self(op1), self(op2))
-        elif op1_col and op2_col:
+    c1, c2 = node.children
+    if c1.dtype != c2.dtype:
+        if isinstance(c1, expr.Literal):  # pragma: no cover
+            c1 = c1.astype(c2.dtype)
+        elif isinstance(c2, expr.Literal):  # pragma: no cover
+            c2 = c2.astype(c1.dtype)
+        elif (
+            isinstance(c1, (expr.Col, expr.ColRef)) and c1.dtype.id() in _DECIMAL_IDS
+        ) or (
+            isinstance(c2, (expr.Col, expr.ColRef)) and c2.dtype.id() in _DECIMAL_IDS
+        ):
+            # Allow mixed-precision decimal, or mixed decimal-float operations through
+            # unchanged.
+            pass
+        else:
             raise NotImplementedError(
-                "Parquet filter binops must have one column reference not two"
-            )
-    return plc_expr.Operation(BINOP_TO_ASTOP[node.op], *map(self, node.children))
+                "BinOp with mismatching dtypes"
+            )  # pragma: no cover
+    children = (c1, c2)
+    return plc_expr.Operation(BINOP_TO_ASTOP[node.op], *map(self, children))
 
 
 @_to_ast.register
@@ -230,7 +212,9 @@ def _(node: expr.BooleanFunction, self: Transformer) -> plc_expr.Expression:
                 # to a expr.LiteralColumn, so the actual type is in the inner type
                 # .inner returns DataTypeClass | DataType, need to cast to DataType
                 plc_dtype = DataType(
-                    cast(pl.DataType, cast(pl.List, haystack.dtype.polars_type).inner)
+                    cast(
+                        "pl.DataType", cast("pl.List", haystack.dtype.polars_type).inner
+                    )
                 ).plc_type
             else:
                 plc_dtype = haystack.dtype.plc_type  # pragma: no cover
@@ -248,9 +232,18 @@ def _(node: expr.BooleanFunction, self: Transformer) -> plc_expr.Expression:
                 ),
             )
     if self.state["for_parquet"] and isinstance(node.children[0], expr.Col):
-        raise NotImplementedError(
-            f"Parquet filters don't support {node.name} on columns"
-        )
+        if node.name not in (
+            expr.BooleanFunction.Name.IsNull,
+            expr.BooleanFunction.Name.IsNotNull,
+        ):
+            raise NotImplementedError(
+                f"Parquet filters don't support {node.name} on columns"
+            )
+        if node.children[0].dtype.id() in (plc.TypeId.STRUCT, plc.TypeId.LIST):
+            # TODO: Remove once https://github.com/NVIDIA/cudf/issues/23397 is resolved.
+            raise NotImplementedError(
+                f"Parquet filters don't support {node.name} on nested types"
+            )
     if node.name is expr.BooleanFunction.Name.IsNull:
         return plc_expr.Operation(plc_expr.ASTOperator.IS_NULL, self(node.children[0]))
     elif node.name is expr.BooleanFunction.Name.IsNotNull:
@@ -274,7 +267,44 @@ def _(node: expr.UnaryFunction, self: Transformer) -> plc_expr.Expression:
     )
 
 
-def to_parquet_filter(node: expr.Expr, stream: Stream) -> plc_expr.Expression | None:
+def _extract_conjuncts(node: expr.Expr) -> list[expr.Expr]:
+    if (
+        isinstance(node, expr.BinOp)
+        and node.op == plc.binaryop.BinaryOperator.NULL_LOGICAL_AND
+    ):
+        return [c for child in node.children for c in _extract_conjuncts(child)]
+    return [node]
+
+
+def _to_parquet_filter(
+    node: expr.Expr, mapper: Transformer, unreadable_columns: frozenset[str]
+) -> plc_expr.Expression | None:
+    if unreadable_columns and any(
+        isinstance(child, expr.Col) and child.name in unreadable_columns
+        for child in traversal([node])
+    ):
+        return None
+    # Converts a boolean column reference (e.g., filter(pl.col("foo")))
+    # to an explicit comparison for parquet filters (e.g., filter(pl.col("foo") == True)).
+    # TODO: Have polars pass us the comparison instead
+    if isinstance(node, expr.Col) and node.dtype.id() == plc.TypeId.BOOL8:
+        node = expr.BinOp(
+            node.dtype,
+            plc.binaryop.BinaryOperator.EQUAL,
+            node,
+            expr.Literal(node.dtype, value=True),
+        )
+    try:
+        return mapper(node)
+    except (KeyError, NotImplementedError):
+        return None
+
+
+def to_parquet_filter(
+    node: expr.Expr,
+    stream: Stream,
+    unreadable_columns: frozenset[str] = frozenset(),
+) -> tuple[plc_expr.Expression | None, expr.Expr | None]:
     """
     Convert an expression to libcudf AST nodes suitable for parquet filtering.
 
@@ -284,18 +314,49 @@ def to_parquet_filter(node: expr.Expr, stream: Stream) -> plc_expr.Expression | 
         Expression to convert.
     stream
         CUDA stream used for device memory operations and kernel launches.
+    unreadable_columns
+        Names of columns that are part of the scan's schema but are not stored
+        in the files, such as hive partition keys. Conjuncts referencing them
+        are left to the residual so they can be applied once those columns have
+        been materialized.
 
     Returns
     -------
-    pylibcudf Expression if conversion is possible, otherwise None.
+    filter
+        pylibcudf Expression suitable for parquet filtering, or None if no part
+        of the predicate can be converted.
+    residual
+        Expression still to be applied as a post-read filter, or None when
+        ``filter`` is exact (equivalent to ``node``).  When ``filter`` is None
+        the caller must apply the full original predicate post-read.
     """
     mapper: Transformer = CachingVisitor(
         _to_ast, state={"for_parquet": True, "stream": stream}
     )
-    try:
-        return mapper(node)
-    except (KeyError, NotImplementedError):
-        return None
+    whole = _to_parquet_filter(node, mapper, unreadable_columns)
+    if whole is not None:
+        return whole, None
+    can_handle_filters = []
+    cant_handle_exprs = []
+    for conjunct in _extract_conjuncts(node):
+        f = _to_parquet_filter(conjunct, mapper, unreadable_columns)
+        if f is not None:
+            can_handle_filters.append(f)
+        else:
+            cant_handle_exprs.append(conjunct)
+    if not can_handle_filters:
+        return None, None
+    combined = reduce(
+        partial(plc_expr.Operation, plc_expr.ASTOperator.LOGICAL_AND),
+        can_handle_filters,
+    )
+    residual = reduce(
+        lambda a, b: expr.BinOp(
+            b.dtype, plc.binaryop.BinaryOperator.NULL_LOGICAL_AND, a, b
+        ),
+        cant_handle_exprs,
+    )
+    return combined, residual
 
 
 def to_ast(node: expr.Expr, stream: Stream) -> plc_expr.Expression | None:

@@ -1,9 +1,8 @@
 /*
- * SPDX-FileCopyrightText: Copyright (c) 2021-2026, NVIDIA CORPORATION.
+ * SPDX-FileCopyrightText: Copyright (c) 2021-2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
 
-#include "sort.hpp"
 #include "sort_column_impl.cuh"
 #include "sort_radix.hpp"
 
@@ -18,13 +17,13 @@ namespace detail {
 
 /**
  * @copydoc
- * stable_sorted_order(column_view&,order,null_order,rmm::cuda_stream_view,rmm::device_async_resource_ref)
+ * stable_sorted_order(column_view&,order,null_order,cuda::stream_ref,rmm::device_async_resource_ref)
  */
 template <>
 std::unique_ptr<column> sorted_order<sort_method::STABLE>(column_view const& input,
                                                           order column_order,
                                                           null_order null_precedence,
-                                                          rmm::cuda_stream_view stream,
+                                                          cuda::stream_ref stream,
                                                           rmm::device_async_resource_ref mr)
 {
   auto sorted_indices = cudf::make_numeric_column(
@@ -33,10 +32,7 @@ std::unique_ptr<column> sorted_order<sort_method::STABLE>(column_view const& inp
   if (is_radix_sortable(input)) {
     sorted_order_radix(input, indices_view, column_order == order::ASCENDING, stream);
   } else {
-    auto const dispatch_type = cudf::is_dictionary(input.type())
-                                 ? dictionary_column_view(input).keys().type()
-                                 : input.type();
-    cudf::type_dispatcher<dispatch_storage_type>(dispatch_type,
+    cudf::type_dispatcher<dispatch_storage_type>(input.type(),
                                                  column_sorted_order_fn<sort_method::STABLE>{},
                                                  input,
                                                  indices_view,

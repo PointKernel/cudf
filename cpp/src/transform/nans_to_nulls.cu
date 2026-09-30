@@ -1,5 +1,5 @@
 /*
- * SPDX-FileCopyrightText: Copyright (c) 2019-2026, NVIDIA CORPORATION.
+ * SPDX-FileCopyrightText: Copyright (c) 2019-2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
 
@@ -16,17 +16,16 @@
 #include <cudf/utilities/traits.hpp>
 #include <cudf/utilities/type_dispatcher.hpp>
 
-#include <rmm/cuda_stream_view.hpp>
-
+#include <cuda/iterator>
 #include <cuda/std/limits>
-#include <thrust/iterator/counting_iterator.h>
+#include <cuda/stream>
 
 namespace cudf {
 namespace detail {
 struct dispatch_nan_to_null {
   template <typename T>
-  std::pair<std::unique_ptr<rmm::device_buffer>, cudf::size_type> operator()(
-    column_view const& input, rmm::cuda_stream_view stream, rmm::device_async_resource_ref mr)
+  std::pair<std::unique_ptr<cuda::device_buffer<std::byte>>, cudf::size_type> operator()(
+    column_view const& input, cuda::stream_ref stream, rmm::device_async_resource_ref mr)
     requires(std::is_floating_point_v<T>)
   {
     auto input_device_view_ptr = column_device_view::create(input, stream);
@@ -37,38 +36,28 @@ struct dispatch_nan_to_null {
                  input_device_view.is_null(idx));
     };
 
-    auto mask = detail::valid_if(thrust::make_counting_iterator<cudf::size_type>(0),
-                                 thrust::make_counting_iterator<cudf::size_type>(input.size()),
+    auto mask = detail::valid_if(cuda::counting_iterator<cudf::size_type>{0},
+                                 cuda::counting_iterator<cudf::size_type>{input.size()},
                                  pred,
                                  stream,
                                  mr);
 
-    return std::pair(std::make_unique<rmm::device_buffer>(std::move(mask.first)), mask.second);
+    return std::pair(std::make_unique<cuda::device_buffer<std::byte>>(std::move(mask.first)),
+                     mask.second);
   }
 
   template <typename T>
-  std::pair<std::unique_ptr<rmm::device_buffer>, cudf::size_type> operator()(
-    column_view const& input, rmm::cuda_stream_view stream, rmm::device_async_resource_ref mr)
+  std::pair<std::unique_ptr<cuda::device_buffer<std::byte>>, cudf::size_type> operator()(
+    column_view const& input, cuda::stream_ref stream, rmm::device_async_resource_ref mr)
     requires(!std::is_floating_point_v<T>)
   {
     CUDF_FAIL("Input column can't be a non-floating type");
   }
 };
 
-std::pair<std::unique_ptr<rmm::device_buffer>, cudf::size_type> nans_to_nulls(
-  column_view const& input, rmm::cuda_stream_view stream, rmm::device_async_resource_ref mr)
-{
-  CUDF_EXPECTS(cudf::is_floating_point(input.type()),
-               "Input must be a floating point type",
-               std::invalid_argument);
-  if (input.is_empty()) { return std::pair(std::make_unique<rmm::device_buffer>(), 0); }
-
-  return cudf::type_dispatcher(input.type(), dispatch_nan_to_null{}, input, stream, mr);
-}
-
 struct copy_float_data_fn {
   column_view const& input;
-  rmm::cuda_stream_view stream;
+  cuda::stream_ref stream;
   rmm::device_async_resource_ref mr;
 
   template <typename T>
@@ -88,7 +77,7 @@ struct copy_float_data_fn {
 };
 
 std::unique_ptr<column> column_nans_to_nulls(column_view const& input,
-                                             rmm::cuda_stream_view stream,
+                                             cuda::stream_ref stream,
                                              rmm::device_async_resource_ref mr)
 {
   CUDF_EXPECTS(cudf::is_floating_point(input.type()),
@@ -108,15 +97,8 @@ std::unique_ptr<column> column_nans_to_nulls(column_view const& input,
 }
 }  // namespace detail
 
-std::pair<std::unique_ptr<rmm::device_buffer>, cudf::size_type> nans_to_nulls(
-  column_view const& input, rmm::cuda_stream_view stream, rmm::device_async_resource_ref mr)
-{
-  CUDF_FUNC_RANGE();
-  return detail::nans_to_nulls(input, stream, mr);
-}
-
 std::unique_ptr<column> column_nans_to_nulls(column_view const& input,
-                                             rmm::cuda_stream_view stream,
+                                             cuda::stream_ref stream,
                                              rmm::device_async_resource_ref mr)
 {
   CUDF_FUNC_RANGE();

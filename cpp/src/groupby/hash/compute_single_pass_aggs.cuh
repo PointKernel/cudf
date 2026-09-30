@@ -1,5 +1,5 @@
 /*
- * SPDX-FileCopyrightText: Copyright (c) 2024-2026, NVIDIA CORPORATION.
+ * SPDX-FileCopyrightText: Copyright (c) 2024-2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
 
@@ -14,14 +14,16 @@
 #include "output_utils.hpp"
 
 #include <cudf/detail/utilities/cuda.hpp>
+#include <cudf/detail/utilities/cuda_memcpy.hpp>
 #include <cudf/detail/utilities/vector_factories.hpp>
 #include <cudf/table/table_device_view.cuh>
 
-#include <rmm/cuda_stream_view.hpp>
 #include <rmm/device_uvector.hpp>
 #include <rmm/exec_policy.hpp>
 
 #include <cuco/static_set.cuh>
+#include <cuda/iterator>
+#include <cuda/stream>
 #include <thrust/for_each.h>
 
 namespace cudf::groupby::detail::hash {
@@ -30,9 +32,9 @@ template <typename SetType>
 std::pair<rmm::device_uvector<size_type>, bool> compute_single_pass_aggs(
   SetType& global_set,
   bitmask_type const* row_bitmask,
-  host_span<aggregation_request const> requests,
+  std::span<aggregation_request const> requests,
   cudf::detail::result_cache* cache,
-  rmm::cuda_stream_view stream,
+  cuda::stream_ref stream,
   rmm::device_async_resource_ref mr)
 {
   // Collect the single-pass aggregations that can be processed in this function.
@@ -45,7 +47,7 @@ std::pair<rmm::device_uvector<size_type>, bool> compute_single_pass_aggs(
 
   // Performs naive global memory aggregations when the workload is not compatible with shared
   // memory, such as when aggregating dictionary columns, when there is insufficient dynamic
-  // shared memory for shared memory aggregations, or when SUM_WITH_OVERFLOW aggregations are
+  // shared memory for shared memory aggregations, or when SUM_OVERFLOW aggregations are
   // present.
   auto const run_aggs_by_global_mem_kernel = [&] {
     auto [agg_results, unique_key_indices] = compute_global_memory_aggs(
@@ -82,17 +84,18 @@ std::pair<rmm::device_uvector<size_type>, bool> compute_single_pass_aggs(
                                                         stream);
   // Initialize it with a sentinel value, so later we can identify which ones are unused and which
   // ones need to be updated.
-  thrust::uninitialized_fill(rmm::exec_policy_nosync(stream),
-                             global_mapping_indices.begin(),
-                             global_mapping_indices.end(),
-                             cudf::detail::CUDF_SIZE_TYPE_SENTINEL);
+  thrust::uninitialized_fill(
+    rmm::exec_policy_nosync(stream, cudf::get_current_device_resource_ref()),
+    global_mapping_indices.begin(),
+    global_mapping_indices.end(),
+    cudf::detail::CUDF_SIZE_TYPE_SENTINEL);
   // Compute the cardinality (the number of unique keys) encounter by each thread block.
   rmm::device_uvector<size_type> block_cardinality(grid_size, stream);
 
   // Flag indicating whether a global memory aggregation fallback is required or not.
-  rmm::device_scalar<cuda::std::atomic_flag> needs_global_memory_fallback(stream);
+  rmm::device_uvector<cuda::std::atomic_flag> needs_global_memory_fallback(1, stream);
   CUDF_CUDA_TRY(cudaMemsetAsync(
-    needs_global_memory_fallback.data(), 0, sizeof(cuda::std::atomic_flag), stream.value()));
+    needs_global_memory_fallback.data(), 0, sizeof(cuda::std::atomic_flag), stream.get()));
 
   auto set_ref_insert = global_set.ref(cuco::op::insert_and_find);
   compute_mapping_indices(grid_size,
@@ -107,14 +110,13 @@ std::pair<rmm::device_uvector<size_type>, bool> compute_single_pass_aggs(
 
   auto const needs_fallback = [&] {
     cuda::std::atomic_flag h_needs_fallback;
-    // Cannot use `device_scalar::value` as it requires a copy constructor, which
-    // `atomic_flag` doesn't have.
-    CUDF_CUDA_TRY(cudaMemcpyAsync(&h_needs_fallback,
-                                  needs_global_memory_fallback.data(),
-                                  sizeof(cuda::std::atomic_flag),
-                                  cudaMemcpyDefault,
-                                  stream.value()));
-    stream.synchronize();
+    // Cannot use a value-returning helper because atomic_flag is not copy-constructible;
+    // copy the raw bytes back to host instead.
+    CUDF_CUDA_TRY(cudf::detail::memcpy_async(&h_needs_fallback,
+                                             needs_global_memory_fallback.data(),
+                                             sizeof(cuda::std::atomic_flag),
+                                             stream));
+    stream.sync();
     return h_needs_fallback.test(cuda::std::memory_order_relaxed);
   }();
   if (needs_fallback) { return run_aggs_by_global_mem_kernel(); }
@@ -126,8 +128,8 @@ std::pair<rmm::device_uvector<size_type>, bool> compute_single_pass_aggs(
     auto key_transform_map = compute_key_transform_map(
       num_rows, unique_keys, stream, cudf::get_current_device_resource_ref());
     thrust::for_each_n(
-      rmm::exec_policy_nosync(stream),
-      thrust::make_counting_iterator(0),
+      rmm::exec_policy_nosync(stream, cudf::get_current_device_resource_ref()),
+      cuda::counting_iterator<cudf::size_type>{0},
       grid_size * GROUPBY_BLOCK_SIZE,
       [key_transform_map      = key_transform_map.begin(),
        global_mapping_indices = global_mapping_indices.begin()] __device__(auto const idx) {

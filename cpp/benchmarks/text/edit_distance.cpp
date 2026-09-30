@@ -1,9 +1,10 @@
 /*
- * SPDX-FileCopyrightText: Copyright (c) 2023-2025, NVIDIA CORPORATION.
+ * SPDX-FileCopyrightText: Copyright (c) 2023-2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
 
 #include <benchmarks/common/generate_input.hpp>
+#include <benchmarks/common/memory_stats.hpp>
 
 #include <cudf/aggregation.hpp>
 #include <cudf/copying.hpp>
@@ -31,14 +32,17 @@ static void bench_edit_distance_utf8(nvbench::state& state)
   auto sv1    = cudf::strings_column_view(input1.view());
   auto sv2    = cudf::strings_column_view(input2.view());
 
-  state.set_cuda_stream(nvbench::make_cuda_stream_view(cudf::get_default_stream().value()));
+  state.set_cuda_stream(nvbench::make_cuda_stream_view(cudf::get_default_stream().get()));
 
   state.add_global_memory_reads<nvbench::int8_t>(input1.alloc_size() + input2.alloc_size());
   // output are integers (one per row)
   state.add_global_memory_writes<nvbench::int32_t>(num_rows);
 
+  auto const mem_stats_logger = cudf::memory_stats_logger();
   state.exec(nvbench::exec_tag::sync,
              [&](nvbench::launch&) { auto result = nvtext::edit_distance(sv1, sv2); });
+  state.add_buffer_size(
+    mem_stats_logger.peak_memory_usage(), "peak_memory_usage", "peak_memory_usage");
 }
 
 static void bench_edit_distance_ascii(nvbench::state& state)
@@ -94,7 +98,7 @@ static void bench_edit_distance_ascii(nvbench::state& state)
                                   0,
                                   {offsets->view()});
 
-  state.set_cuda_stream(nvbench::make_cuda_stream_view(cudf::get_default_stream().value()));
+  state.set_cuda_stream(nvbench::make_cuda_stream_view(cudf::get_default_stream().get()));
 
   auto sv1          = cudf::strings_column_view(input1);
   auto sv2          = cudf::strings_column_view(input2);
@@ -103,8 +107,11 @@ static void bench_edit_distance_ascii(nvbench::state& state)
   // output are integers (one per row)
   state.add_global_memory_writes<nvbench::int32_t>(num_rows);
 
+  auto const mem_stats_logger = cudf::memory_stats_logger();
   state.exec(nvbench::exec_tag::sync,
              [&](nvbench::launch&) { auto result = nvtext::edit_distance(sv1, sv2); });
+  state.add_buffer_size(
+    mem_stats_logger.peak_memory_usage(), "peak_memory_usage", "peak_memory_usage");
 }
 
 static void bench_edit_distance(nvbench::state& state)

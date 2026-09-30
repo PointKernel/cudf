@@ -1,7 +1,9 @@
 /*
- * SPDX-FileCopyrightText: Copyright (c) 2020-2025, NVIDIA CORPORATION.
+ * SPDX-FileCopyrightText: Copyright (c) 2020-2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
+
+#include "true_if.cuh"
 
 #include <cudf/column/column_device_view.cuh>
 #include <cudf/column/column_factories.hpp>
@@ -13,7 +15,7 @@
 #include <cudf/utilities/memory_resource.hpp>
 #include <cudf/utilities/type_dispatcher.hpp>
 
-#include <rmm/cuda_stream_view.hpp>
+#include <cuda/stream>
 
 namespace cudf {
 namespace detail {
@@ -21,7 +23,7 @@ struct nan_dispatcher {
   template <typename T, typename Predicate>
   std::unique_ptr<column> operator()(cudf::column_view const& input,
                                      Predicate predicate,
-                                     rmm::cuda_stream_view stream,
+                                     cuda::stream_ref stream,
                                      rmm::device_async_resource_ref mr)
     requires(std::is_floating_point_v<T>)
   {
@@ -49,7 +51,7 @@ struct nan_dispatcher {
   template <typename T, typename Predicate>
   std::unique_ptr<column> operator()(cudf::column_view const& input,
                                      Predicate predicate,
-                                     rmm::cuda_stream_view stream,
+                                     cuda::stream_ref stream,
                                      rmm::device_async_resource_ref mr)
     requires(!std::is_floating_point_v<T>)
   {
@@ -58,7 +60,7 @@ struct nan_dispatcher {
 };
 
 std::unique_ptr<column> is_nan(cudf::column_view const& input,
-                               rmm::cuda_stream_view stream,
+                               cuda::stream_ref stream,
                                rmm::device_async_resource_ref mr)
 {
   auto predicate = [] __device__(auto element_validity_pair) {
@@ -69,7 +71,7 @@ std::unique_ptr<column> is_nan(cudf::column_view const& input,
 }
 
 std::unique_ptr<column> is_not_nan(cudf::column_view const& input,
-                                   rmm::cuda_stream_view stream,
+                                   cuda::stream_ref stream,
                                    rmm::device_async_resource_ref mr)
 {
   auto predicate = [] __device__(auto element_validity_pair) {
@@ -82,7 +84,7 @@ std::unique_ptr<column> is_not_nan(cudf::column_view const& input,
 }  // namespace detail
 
 std::unique_ptr<column> is_nan(cudf::column_view const& input,
-                               rmm::cuda_stream_view stream,
+                               cuda::stream_ref stream,
                                rmm::device_async_resource_ref mr)
 {
   CUDF_FUNC_RANGE();
@@ -90,7 +92,7 @@ std::unique_ptr<column> is_nan(cudf::column_view const& input,
 }
 
 std::unique_ptr<column> is_not_nan(cudf::column_view const& input,
-                                   rmm::cuda_stream_view stream,
+                                   cuda::stream_ref stream,
                                    rmm::device_async_resource_ref mr)
 {
   CUDF_FUNC_RANGE();

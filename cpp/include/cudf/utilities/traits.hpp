@@ -1,5 +1,5 @@
 /*
- * SPDX-FileCopyrightText: Copyright (c) 2019-2025, NVIDIA CORPORATION.
+ * SPDX-FileCopyrightText: Copyright (c) 2019-2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
 
@@ -13,12 +13,16 @@
 
 #include <cuda/std/type_traits>
 
+/**
+ * @file
+ * @brief Type traits for classifying and querying properties of cudf column and scalar types.
+ */
+
 namespace CUDF_EXPORT cudf {
 
 /**
  * @addtogroup utility_types
  * @{
- * @file
  */
 
 /// Utility metafunction that maps a sequence of any types to the type void.
@@ -221,7 +225,7 @@ bool is_index_type(data_type type);
  * @return true `T` is signed numeric
  */
 template <typename T>
-constexpr inline bool is_signed()
+CUDF_HOST_DEVICE constexpr inline bool is_signed()
 {
   return cuda::std::is_signed_v<T>;
 }
@@ -281,7 +285,7 @@ CUDF_HOST_DEVICE constexpr inline bool is_signed_iterator()
  * @return false  `T` is not integral
  */
 template <typename T>
-constexpr inline bool is_integral()
+CUDF_HOST_DEVICE constexpr inline bool is_integral()
 {
   return cuda::std::is_integral_v<T>;
 }
@@ -373,8 +377,8 @@ bool is_floating_point(data_type type);
  * @brief Indicates whether `T` is a std::byte type.
  *
  * @tparam T The type to verify
- * @return true `type` is std::byte
- * @return false `type` is not std::byte
+ * @return true `T` is std::byte
+ * @return false `T` is not std::byte
  */
 template <typename T>
 constexpr inline bool is_byte()
@@ -385,9 +389,9 @@ constexpr inline bool is_byte()
 /**
  * @brief Indicates whether `T` is a Boolean type.
  *
- * @param type The `data_type` to verify
- * @return true `type` is Boolean
- * @return false `type` is not Boolean
+ * @tparam T The type to verify
+ * @return true `T` is Boolean
+ * @return false `T` is not Boolean
  */
 template <typename T>
 constexpr inline bool is_boolean()
@@ -531,7 +535,7 @@ constexpr bool is_rep_layout_compatible()
  * @return false  `T` is not dictionary-type
  */
 template <typename T>
-constexpr inline bool is_dictionary()
+CUDF_HOST_DEVICE constexpr inline bool is_dictionary()
 {
   return cuda::std::is_same_v<dictionary32, T>;
 }
@@ -544,6 +548,28 @@ constexpr inline bool is_dictionary()
  * @return false `type` is not a dictionary type
  */
 bool is_dictionary(data_type type);
+
+/**
+ * @brief Indicates whether the type `T` is a valid dictionary key type
+ *
+ * @tparam T  The type to verify
+ * @return true `T` can be a dictionary key type
+ * @return false  `T` cannot be a dictionary key type
+ */
+template <typename T>
+constexpr inline bool is_dictionary_key()
+{
+  return !is_dictionary<T>() && is_relationally_comparable<T, T>();
+}
+
+/**
+ * @brief Indicates whether `type` is a valid dictionary type
+ *
+ * @param type The `data_type` to verify
+ * @return true `type` can be a dictionary key type
+ * @return false `type` cannot be a dictionary type
+ */
+bool is_dictionary_key(data_type type);
 
 /**
  * @brief Indicates whether elements of type `T` are fixed-width.
@@ -616,9 +642,9 @@ bool is_compound(data_type type);
  * can have an arbitrarily deep list of descendants of the same
  * type. Strings are not a nested type, but lists are.
  *
- * @param T The type to verify
- * @return true T is a nested type
- * @return false T is not a nested type
+ * @tparam T The type to verify
+ * @return true `T` is a nested type
+ * @return false `T` is not a nested type
  */
 template <typename T>
 CUDF_HOST_DEVICE constexpr inline bool is_nested()

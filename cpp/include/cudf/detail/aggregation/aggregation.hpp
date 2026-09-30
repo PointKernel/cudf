@@ -1,5 +1,5 @@
 /*
- * SPDX-FileCopyrightText: Copyright (c) 2019-2026, NVIDIA CORPORATION.
+ * SPDX-FileCopyrightText: Copyright (c) 2019-2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
 
@@ -14,11 +14,13 @@
 #include <cudf/utilities/span.hpp>
 #include <cudf/utilities/traits.hpp>
 
+#include <cuda/std/type_traits>
+
 #include <functional>
 #include <numeric>
 #include <utility>
 
-namespace CUDF_EXPORT cudf {
+namespace cudf {
 namespace detail {
 
 /**
@@ -77,15 +79,15 @@ class sum_aggregation final
 };
 
 /**
- * @brief Derived class for specifying a sum_with_overflow aggregation
+ * @brief Derived class for specifying a sum_overflow aggregation
  */
-class sum_with_overflow_aggregation final
-  : public clonable<sum_with_overflow_aggregation>::derived_from<groupby_aggregation,
-                                                                 groupby_scan_aggregation,
-                                                                 reduce_aggregation,
-                                                                 segmented_reduce_aggregation> {
+class sum_overflow_aggregation final
+  : public clonable<sum_overflow_aggregation>::derived_from<groupby_aggregation,
+                                                            groupby_scan_aggregation,
+                                                            reduce_aggregation,
+                                                            segmented_reduce_aggregation> {
  public:
-  sum_with_overflow_aggregation() : aggregation(SUM_WITH_OVERFLOW) {}
+  sum_overflow_aggregation() : aggregation(SUM_OVERFLOW) {}
 };
 
 /**
@@ -136,7 +138,8 @@ class count_aggregation final
   : public clonable<count_aggregation>::derived_from<rolling_aggregation,
                                                      groupby_aggregation,
                                                      groupby_scan_aggregation,
-                                                     reduce_aggregation> {
+                                                     reduce_aggregation,
+                                                     scan_aggregation> {
  public:
   count_aggregation(aggregation::Kind kind) : aggregation(kind) {}
 };
@@ -579,52 +582,6 @@ class lead_lag_aggregation final
 };
 
 /**
- * @brief Derived class for specifying a custom aggregation
- * specified in udf
- */
-class udf_aggregation final : public clonable<udf_aggregation>::derived_from<rolling_aggregation> {
- public:
-  udf_aggregation(aggregation::Kind type,
-                  std::string user_defined_aggregator,
-                  data_type output_type)
-    : aggregation{type},
-      _source{std::move(user_defined_aggregator)},
-      _operator_name{(type == aggregation::PTX) ? "rolling_udf_ptx" : "rolling_udf_cuda"},
-      _function_name{"rolling_udf"},
-      _output_type{output_type}
-  {
-    CUDF_EXPECTS(type == aggregation::PTX or type == aggregation::CUDA,
-                 "udf_aggregation can accept only PTX, CUDA");
-  }
-
-  [[nodiscard]] bool is_equal(aggregation const& _other) const override
-  {
-    if (!this->aggregation::is_equal(_other)) { return false; }
-    auto const& other = dynamic_cast<udf_aggregation const&>(_other);
-    return (_source == other._source and _operator_name == other._operator_name and
-            _function_name == other._function_name and _output_type == other._output_type);
-  }
-
-  [[nodiscard]] size_t do_hash() const override
-  {
-    return this->aggregation::do_hash() ^ hash_impl();
-  }
-
-  std::string const _source;
-  std::string const _operator_name;
-  std::string const _function_name;
-  data_type _output_type;
-
- protected:
-  [[nodiscard]] size_t hash_impl() const
-  {
-    return std::hash<std::string>{}(_source) ^ std::hash<std::string>{}(_operator_name) ^
-           std::hash<std::string>{}(_function_name) ^
-           std::hash<int>{}(static_cast<int32_t>(_output_type.id()));
-  }
-};
-
-/**
  * @brief Derived class for specifying host-based UDF aggregation.
  */
 class host_udf_aggregation final : public groupby_aggregation,
@@ -974,13 +931,21 @@ struct target_type_impl<Source,
   using type = Source;
 };
 
-// SUM_WITH_OVERFLOW outputs a struct {sum: Source, overflow: bool} where sum type matches input
-// type, only supports signed integral types (excluding bool) and decimal types
+/**
+ * @brief Whether `Source` is a valid input type for the SUM_OVERFLOW aggregation.
+ *
+ * Supports signed integral types (excluding bool) and fixed-point (decimal) types.
+ */
 template <typename Source>
-  requires((cudf::is_integral_not_bool<Source>() && cudf::is_signed<Source>()) ||
-           cudf::is_fixed_point<Source>())
-struct target_type_impl<Source, aggregation::SUM_WITH_OVERFLOW> {
-  using type = struct_view;  // SUM_WITH_OVERFLOW outputs a struct with sum and overflow fields
+concept sum_overflow_supported =
+  (cudf::is_integral_not_bool<Source>() && cudf::is_signed<Source>()) ||
+  cudf::is_fixed_point<Source>();
+
+// SUM_OVERFLOW outputs a struct {sum: Source, overflow: bool} where the sum matches the input
+// type
+template <sum_overflow_supported Source>
+struct target_type_impl<Source, aggregation::SUM_OVERFLOW> {
+  using type = struct_view;  // SUM_OVERFLOW outputs a struct with sum and overflow fields
 };
 
 // Always use `double` for M2
@@ -1185,8 +1150,8 @@ CUDF_HOST_DEVICE inline decltype(auto) aggregation_dispatcher(aggregation::Kind 
   switch (k) {
     case aggregation::SUM:
       return f.template operator()<aggregation::SUM>(std::forward<Ts>(args)...);
-    case aggregation::SUM_WITH_OVERFLOW:
-      return f.template operator()<aggregation::SUM_WITH_OVERFLOW>(std::forward<Ts>(args)...);
+    case aggregation::SUM_OVERFLOW:
+      return f.template operator()<aggregation::SUM_OVERFLOW>(std::forward<Ts>(args)...);
     case aggregation::PRODUCT:
       return f.template operator()<aggregation::PRODUCT>(std::forward<Ts>(args)...);
     case aggregation::MIN:
@@ -1340,9 +1305,9 @@ data_type target_type(data_type source_type, aggregation::Kind k);
  * @tparam k The aggregation to perform
  */
 template <typename Source, aggregation::Kind k>
-constexpr inline bool is_valid_aggregation()
+CUDF_HOST_DEVICE constexpr inline bool is_valid_aggregation()
 {
-  return (not std::is_void_v<target_type_t<Source, k>>);
+  return (not cuda::std::is_void_v<target_type_t<Source, k>>);
 }
 
 /**
@@ -1371,7 +1336,7 @@ bool is_valid_aggregation(data_type source, aggregation::Kind k);
  */
 void initialize_with_identity(mutable_table_view const& table,
                               host_span<cudf::aggregation::Kind const> aggs,
-                              rmm::cuda_stream_view stream);
+                              cuda::stream_ref stream);
 
 }  // namespace detail
-}  // namespace CUDF_EXPORT cudf
+}  // namespace cudf

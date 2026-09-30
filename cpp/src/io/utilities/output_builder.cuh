@@ -1,5 +1,5 @@
 /*
- * SPDX-FileCopyrightText: Copyright (c) 2022-2025, NVIDIA CORPORATION.
+ * SPDX-FileCopyrightText: Copyright (c) 2022-2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
 
@@ -10,10 +10,10 @@
 #include <cudf/utilities/memory_resource.hpp>
 #include <cudf/utilities/span.hpp>
 
-#include <rmm/cuda_stream_view.hpp>
 #include <rmm/exec_policy.hpp>
-#include <rmm/mr/device_memory_resource.hpp>
+#include <rmm/resource_ref.hpp>
 
+#include <cuda/stream>
 #include <thrust/copy.h>
 
 #include <iterator>
@@ -45,25 +45,29 @@ class split_device_span {
 
   split_device_span() = default;
 
-  explicit constexpr split_device_span(device_span<T> head, device_span<T> tail = {})
+  explicit CUDF_HOST_DEVICE constexpr split_device_span(device_span<T> head,
+                                                        device_span<T> tail = {})
     : _head{head}, _tail{tail}
   {
   }
 
-  [[nodiscard]] __device__ constexpr reference operator[](size_type i) const
+  [[nodiscard]] CUDF_HOST_DEVICE constexpr reference operator[](size_type i) const
   {
     return i < _head.size() ? _head[i] : _tail[i - _head.size()];
   }
 
-  [[nodiscard]] constexpr size_type size() const { return _head.size() + _tail.size(); }
+  [[nodiscard]] CUDF_HOST_DEVICE constexpr size_type size() const
+  {
+    return _head.size() + _tail.size();
+  }
 
-  [[nodiscard]] constexpr device_span<T> head() const { return _head; }
+  [[nodiscard]] CUDF_HOST_DEVICE constexpr device_span<T> head() const { return _head; }
 
-  [[nodiscard]] constexpr device_span<T> tail() const { return _tail; }
+  [[nodiscard]] CUDF_HOST_DEVICE constexpr device_span<T> tail() const { return _tail; }
 
-  [[nodiscard]] constexpr iterator begin() const;
+  [[nodiscard]] CUDF_HOST_DEVICE constexpr iterator begin() const;
 
-  [[nodiscard]] constexpr iterator end() const;
+  [[nodiscard]] CUDF_HOST_DEVICE constexpr iterator end() const;
 
  private:
   device_span<T> _head;
@@ -89,68 +93,78 @@ class split_device_span_iterator {
 
   split_device_span_iterator() = default;
 
-  constexpr split_device_span_iterator(split_device_span<T> span, size_type offset)
+  CUDF_HOST_DEVICE constexpr split_device_span_iterator(split_device_span<T> span, size_type offset)
     : _span{span}, _offset{offset}
   {
   }
 
-  [[nodiscard]] constexpr reference operator*() const { return _span[_offset]; }
+  [[nodiscard]] CUDF_HOST_DEVICE constexpr reference operator*() const { return _span[_offset]; }
 
-  [[nodiscard]] constexpr reference operator[](size_type i) const { return _span[_offset + i]; }
+  [[nodiscard]] CUDF_HOST_DEVICE constexpr reference operator[](size_type i) const
+  {
+    return _span[_offset + i];
+  }
 
-  [[nodiscard]] constexpr friend bool operator==(it const& lhs, it const& rhs)
+  [[nodiscard]] CUDF_HOST_DEVICE constexpr friend bool operator==(it const& lhs, it const& rhs)
   {
     return lhs._offset == rhs._offset;
   }
 
-  [[nodiscard]] constexpr friend bool operator!=(it const& lhs, it const& rhs)
+  [[nodiscard]] CUDF_HOST_DEVICE constexpr friend bool operator!=(it const& lhs, it const& rhs)
   {
     return !(lhs == rhs);
   }
-  [[nodiscard]] constexpr friend bool operator<(it const& lhs, it const& rhs)
+  [[nodiscard]] CUDF_HOST_DEVICE constexpr friend bool operator<(it const& lhs, it const& rhs)
   {
     return lhs._offset < rhs._offset;
   }
 
-  [[nodiscard]] constexpr friend bool operator>=(it const& lhs, it const& rhs)
+  [[nodiscard]] CUDF_HOST_DEVICE constexpr friend bool operator>=(it const& lhs, it const& rhs)
   {
     return !(lhs < rhs);
   }
 
-  [[nodiscard]] constexpr friend bool operator>(it const& lhs, it const& rhs) { return rhs < lhs; }
+  [[nodiscard]] CUDF_HOST_DEVICE constexpr friend bool operator>(it const& lhs, it const& rhs)
+  {
+    return rhs < lhs;
+  }
 
-  [[nodiscard]] constexpr friend bool operator<=(it const& lhs, it const& rhs)
+  [[nodiscard]] CUDF_HOST_DEVICE constexpr friend bool operator<=(it const& lhs, it const& rhs)
   {
     return !(lhs > rhs);
   }
 
-  [[nodiscard]] constexpr friend difference_type operator-(it const& lhs, it const& rhs)
+  [[nodiscard]] CUDF_HOST_DEVICE constexpr friend difference_type operator-(it const& lhs,
+                                                                            it const& rhs)
   {
     return lhs._offset - rhs._offset;
   }
 
-  [[nodiscard]] constexpr friend it operator+(it lhs, difference_type i) { return lhs += i; }
+  [[nodiscard]] CUDF_HOST_DEVICE constexpr friend it operator+(it lhs, difference_type i)
+  {
+    return lhs += i;
+  }
 
-  constexpr it& operator+=(difference_type i)
+  CUDF_HOST_DEVICE constexpr it& operator+=(difference_type i)
   {
     _offset += i;
     return *this;
   }
 
-  constexpr it& operator-=(difference_type i) { return *this += -i; }
+  CUDF_HOST_DEVICE constexpr it& operator-=(difference_type i) { return *this += -i; }
 
-  constexpr it& operator++() { return *this += 1; }
+  CUDF_HOST_DEVICE constexpr it& operator++() { return *this += 1; }
 
-  constexpr it& operator--() { return *this -= 1; }
+  CUDF_HOST_DEVICE constexpr it& operator--() { return *this -= 1; }
 
-  constexpr it operator++(int)
+  CUDF_HOST_DEVICE constexpr it operator++(int)
   {
     auto result = *this;
     ++*this;
     return result;
   }
 
-  constexpr it operator--(int)
+  CUDF_HOST_DEVICE constexpr it operator--(int)
   {
     auto result = *this;
     --*this;
@@ -163,13 +177,15 @@ class split_device_span_iterator {
 };
 
 template <typename T>
-[[nodiscard]] constexpr split_device_span_iterator<T> split_device_span<T>::begin() const
+[[nodiscard]] CUDF_HOST_DEVICE constexpr split_device_span_iterator<T> split_device_span<T>::begin()
+  const
 {
   return {*this, 0};
 }
 
 template <typename T>
-[[nodiscard]] constexpr split_device_span_iterator<T> split_device_span<T>::end() const
+[[nodiscard]] CUDF_HOST_DEVICE constexpr split_device_span_iterator<T> split_device_span<T>::end()
+  const
 {
   return {*this, size()};
 }
@@ -192,12 +208,13 @@ class output_builder {
    *
    * @param max_write_size the maximum number of elements that will be written into a
    *                       split_device_span returned from `next_output`.
+   * @param max_growth Maximum growth factor for the internal buffer
    * @param stream the stream used to allocate the first chunk of memory.
    * @param mr optional, the memory resource to use for allocation.
    */
   output_builder(size_type max_write_size,
                  size_type max_growth,
-                 rmm::cuda_stream_view stream,
+                 cuda::stream_ref stream,
                  rmm::device_async_resource_ref mr = cudf::get_current_device_resource_ref())
     : _max_write_size{max_write_size}, _max_growth{max_growth}
   {
@@ -220,7 +237,7 @@ class output_builder {
    * @return A `split_device_span` starting directly after the last output and providing at least
    *         `max_write_size` entries of storage.
    */
-  [[nodiscard]] split_device_span<T> next_output(rmm::cuda_stream_view stream)
+  [[nodiscard]] split_device_span<T> next_output(cuda::stream_ref stream)
   {
     auto head_it   = _chunks.end() - (_chunks.size() > 1 and _chunks.back().is_empty() ? 2 : 1);
     auto head_span = get_free_span(*head_it);
@@ -247,7 +264,7 @@ class output_builder {
    *               reallocate, this only changes the stream of the internally stored vectors,
    *               impacting their subsequent copy and destruction behavior.
    */
-  void advance_output(size_type actual_size, rmm::cuda_stream_view stream)
+  void advance_output(size_type actual_size, cuda::stream_ref stream)
   {
     CUDF_EXPECTS(actual_size <= _max_write_size, "Internal error");
     if (_chunks.size() < 2) {
@@ -270,7 +287,7 @@ class output_builder {
    * @param stream The stream used to access the element.
    * @return The first element that was written to the output.
    */
-  [[nodiscard]] T front_element(rmm::cuda_stream_view stream) const
+  [[nodiscard]] T front_element(cuda::stream_ref stream) const
   {
     return _chunks.front().front_element(stream);
   }
@@ -281,7 +298,7 @@ class output_builder {
    * @param stream The stream used to access the element.
    * @return The last element that was written to the output.
    */
-  [[nodiscard]] T back_element(rmm::cuda_stream_view stream) const
+  [[nodiscard]] T back_element(cuda::stream_ref stream) const
   {
 #if defined(__GNUC__) && (__GNUC__ >= 14)
 #pragma GCC diagnostic push
@@ -305,14 +322,17 @@ class output_builder {
    * @param mr The memory resource used to allocate the output vector.
    * @return The output vector.
    */
-  [[nodiscard]] rmm::device_uvector<T> gather(rmm::cuda_stream_view stream,
+  [[nodiscard]] rmm::device_uvector<T> gather(cuda::stream_ref stream,
                                               rmm::device_async_resource_ref mr) const
   {
     rmm::device_uvector<T> output{size(), stream, mr};
     auto output_it = output.begin();
     for (auto const& chunk : _chunks) {
-      output_it = thrust::copy(
-        rmm::exec_policy_nosync(stream), chunk.begin(), chunk.begin() + chunk.size(), output_it);
+      output_it =
+        thrust::copy(rmm::exec_policy_nosync(stream, cudf::get_current_device_resource_ref()),
+                     chunk.begin(),
+                     chunk.begin() + chunk.size(),
+                     output_it);
     }
     return output;
   }
@@ -329,7 +349,7 @@ class output_builder {
    */
   static void inplace_resize(rmm::device_uvector<T>& vector,
                              size_type new_size,
-                             rmm::cuda_stream_view stream)
+                             cuda::stream_ref stream)
   {
     CUDF_EXPECTS(new_size <= vector.capacity(), "Internal error");
     vector.resize(new_size, stream);

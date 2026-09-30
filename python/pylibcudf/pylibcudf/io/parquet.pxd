@@ -1,4 +1,4 @@
-# SPDX-FileCopyrightText: Copyright (c) 2024-2026, NVIDIA CORPORATION.
+# SPDX-FileCopyrightText: Copyright (c) 2024-2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 from libc.stdint cimport int64_t, uint8_t
 
@@ -6,10 +6,11 @@ from libcpp cimport bool
 from libcpp.memory cimport unique_ptr
 from libcpp.vector cimport vector
 
-from rmm.pylibrmm.stream cimport Stream
 from rmm.pylibrmm.memory_resource cimport DeviceMemoryResource
+from rmm.pylibrmm.stream cimport Stream
 
 from pylibcudf.expressions cimport Expression
+from pylibcudf.io.parquet_metadata cimport FileMetaData
 
 from pylibcudf.io.types cimport (
     compression_type,
@@ -32,7 +33,7 @@ from pylibcudf.libcudf.io.parquet cimport (
     chunked_parquet_writer_options_builder,
 )
 
-from pylibcudf.libcudf.types cimport size_type
+from pylibcudf.libcudf.types cimport size_type, type_id
 
 from pylibcudf.table cimport Table
 
@@ -48,9 +49,14 @@ cdef class ParquetReaderOptions:
     cpdef void set_columns(self, list col_names)
     cpdef void set_column_names(self, list col_names)
     cpdef void set_column_indices(self, list col_indices)
+    cpdef void set_column_field_ids(self, list column_field_ids)
     cpdef void set_filter(self, Expression filter)
     cpdef void set_source(self, SourceInfo src)
     cpdef bool is_enabled_use_jit_filter(self)
+    cpdef bool is_enabled_case_sensitive_names(self)
+    cpdef void enable_case_sensitive_names(self, bool val)
+    cpdef bool is_enabled_prepend_source_index_column(self)
+    cpdef void enable_prepend_source_index_column(self, bool val)
 
 
 cdef class ParquetReaderOptionsBuilder:
@@ -65,12 +71,16 @@ cdef class ParquetReaderOptionsBuilder:
     cpdef ParquetReaderOptionsBuilder columns(self, list col_names)
     cpdef ParquetReaderOptionsBuilder column_names(self, list col_names)
     cpdef ParquetReaderOptionsBuilder column_indices(self, list col_indices)
+    cpdef ParquetReaderOptionsBuilder column_field_ids(self, list column_field_ids)
     cpdef ParquetReaderOptionsBuilder use_jit_filter(self, bool use_jit_filter)
-    cpdef build(self)
+    cpdef ParquetReaderOptionsBuilder case_sensitive_names(self, bool val)
+    cpdef ParquetReaderOptionsBuilder prepend_source_index_column(self, bool val)
+    cpdef ParquetReaderOptionsBuilder decimal_width(self, type_id width)
+    cpdef ParquetReaderOptions build(self)
 
 
 cdef class ChunkedParquetReader:
-    cdef readonly Stream stream
+    cdef Stream _stream
     cdef DeviceMemoryResource mr
     cdef unique_ptr[cpp_chunked_parquet_reader] reader
 
@@ -78,8 +88,11 @@ cdef class ChunkedParquetReader:
     cpdef TableWithMetadata read_chunk(self, DeviceMemoryResource mr=*)
 
 
-cpdef read_parquet(
-    ParquetReaderOptions options, Stream stream = *, DeviceMemoryResource mr=*
+cpdef TableWithMetadata read_parquet(
+    ParquetReaderOptions options,
+    object stream = *,
+    DeviceMemoryResource mr=*,
+    object parquet_metadatas=*,
 )
 
 
@@ -176,7 +189,7 @@ cdef class ParquetWriterOptionsBuilder:
 
     cpdef ParquetWriterOptions build(self)
 
-cpdef memoryview write_parquet(ParquetWriterOptions options, Stream stream = *)
+cpdef memoryview write_parquet(ParquetWriterOptions options, object stream = *)
 
 cpdef bool is_supported_read_parquet(compression_type compression)
 

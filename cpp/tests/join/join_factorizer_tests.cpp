@@ -1,5 +1,5 @@
 /*
- * SPDX-FileCopyrightText: Copyright (c) 2026, NVIDIA CORPORATION.
+ * SPDX-FileCopyrightText: Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
 
@@ -19,6 +19,8 @@
 #include <cudf/types.hpp>
 #include <cudf/utilities/default_stream.hpp>
 #include <cudf/utilities/span.hpp>
+
+#include <rmm/mr/statistics_resource_adaptor.hpp>
 
 #include <algorithm>
 #include <set>
@@ -43,7 +45,7 @@ struct JoinFactorizerTest : public cudf::test::BaseFixture {
   void verify_equal_keys_have_equal_ids(cudf::table_view const& keys, cudf::column_view const& ids)
   {
     // Sort the keys+ids together by keys, then verify adjacent equal keys have equal ids
-    // Create a table with keys + id column for sorting
+    // Right a table with keys + id column for sorting
     std::vector<cudf::column_view> all_cols;
     for (int i = 0; i < keys.num_columns(); ++i) {
       all_cols.push_back(keys.column(i));
@@ -608,8 +610,8 @@ TEST_F(JoinFactorizerTest, FloatWithNulls)
   // Distinct: 1.5, 2.5 = 2 (null skipped)
   EXPECT_EQ(remap_unequal.distinct_count(), 2);
 
-  auto build_result_unequal = remap_unequal.factorize_right_keys();
-  auto host_ids_unequal     = to_host<int32_t>(*build_result_unequal);
+  auto right_result_unequal = remap_unequal.factorize_right_keys();
+  auto host_ids_unequal     = to_host<int32_t>(*right_result_unequal);
 
   // Null row should get BUILD_NULL sentinel
   EXPECT_EQ(host_ids_unequal[2], cudf::FACTORIZE_RIGHT_NULL);
@@ -642,8 +644,8 @@ TEST_F(JoinFactorizerTest, DoubleWithNulls)
   // Distinct: 1.0, 2.0 = 2 (null skipped)
   EXPECT_EQ(remap_unequal.distinct_count(), 2);
 
-  auto build_result_unequal = remap_unequal.factorize_right_keys();
-  auto host_ids_unequal     = to_host<int32_t>(*build_result_unequal);
+  auto right_result_unequal = remap_unequal.factorize_right_keys();
+  auto host_ids_unequal     = to_host<int32_t>(*right_result_unequal);
 
   // Null row should get BUILD_NULL sentinel
   EXPECT_EQ(host_ids_unequal[2], cudf::FACTORIZE_RIGHT_NULL);
@@ -739,14 +741,38 @@ TEST_F(JoinFactorizerTest, EmptyLeftSchemaMismatchColumnCount)
   EXPECT_THROW((void)remap.factorize_left_keys(left_table), std::invalid_argument);
 }
 
-// Tests for optional statistics computation
+// Tests for optional metrics computation
 
-TEST_F(JoinFactorizerTest, StatisticsEnabled)
+TEST_F(JoinFactorizerTest, MemoryResource)
+{
+  column_wrapper<int32_t> right_col{1, 2, 2, 3};
+  auto right_table = cudf::table_view{{right_col}};
+
+  auto mr = rmm::mr::statistics_resource_adaptor(cudf::get_current_device_resource_ref());
+
+  cudf::join_factorizer remap{right_table,
+                              cudf::null_equality::EQUAL,
+                              cudf::join_statistics::COMPUTE,
+                              cudf::get_default_stream(),
+                              mr};
+
+  EXPECT_GT(mr.get_bytes_counter().peak, 0);
+
+  auto result = remap.factorize_right_keys();
+  auto ids    = to_host<int32_t>(result->view());
+
+  ASSERT_EQ(ids.size(), 4);
+  EXPECT_EQ(ids[1], ids[2]);
+  EXPECT_NE(ids[0], ids[1]);
+  EXPECT_NE(ids[1], ids[3]);
+}
+
+TEST_F(JoinFactorizerTest, MetricsEnabled)
 {
   column_wrapper<int32_t> right_col{1, 2, 2, 3, 3, 3};
   auto right_table = cudf::table_view{{right_col}};
 
-  // Default: statistics enabled
+  // Default: metrics enabled
   cudf::join_factorizer remap{right_table};
 
   EXPECT_TRUE(remap.has_statistics());
@@ -754,12 +780,12 @@ TEST_F(JoinFactorizerTest, StatisticsEnabled)
   EXPECT_EQ(remap.max_multiplicity(), 3);
 }
 
-TEST_F(JoinFactorizerTest, StatisticsDisabled)
+TEST_F(JoinFactorizerTest, MetricsDisabled)
 {
   column_wrapper<int32_t> right_col{1, 2, 2, 3, 3, 3};
   auto right_table = cudf::table_view{{right_col}};
 
-  // Explicitly disable statistics
+  // Explicitly disable metrics
   cudf::join_factorizer remap{right_table, cudf::null_equality::EQUAL, cudf::join_statistics::SKIP};
 
   EXPECT_FALSE(remap.has_statistics());
@@ -767,12 +793,12 @@ TEST_F(JoinFactorizerTest, StatisticsDisabled)
   EXPECT_THROW((void)remap.max_multiplicity(), cudf::logic_error);
 }
 
-TEST_F(JoinFactorizerTest, StatisticsDisabledRemapStillWorks)
+TEST_F(JoinFactorizerTest, MetricsDisabledRemapStillWorks)
 {
   column_wrapper<int32_t> right_col{10, 20, 20, 30};
   auto right_table = cudf::table_view{{right_col}};
 
-  // Disable statistics but remapping should still work
+  // Disable metrics but remapping should still work
   cudf::join_factorizer remap{right_table, cudf::null_equality::EQUAL, cudf::join_statistics::SKIP};
 
   // Remap right keys

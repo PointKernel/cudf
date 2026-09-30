@@ -1,38 +1,39 @@
-# SPDX-FileCopyrightText: Copyright (c) 2025-2026, NVIDIA CORPORATION & AFFILIATES.
+# SPDX-FileCopyrightText: Copyright (c) 2025-2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
 """Utilities for tracing and monitoring IR execution."""
 
 from __future__ import annotations
 
+import contextlib
 import enum
 import functools
 import os
 import time
-from typing import TYPE_CHECKING, Any, Concatenate, Literal
+from typing import TYPE_CHECKING, Any, Concatenate, Literal, ParamSpec
 
 import nvtx
 import pynvml
-from typing_extensions import ParamSpec
 
 import rmm
 import rmm.statistics
 
 from cudf_polars.utils.config import _bool_converter, get_device_handle
 
-try:
+try:  # pragma: no cover; requires structlog
     import structlog
-except ImportError:
+except ImportError:  # pragma: no cover; requires no structlog
     _HAS_STRUCTLOG = False
-else:
+else:  # pragma: no cover; requires structlog
     _HAS_STRUCTLOG = True
 
 
 LOG_TRACES = _HAS_STRUCTLOG and _bool_converter(
     os.environ.get("CUDF_POLARS_LOG_TRACES", "0")
 )
+# memory tracing is expensive, and so disabled by default.
 LOG_MEMORY = LOG_TRACES and _bool_converter(
-    os.environ.get("CUDF_POLARS_LOG_TRACES_MEMORY", "1")
+    os.environ.get("CUDF_POLARS_LOG_TRACES_MEMORY", "0")
 )
 LOG_DATAFRAMES = LOG_TRACES and _bool_converter(
     os.environ.get("CUDF_POLARS_LOG_TRACES_DATAFRAMES", "1")
@@ -45,17 +46,19 @@ nvtx_annotate_cudf_polars = functools.partial(
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Sequence
+    from collections.abc import Callable, Generator, Sequence
 
     import cudf_polars.containers
     from cudf_polars.dsl import ir
+    from cudf_polars.dsl.ir import IRExecutionContext
 
 
-class Scope(str, enum.Enum):
+class Scope(enum.StrEnum):
     """Scope values for structured logging."""
 
     PLAN = "plan"
     ACTOR = "actor"
+    IO_TASK = "io_task"
     EVALUATE_IR_NODE = "evaluate_ir_node"
 
 
@@ -161,6 +164,10 @@ def log_do_evaluate(
     if not LOG_TRACES:
         return func
     else:  # pragma: no cover; requires CUDF_POLARS_LOG_TRACES=1
+        # do this just once
+        pynvml.nvmlInit()
+        maybe_handle = get_device_handle()
+        pid = _getpid()
 
         @functools.wraps(func)
         def wrapper(
@@ -168,10 +175,8 @@ def log_do_evaluate(
             *args: P.args,
             **kwargs: P.kwargs,
         ) -> cudf_polars.containers.DataFrame:
-            # do this just once
-            pynvml.nvmlInit()
-            maybe_handle = get_device_handle()
-            pid = _getpid()
+            from cudf_polars.quent._types import Task
+
             log = structlog.get_logger()
 
             # By convention, all non-dataframe arguments (non-child) come first.
@@ -179,6 +184,23 @@ def log_do_evaluate(
             frames: list[cudf_polars.containers.DataFrame] = (
                 list(args) + [v for k, v in kwargs.items() if k != "context"]
             )[cls._n_non_child_args :]  # type: ignore[assignment]
+
+            # And the kwonly 'context' argument has the IR execution context.
+            ir_execution_context: IRExecutionContext = kwargs["context"]  # type: ignore[assignment]
+
+            if ir_execution_context.quent_ir_execution_context is not None:
+                quent_task = Task.from_ir(
+                    cls, ir_execution_context.quent_ir_execution_context
+                )
+                ir_execution_context.quent_ir_execution_context.context._emit_task_begin_events(
+                    cls,
+                    quent_task,
+                    ir_execution_context.quent_ir_execution_context,
+                    input_frames_bytes=sum(frame._size_bytes for frame in frames),
+                )
+
+            else:
+                quent_task = None
 
             before_start = time.monotonic_ns()
             before = make_snapshot(
@@ -191,8 +213,26 @@ def log_do_evaluate(
             # argument, followed by the method-specific arguments, and returns a DataFrame.
 
             start = time.monotonic_ns()
-            result = func(cls, *args, **kwargs)
+            try:
+                result = func(cls, *args, **kwargs)
+            except Exception:  # pragma: no cover;
+                result = None
+                raise
+            finally:
+                if (
+                    quent_task is not None
+                    and ir_execution_context.quent_ir_execution_context is not None
+                ):
+                    # TODO: This should emit some Chunk-level statistics (duration, rows, bytes, schema, etc.)
+                    ir_execution_context.quent_ir_execution_context.context._emit_task_end_events(
+                        cls,
+                        quent_task,
+                        ir_execution_context.quent_ir_execution_context,
+                        result,
+                    )
             stop = time.monotonic_ns()
+
+            assert result is not None
 
             after_start = time.monotonic_ns()
             after = make_snapshot(
@@ -218,3 +258,20 @@ def log_do_evaluate(
             return result
 
         return wrapper
+
+
+@contextlib.contextmanager
+def bound_contextvars(**kwargs: Any) -> Generator[None, None, None]:
+    """Wrapper around structlog.contextvars.bound_contextvars."""
+    if LOG_TRACES:  # pragma: no cover; requires CUDF_POLARS_LOG_TRACES=1
+        with structlog.contextvars.bound_contextvars(**kwargs):
+            yield
+    else:
+        yield
+
+
+def log(message: str, **kwargs: Any) -> None:
+    """Wrapper around structlog.get_logger().info."""
+    if LOG_TRACES:  # pragma: no cover; requires CUDF_POLARS_LOG_TRACES=1
+        log = structlog.get_logger()
+        log.info(message, **kwargs)

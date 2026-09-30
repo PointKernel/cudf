@@ -1,5 +1,5 @@
 /*
- * SPDX-FileCopyrightText: Copyright (c) 2021-2026, NVIDIA CORPORATION.
+ * SPDX-FileCopyrightText: Copyright (c) 2021-2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
 
@@ -7,18 +7,50 @@
 
 #include <cudf_test/base_fixture.hpp>
 #include <cudf_test/column_wrapper.hpp>
+#include <cudf_test/iterator_utilities.hpp>
 #include <cudf_test/table_utilities.hpp>
 
 #include <cudf/contiguous_split.hpp>
 #include <cudf/copying.hpp>
 
+// Size of the serialized table header that precedes the column entries in the
+// packed metadata buffer: version + num_columns + num_rows + pad, four 4-byte fields.
+// Must match `serialized_table_header` in cpp/src/copying/pack.cpp.
+auto constexpr metadata_header_size = 4 * sizeof(cudf::size_type);
+
 struct PackUnpackTest : public cudf::test::BaseFixture {
+  void verify_column_metadata(cudf::column_view const& col,
+                              cudf::packed_metadata_view::column_view const& meta)
+  {
+    EXPECT_EQ(meta.type(), col.type());
+    EXPECT_EQ(meta.num_rows(), col.size());
+    EXPECT_EQ(meta.null_count(), col.null_count());
+    EXPECT_EQ(meta.num_children(), col.num_children());
+    for (cudf::size_type i = 0; i < col.num_children(); i++) {
+      verify_column_metadata(col.child(i), meta.child(i));
+    }
+  }
+
+  void verify_metadata(cudf::table_view const& t, cudf::packed_columns const& packed)
+  {
+    auto view = cudf::packed_metadata_view(*packed.metadata);
+    EXPECT_EQ(view.num_columns(), t.num_columns());
+    EXPECT_EQ(view.num_rows(), t.num_rows());
+    for (cudf::size_type i = 0; i < t.num_columns(); i++) {
+      verify_column_metadata(t.column(i), view.column(i));
+    }
+  }
+
   void run_test(cudf::table_view const& t)
   {
     // verify pack/unpack works
     auto packed   = cudf::pack(t);
     auto unpacked = cudf::unpack(packed);
     CUDF_TEST_EXPECT_TABLES_EQUAL(t, unpacked);
+
+    // verify packed_metadata_view matches the unpacked table (which reflects
+    // the compacted sizes stored in the packed metadata, not the original sliced sizes)
+    verify_metadata(unpacked, packed);
 
     // verify packed_size returns the correct size
     EXPECT_EQ(cudf::packed_size(t), packed.gpu_data->size());
@@ -105,8 +137,7 @@ std::vector<std::unique_ptr<cudf::column>> generate_lists(bool include_validity)
   using LCW = cudf::test::lists_column_wrapper<int>;
 
   if (include_validity) {
-    auto valids =
-      cudf::detail::make_counting_transform_iterator(0, [](auto i) { return i % 2 == 0; });
+    auto valids = cudf::test::iterators::valids_at_multiples_of(2);
     cudf::test::lists_column_wrapper<int> list0{{1, 2, 3},
                                                 {4, 5},
                                                 {6},
@@ -414,8 +445,11 @@ TEST_F(PackUnpackTest, NestedEmpty)
   {
     auto empty_string = cudf::make_empty_column(cudf::data_type{cudf::type_id::STRING});
     auto offsets      = cudf::test::fixed_width_column_wrapper<int>({0, 0});
-    auto list         = cudf::make_lists_column(
-      1, offsets.release(), std::move(empty_string), 0, rmm::device_buffer{});
+    auto list         = cudf::make_lists_column(1,
+                                        offsets.release(),
+                                        std::move(empty_string),
+                                        0,
+                                        cudf::create_null_mask(0, cudf::mask_state::UNALLOCATED));
 
     cudf::table_view src_table({static_cast<cudf::column_view>(*list)});
     this->run_test(src_table);
@@ -427,8 +461,11 @@ TEST_F(PackUnpackTest, NestedEmpty)
     cudf::test::strings_column_wrapper str{"abc"};
     auto empty_string = cudf::empty_like(str);
     auto offsets      = cudf::test::fixed_width_column_wrapper<int>({0, 0});
-    auto list         = cudf::make_lists_column(
-      1, offsets.release(), std::move(empty_string), 0, rmm::device_buffer{});
+    auto list         = cudf::make_lists_column(1,
+                                        offsets.release(),
+                                        std::move(empty_string),
+                                        0,
+                                        cudf::create_null_mask(0, cudf::mask_state::UNALLOCATED));
 
     cudf::table_view src_table({static_cast<cudf::column_view>(*list)});
     this->run_test(src_table);
@@ -440,8 +477,11 @@ TEST_F(PackUnpackTest, NestedEmpty)
     cudf::test::lists_column_wrapper<float> listw{{1.0f, 2.0f}, {3.0f, 4.0f}};
     auto empty_list = cudf::empty_like(listw);
     auto offsets    = cudf::test::fixed_width_column_wrapper<int>({0, 0});
-    auto list =
-      cudf::make_lists_column(1, offsets.release(), std::move(empty_list), 0, rmm::device_buffer{});
+    auto list       = cudf::make_lists_column(1,
+                                        offsets.release(),
+                                        std::move(empty_list),
+                                        0,
+                                        cudf::create_null_mask(0, cudf::mask_state::UNALLOCATED));
 
     cudf::table_view src_table({static_cast<cudf::column_view>(*list)});
     this->run_test(src_table);
@@ -453,8 +493,11 @@ TEST_F(PackUnpackTest, NestedEmpty)
     cudf::test::lists_column_wrapper<float> listw{{1.0f, 2.0f}, {3.0f, 4.0f}};
     auto empty_list = cudf::empty_like(listw);
     auto offsets    = cudf::test::fixed_width_column_wrapper<int>({0, 0});
-    auto list =
-      cudf::make_lists_column(1, offsets.release(), std::move(empty_list), 0, rmm::device_buffer{});
+    auto list       = cudf::make_lists_column(1,
+                                        offsets.release(),
+                                        std::move(empty_list),
+                                        0,
+                                        cudf::create_null_mask(0, cudf::mask_state::UNALLOCATED));
 
     cudf::table_view src_table({static_cast<cudf::column_view>(*list)});
     this->run_test(src_table);
@@ -468,8 +511,11 @@ TEST_F(PackUnpackTest, NestedEmpty)
     auto struct_column = cudf::test::structs_column_wrapper({ints, floats});
     auto empty_struct  = cudf::empty_like(struct_column);
     auto offsets       = cudf::test::fixed_width_column_wrapper<int>({0, 0});
-    auto list          = cudf::make_lists_column(
-      1, offsets.release(), std::move(empty_struct), 0, rmm::device_buffer{});
+    auto list          = cudf::make_lists_column(1,
+                                        offsets.release(),
+                                        std::move(empty_struct),
+                                        0,
+                                        cudf::create_null_mask(0, cudf::mask_state::UNALLOCATED));
 
     cudf::table_view src_table({static_cast<cudf::column_view>(*list)});
     this->run_test(src_table);
@@ -480,8 +526,7 @@ TEST_F(PackUnpackTest, NestedSliced)
 {
   // list
   {
-    auto valids =
-      cudf::detail::make_counting_transform_iterator(0, [](auto i) { return i % 2 == 0; });
+    auto valids = cudf::test::iterators::valids_at_multiples_of(2);
 
     using LCW = cudf::test::lists_column_wrapper<int>;
 
@@ -501,8 +546,10 @@ TEST_F(PackUnpackTest, NestedSliced)
     children.push_back(std::make_unique<cudf::column>(col2));
     children.push_back(std::make_unique<cudf::column>(col0));
     children.push_back(std::make_unique<cudf::column>(col1));
-    auto col3 = cudf::make_structs_column(
-      static_cast<cudf::column_view>(col0).size(), std::move(children), 0, rmm::device_buffer{});
+    auto col3 = cudf::make_structs_column(static_cast<cudf::column_view>(col0).size(),
+                                          std::move(children),
+                                          0,
+                                          cudf::create_null_mask(0, cudf::mask_state::UNALLOCATED));
 
     cudf::table_view t({col0, col1, col2, *col3});
     this->run_test(t);
@@ -553,6 +600,53 @@ TEST_F(PackUnpackTest, EmptyTable)
   }
 }
 
+TEST_F(PackUnpackTest, ZeroColumnsWithRows)
+{
+  // A zero-column table with rows survives a pack/unpack round-trip.
+  cudf::table_view t{std::vector<cudf::column_view>{}, 7};
+  auto unpacked = cudf::unpack(cudf::pack(t));
+  EXPECT_EQ(unpacked.num_columns(), 0);
+  EXPECT_EQ(unpacked.num_rows(), 7);
+
+  // A genuinely empty (0, 0) table round-trips to (0, 0).
+  cudf::table_view empty{std::vector<cudf::column_view>{}, 0};
+  auto unpacked_empty = cudf::unpack(cudf::pack(empty));
+  EXPECT_EQ(unpacked_empty.num_columns(), 0);
+  EXPECT_EQ(unpacked_empty.num_rows(), 0);
+}
+
+TEST_F(PackUnpackTest, UnpackMetadataSpan)
+{
+  auto const unpack_and_test = [](cudf::table_view const& input,
+                                  cudf::packed_columns const packed) {
+    auto unpacked =
+      cudf::unpack(*packed.metadata, reinterpret_cast<uint8_t const*>(packed.gpu_data->data()));
+    CUDF_TEST_EXPECT_TABLES_EQUAL(input, unpacked);
+  };
+
+  cudf::table_view only_rows{std::vector<cudf::column_view>{}, 7};
+  unpack_and_test(only_rows, cudf::pack(only_rows));
+
+  cudf::table_view empty{};
+  auto empty_packed = cudf::pack(empty);
+  ASSERT_TRUE(empty_packed.metadata->empty());
+  unpack_and_test(empty, std::move(empty_packed));
+}
+
+TEST_F(PackUnpackTest, UnpackMetadataSpanRejectsTruncatedBuffer)
+{
+  std::vector<uint8_t> truncated_header(1);
+  EXPECT_THROW(cudf::unpack(truncated_header, nullptr), cudf::logic_error);
+
+  cudf::test::fixed_width_column_wrapper<int> column{1, 2, 3};
+  auto packed = cudf::pack(cudf::table_view({column}));
+  auto truncated_column =
+    std::span<uint8_t const>{packed.metadata->data(), packed.metadata->size() - 1};
+  EXPECT_THROW(
+    cudf::unpack(truncated_column, reinterpret_cast<uint8_t const*>(packed.gpu_data->data())),
+    cudf::logic_error);
+}
+
 TEST_F(PackUnpackTest, SlicedEmpty)
 {
   // empty sliced column. this is specifically testing the corner case:
@@ -589,4 +683,212 @@ TEST_F(PackUnpackTest, DISABLED_LongOffsetsAndChars)
   auto str = make_long_offsets_and_chars_string_column();
   cudf::table_view tbl({*str});
   this->run_test(tbl);
+}
+
+TEST_F(PackUnpackTest, MetadataViewEmptyBuffer)
+{
+  auto packed = cudf::pack(cudf::table_view{});
+  ASSERT_TRUE(packed.metadata->empty());
+  auto view = cudf::packed_metadata_view(*packed.metadata);
+  EXPECT_EQ(view.num_columns(), 0);
+  EXPECT_EQ(view.num_rows(), 0);
+  EXPECT_THROW(std::ignore = view.column(0), std::out_of_range);
+}
+
+TEST_F(PackUnpackTest, MetadataViewRejectsNonMultipleSize)
+{
+  // Pack a valid table, then present its metadata with one byte chopped off
+  // so the size is not a multiple of the serialized entry size.
+  cudf::test::fixed_width_column_wrapper<int> col{1, 2, 3};
+  auto packed = cudf::pack(cudf::table_view({col}));
+  ASSERT_GT(packed.metadata->size(), 1);
+  auto truncated = std::span<uint8_t const>(packed.metadata->data(), packed.metadata->size() - 1);
+  EXPECT_THROW(cudf::packed_metadata_view{truncated}, cudf::logic_error);
+}
+
+TEST_F(PackUnpackTest, MetadataViewRejectsTruncatedBuffer)
+{
+  // Pack a multi-column table, then lop off one serialized entry so
+  // the header claims more columns than the buffer actually contains.
+  cudf::test::fixed_width_column_wrapper<int> col1{1, 2, 3};
+  cudf::test::fixed_width_column_wrapper<float> col2{4.0f, 5.0f, 6.0f};
+  cudf::test::fixed_width_column_wrapper<double> col3{7.0, 8.0, 9.0};
+  auto packed = cudf::pack(cudf::table_view({col1, col2, col3}));
+
+  // Metadata has a table header plus 3 column entries. Remove the last entry so
+  // the header still says "3 columns" but only 2 column entries remain.
+  auto const entry_size     = (packed.metadata->size() - metadata_header_size) / 3;
+  auto const truncated_size = packed.metadata->size() - entry_size;
+
+  auto truncated = std::span<uint8_t const>(packed.metadata->data(), truncated_size);
+  EXPECT_THROW(cudf::packed_metadata_view{truncated}, cudf::logic_error);
+}
+
+TEST_F(PackUnpackTest, MetadataViewRejectsTooLongBuffer)
+{
+  // Pack a valid table, then extend the buffer by one entry so the tree
+  // doesn't consume the entire buffer.
+  cudf::test::fixed_width_column_wrapper<int> col{1, 2, 3};
+  auto packed = cudf::pack(cudf::table_view({col}));
+
+  auto const entry_size = packed.metadata->size() - metadata_header_size;  // 1 column entry
+  auto extended         = *packed.metadata;
+  extended.resize(packed.metadata->size() + entry_size, 0);
+
+  EXPECT_THROW(cudf::packed_metadata_view{extended}, cudf::logic_error);
+}
+
+TEST_F(PackUnpackTest, MetadataViewRejectsCorruptedChildCount)
+{
+  // Pack a table with a struct column, then corrupt the struct's num_children
+  // field so traversal would read past the buffer.
+  cudf::test::fixed_width_column_wrapper<int> ints{1, 2, 3};
+  cudf::test::fixed_width_column_wrapper<float> floats{4.0f, 5.0f, 6.0f};
+  auto struct_col = cudf::test::structs_column_wrapper({ints, floats});
+  auto packed     = cudf::pack(cudf::table_view({struct_col}));
+
+  // The metadata layout is: [header, struct, ints_child, floats_child].
+  // The struct entry is the first column entry. We corrupt its num_children from 2 to
+  // something larger so the tree claims more entries than exist.
+  auto corrupted = *packed.metadata;
+
+  // The num_children field is the
+  // second-to-last 4-byte value in each entry (before the trailing pad).
+  auto const entry_size = (corrupted.size() - metadata_header_size) / 3;  // 3 column entries
+  auto const num_children_offset = metadata_header_size                   // skip table header
+                                   + entry_size - 2 * sizeof(int32_t);    // num_children in struct
+  cudf::size_type bad_children = 10;
+  std::memcpy(corrupted.data() + num_children_offset, &bad_children, sizeof(bad_children));
+
+  EXPECT_THROW(cudf::packed_metadata_view{corrupted}, cudf::logic_error);
+}
+
+TEST_F(PackUnpackTest, MetadataRejectsNegativeColumnCount)
+{
+  cudf::test::fixed_width_column_wrapper<int> col{1, 2, 3};
+  auto packed = cudf::pack(cudf::table_view({col}));
+
+  auto corrupted = *packed.metadata;
+  // num_columns follows the leading version field in the header.
+  auto constexpr num_columns_offset = sizeof(std::int32_t);
+  cudf::size_type const negative    = -1;
+  std::memcpy(corrupted.data() + num_columns_offset, &negative, sizeof(negative));
+
+  EXPECT_THROW(cudf::packed_metadata_view{corrupted}, cudf::logic_error);
+  EXPECT_THROW(
+    cudf::unpack(corrupted.data(), reinterpret_cast<uint8_t const*>(packed.gpu_data->data())),
+    cudf::logic_error);
+}
+
+// num_rows follows the leading version and num_columns fields in the header.
+auto constexpr num_rows_offset = 2 * sizeof(std::int32_t);
+
+TEST_F(PackUnpackTest, MetadataRejectsNegativeRowCount)
+{
+  cudf::test::fixed_width_column_wrapper<int> col{1, 2, 3};
+  auto packed = cudf::pack(cudf::table_view({col}));
+
+  auto corrupted                 = *packed.metadata;
+  cudf::size_type const negative = -1;
+  std::memcpy(corrupted.data() + num_rows_offset, &negative, sizeof(negative));
+
+  EXPECT_THROW(cudf::packed_metadata_view{corrupted}, cudf::logic_error);
+  EXPECT_THROW(
+    cudf::unpack(corrupted.data(), reinterpret_cast<uint8_t const*>(packed.gpu_data->data())),
+    cudf::logic_error);
+}
+
+TEST_F(PackUnpackTest, MetadataRejectsRowCountInconsistentWithColumns)
+{
+  cudf::test::fixed_width_column_wrapper<int> col{1, 2, 3};
+  auto packed = cudf::pack(cudf::table_view({col}));
+
+  // The column has 3 rows; a header row count that disagrees must be rejected.
+  auto corrupted              = *packed.metadata;
+  cudf::size_type const wrong = 99;
+  std::memcpy(corrupted.data() + num_rows_offset, &wrong, sizeof(wrong));
+
+  EXPECT_THROW(cudf::packed_metadata_view{corrupted}, cudf::logic_error);
+  EXPECT_THROW(
+    cudf::unpack(corrupted.data(), reinterpret_cast<uint8_t const*>(packed.gpu_data->data())),
+    cudf::logic_error);
+}
+
+TEST_F(PackUnpackTest, MetadataRejectsRowCountInconsistentAcrossColumns)
+{
+  cudf::test::fixed_width_column_wrapper<int> col1{1, 2, 3};
+  cudf::test::fixed_width_column_wrapper<int> col2{4, 5, 6};
+  auto packed = cudf::pack(cudf::table_view({col1, col2}));
+
+  // Leave the header and column 0 at 3 rows but corrupt column 1's size to 4. Validating only
+  // the first column would miss this; every top-level column must match the recorded row count.
+  auto corrupted        = *packed.metadata;
+  auto const entry_size = (corrupted.size() - metadata_header_size) / 2;  // 2 column entries
+  // size is the first field after the 8-byte data_type (two int32s) in each entry.
+  auto const col1_size_offset = metadata_header_size + entry_size + 2 * sizeof(std::int32_t);
+  cudf::size_type const wrong = 4;
+  std::memcpy(corrupted.data() + col1_size_offset, &wrong, sizeof(wrong));
+
+  EXPECT_THROW(cudf::packed_metadata_view{corrupted}, cudf::logic_error);
+  EXPECT_THROW(
+    cudf::unpack(corrupted.data(), reinterpret_cast<uint8_t const*>(packed.gpu_data->data())),
+    cudf::logic_error);
+}
+
+TEST_F(PackUnpackTest, MetadataRejectsUnsupportedVersion)
+{
+  cudf::test::fixed_width_column_wrapper<int> col{1, 2, 3};
+  auto packed = cudf::pack(cudf::table_view({col}));
+
+  auto corrupted = *packed.metadata;
+  // The version is the leading value of the header.
+  std::int32_t const unknown_version = 999;
+  std::memcpy(corrupted.data(), &unknown_version, sizeof(unknown_version));
+
+  EXPECT_THROW(cudf::packed_metadata_view{corrupted}, cudf::logic_error);
+  EXPECT_THROW(
+    cudf::unpack(corrupted.data(), reinterpret_cast<uint8_t const*>(packed.gpu_data->data())),
+    cudf::logic_error);
+}
+
+TEST_F(PackUnpackTest, MetadataRejectsNegativeChildCount)
+{
+  cudf::test::fixed_width_column_wrapper<int> ints{1, 2, 3};
+  cudf::test::fixed_width_column_wrapper<float> floats{4.0f, 5.0f, 6.0f};
+  auto struct_col = cudf::test::structs_column_wrapper({ints, floats});
+  auto packed     = cudf::pack(cudf::table_view({struct_col}));
+
+  auto corrupted        = *packed.metadata;
+  auto const entry_size = (corrupted.size() - metadata_header_size) / 3;  // 3 column entries
+  auto const num_children_offset = metadata_header_size + entry_size - 2 * sizeof(int32_t);
+  cudf::size_type const negative = -1;
+  std::memcpy(corrupted.data() + num_children_offset, &negative, sizeof(negative));
+
+  EXPECT_THROW(cudf::packed_metadata_view{corrupted}, cudf::logic_error);
+  EXPECT_THROW(
+    cudf::unpack(corrupted.data(), reinterpret_cast<uint8_t const*>(packed.gpu_data->data())),
+    cudf::logic_error);
+}
+
+TEST_F(PackUnpackTest, MetadataViewColumnIndexOutOfRange)
+{
+  cudf::test::fixed_width_column_wrapper<int> col{1, 2, 3};
+  auto packed = cudf::pack(cudf::table_view({col}));
+  auto view   = cudf::packed_metadata_view(*packed.metadata);
+
+  EXPECT_THROW(std::ignore = view.column(-1), std::out_of_range);
+  EXPECT_THROW(std::ignore = view.column(view.num_columns()), std::out_of_range);
+}
+
+TEST_F(PackUnpackTest, MetadataViewChildIndexOutOfRange)
+{
+  cudf::test::fixed_width_column_wrapper<int> ints{1, 2, 3};
+  cudf::test::fixed_width_column_wrapper<float> floats{4.0f, 5.0f, 6.0f};
+  auto struct_col = cudf::test::structs_column_wrapper({ints, floats});
+  auto packed     = cudf::pack(cudf::table_view({struct_col}));
+  auto view       = cudf::packed_metadata_view(*packed.metadata);
+  auto col_meta   = view.column(0);
+
+  EXPECT_THROW(std::ignore = col_meta.child(-1), std::out_of_range);
+  EXPECT_THROW(std::ignore = col_meta.child(col_meta.num_children()), std::out_of_range);
 }

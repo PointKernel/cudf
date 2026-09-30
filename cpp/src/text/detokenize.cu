@@ -1,15 +1,16 @@
 /*
- * SPDX-FileCopyrightText: Copyright (c) 2020-2026, NVIDIA CORPORATION.
+ * SPDX-FileCopyrightText: Copyright (c) 2020-2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
 
 #include <cudf/column/column.hpp>
 #include <cudf/column/column_device_view.cuh>
 #include <cudf/column/column_factories.hpp>
+#include <cudf/detail/algorithms/copy_if.cuh>
+#include <cudf/detail/algorithms/reduce.cuh>
 #include <cudf/detail/indexalator.cuh>
 #include <cudf/detail/nvtx/ranges.hpp>
 #include <cudf/detail/sorting.hpp>
-#include <cudf/detail/utilities/algorithm.cuh>
 #include <cudf/strings/detail/strings_children.cuh>
 #include <cudf/strings/detail/utilities.cuh>
 #include <cudf/strings/string_view.cuh>
@@ -21,10 +22,10 @@
 
 #include <nvtext/tokenize.hpp>
 
-#include <rmm/cuda_stream_view.hpp>
 #include <rmm/device_uvector.hpp>
 
-#include <thrust/iterator/counting_iterator.h>
+#include <cuda/iterator>
+#include <cuda/stream>
 
 namespace nvtext {
 namespace detail {
@@ -89,24 +90,24 @@ rmm::device_uvector<cudf::size_type> create_token_row_offsets(
   cudf::column_view const& row_indices,
   cudf::column_view const& sorted_indices,
   cudf::size_type tokens_counts,
-  rmm::cuda_stream_view stream)
+  cuda::stream_ref stream)
 {
   index_changed_fn fn{cudf::detail::indexalator_factory::make_input_iterator(row_indices),
                       sorted_indices.data<cudf::size_type>()};
 
   auto const output_count =
-    cudf::detail::count_if(thrust::counting_iterator<cudf::size_type>(0),
-                           thrust::counting_iterator<cudf::size_type>(tokens_counts),
+    cudf::detail::count_if(cuda::counting_iterator<cudf::size_type>{0},
+                           cuda::counting_iterator<cudf::size_type>{tokens_counts},
                            fn,
                            stream);
 
   auto tokens_offsets = rmm::device_uvector<cudf::size_type>(output_count + 1, stream);
 
-  cudf::detail::copy_if(thrust::counting_iterator<cudf::size_type>(0),
-                        thrust::counting_iterator<cudf::size_type>(tokens_counts),
-                        tokens_offsets.begin(),
-                        fn,
-                        stream);
+  cudf::detail::copy_if_async(cuda::counting_iterator<cudf::size_type>{0},
+                              cuda::counting_iterator<cudf::size_type>{tokens_counts},
+                              tokens_offsets.begin(),
+                              fn,
+                              stream);
 
   // set the last element to the total number of tokens
   tokens_offsets.set_element(output_count, tokens_counts, stream);
@@ -121,7 +122,7 @@ rmm::device_uvector<cudf::size_type> create_token_row_offsets(
 std::unique_ptr<cudf::column> detokenize(cudf::strings_column_view const& strings,
                                          cudf::column_view const& row_indices,
                                          cudf::string_scalar const& separator,
-                                         rmm::cuda_stream_view stream,
+                                         cuda::stream_ref stream,
                                          rmm::device_async_resource_ref mr)
 {
   CUDF_EXPECTS(separator.is_valid(stream), "Parameter separator must be valid");
@@ -153,8 +154,11 @@ std::unique_ptr<cudf::column> detokenize(cudf::strings_column_view const& string
     mr);
 
   // make the output strings column from the offsets and chars column
-  return cudf::make_strings_column(
-    output_count, std::move(offsets_column), chars.release(), 0, rmm::device_buffer{});
+  return cudf::make_strings_column(output_count,
+                                   std::move(offsets_column),
+                                   chars.release(),
+                                   0,
+                                   cudf::create_null_mask(0, cudf::mask_state::UNALLOCATED));
 }
 
 }  // namespace detail
@@ -162,7 +166,7 @@ std::unique_ptr<cudf::column> detokenize(cudf::strings_column_view const& string
 std::unique_ptr<cudf::column> detokenize(cudf::strings_column_view const& input,
                                          cudf::column_view const& row_indices,
                                          cudf::string_scalar const& separator,
-                                         rmm::cuda_stream_view stream,
+                                         cuda::stream_ref stream,
                                          rmm::device_async_resource_ref mr)
 {
   CUDF_FUNC_RANGE();

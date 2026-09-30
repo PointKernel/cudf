@@ -1,5 +1,5 @@
 /*
- * SPDX-FileCopyrightText: Copyright (c) 2024-2026, NVIDIA CORPORATION.
+ * SPDX-FileCopyrightText: Copyright (c) 2024-2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
 
@@ -16,10 +16,9 @@
 #include <rmm/device_uvector.hpp>
 #include <rmm/exec_policy.hpp>
 
+#include <cuda/iterator>
 #include <cuda/std/limits>
 #include <cuda/std/tuple>
-#include <thrust/iterator/counting_iterator.h>
-#include <thrust/iterator/zip_iterator.h>
 #include <thrust/transform.h>
 
 using doubles_col = cudf::test::fixed_width_column_wrapper<double>;
@@ -36,14 +35,14 @@ struct host_udf_groupby_example : cudf::groupby_host_udf {
   host_udf_groupby_example() = default;
 
   [[nodiscard]] std::unique_ptr<cudf::column> get_empty_output(
-    rmm::cuda_stream_view, rmm::device_async_resource_ref) const override
+    cuda::stream_ref, rmm::device_async_resource_ref) const override
   {
     return cudf::make_empty_column(
       cudf::data_type{cudf::type_to_id<typename groupby_fn::OutputType>()});
   }
 
   [[nodiscard]] std::unique_ptr<cudf::column> operator()(
-    rmm::cuda_stream_view stream, rmm::device_async_resource_ref mr) const override
+    cuda::stream_ref stream, rmm::device_async_resource_ref mr) const override
   {
     auto const values = get_grouped_values();
     return cudf::type_dispatcher(values.type(), groupby_fn{*this}, stream, mr);
@@ -75,7 +74,7 @@ struct host_udf_groupby_example : cudf::groupby_host_udf {
     }
 
     template <typename T, CUDF_ENABLE_IF(std::is_same_v<InputType, T>)>
-    std::unique_ptr<cudf::column> operator()(rmm::cuda_stream_view stream,
+    std::unique_ptr<cudf::column> operator()(cuda::stream_ref stream,
                                              rmm::device_async_resource_ref mr) const
     {
       auto const values = parent.get_grouped_values();
@@ -102,9 +101,9 @@ struct host_udf_groupby_example : cudf::groupby_host_udf {
 
       thrust::transform(
         rmm::exec_policy_nosync(stream),
-        thrust::make_counting_iterator(0),
-        thrust::make_counting_iterator(num_groups),
-        thrust::make_zip_iterator(output->mutable_view().begin<OutputType>(), valid_idx.begin()),
+        cuda::counting_iterator<cudf::size_type>{0},
+        cuda::counting_iterator{num_groups},
+        cuda::make_zip_iterator(output->mutable_view().begin<OutputType>(), valid_idx.begin()),
         transform_fn{*values_dv_ptr,
                      offsets,
                      group_indices,

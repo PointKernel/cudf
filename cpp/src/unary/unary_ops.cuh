@@ -1,5 +1,5 @@
 /*
- * SPDX-FileCopyrightText: Copyright (c) 2019-2026, NVIDIA CORPORATION.
+ * SPDX-FileCopyrightText: Copyright (c) 2019-2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
 
@@ -12,9 +12,9 @@
 #include <cudf/utilities/error.hpp>
 #include <cudf/utilities/memory_resource.hpp>
 
-#include <rmm/cuda_stream_view.hpp>
 #include <rmm/exec_policy.hpp>
 
+#include <cuda/stream>
 #include <thrust/transform.h>
 
 namespace cudf {
@@ -23,7 +23,7 @@ template <typename T, typename Tout, typename F>
 struct launcher {
   static std::unique_ptr<cudf::column> launch(cudf::column_view const& input,
                                               cudf::unary_operator op,
-                                              rmm::cuda_stream_view stream,
+                                              cuda::stream_ref stream,
                                               rmm::device_async_resource_ref mr)
   {
     std::unique_ptr<cudf::column> output = [&] {
@@ -56,13 +56,13 @@ struct launcher {
         rmm::device_buffer{input.null_mask(), bitmask_allocation_size_bytes(input.size())},
         input.null_count());
 
-    thrust::transform(rmm::exec_policy_nosync(stream),
+    thrust::transform(rmm::exec_policy_nosync(stream, cudf::get_current_device_resource_ref()),
                       input.begin<T>(),
                       input.end<T>(),
                       output_view.begin<Tout>(),
                       F{});
 
-    CUDF_CHECK_CUDA(stream.value());
+    CUDF_CHECK_CUDA(stream.get());
 
     return output;
   }

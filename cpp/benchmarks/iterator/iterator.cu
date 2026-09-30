@@ -1,5 +1,5 @@
 /*
- * SPDX-FileCopyrightText: Copyright (c) 2019-2025, NVIDIA CORPORATION.
+ * SPDX-FileCopyrightText: Copyright (c) 2019-2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
 
@@ -14,9 +14,9 @@
 #include <rmm/device_uvector.hpp>
 
 #include <cub/device/device_reduce.cuh>
+#include <cuda/buffer>
+#include <cuda/iterator>
 #include <thrust/execution_policy.h>
-#include <thrust/iterator/counting_iterator.h>
-#include <thrust/iterator/transform_iterator.h>
 #include <thrust/reduce.h>
 
 #include <nvbench/nvbench.cuh>
@@ -31,7 +31,10 @@ inline auto reduce_by_cub(OutputIterator result, InputIterator d_in, int num_ite
     nullptr, temp_storage_bytes, d_in, result, num_items, cudf::DeviceSum{}, init);
 
   // Allocate temporary storage
-  rmm::device_buffer d_temp_storage(temp_storage_bytes, cudf::get_default_stream());
+  cuda::device_buffer<std::byte> d_temp_storage(cudf::get_default_stream(),
+                                                cudf::get_current_device_resource_ref(),
+                                                temp_storage_bytes,
+                                                cuda::no_init);
 
   // Run reduction
   cub::DeviceReduce::Reduce(
@@ -106,7 +109,7 @@ void bench_iterator_cub_raw(nvbench::state& state)
 {
   using T                = double;
   auto const column_size = static_cast<cudf::size_type>(state.get_int64("num_rows"));
-  auto num_gen           = thrust::counting_iterator<cudf::size_type>(0);
+  auto num_gen           = cuda::counting_iterator<cudf::size_type>{0};
 
   cudf::test::fixed_width_column_wrapper<T> wrap_hasnull_F(num_gen, num_gen + column_size);
   cudf::column_view hasnull_F = wrap_hasnull_F;
@@ -116,7 +119,7 @@ void bench_iterator_cub_raw(nvbench::state& state)
     1, cudf::get_default_stream(), cudf::get_current_device_resource_ref());
 
   auto stream = cudf::get_default_stream();
-  state.set_cuda_stream(nvbench::make_cuda_stream_view(stream.value()));
+  state.set_cuda_stream(nvbench::make_cuda_stream_view(stream.get()));
 
   auto const data_size = column_size * sizeof(T);
   state.add_global_memory_reads<nvbench::int8_t>(data_size);
@@ -130,7 +133,7 @@ void bench_iterator_cub_iter(nvbench::state& state)
 {
   using T                = double;
   auto const column_size = static_cast<cudf::size_type>(state.get_int64("num_rows"));
-  auto num_gen           = thrust::counting_iterator<cudf::size_type>(0);
+  auto num_gen           = cuda::counting_iterator<cudf::size_type>{0};
 
   cudf::test::fixed_width_column_wrapper<T> wrap_hasnull_F(num_gen, num_gen + column_size);
   cudf::column_view hasnull_F = wrap_hasnull_F;
@@ -140,7 +143,7 @@ void bench_iterator_cub_iter(nvbench::state& state)
     1, cudf::get_default_stream(), cudf::get_current_device_resource_ref());
 
   auto stream = cudf::get_default_stream();
-  state.set_cuda_stream(nvbench::make_cuda_stream_view(stream.value()));
+  state.set_cuda_stream(nvbench::make_cuda_stream_view(stream.get()));
 
   auto const data_size = column_size * sizeof(T);
   state.add_global_memory_reads<nvbench::int8_t>(data_size);
@@ -154,7 +157,7 @@ void bench_iterator_thrust_raw(nvbench::state& state)
 {
   using T                = double;
   auto const column_size = static_cast<cudf::size_type>(state.get_int64("num_rows"));
-  auto num_gen           = thrust::counting_iterator<cudf::size_type>(0);
+  auto num_gen           = cuda::counting_iterator<cudf::size_type>{0};
 
   cudf::test::fixed_width_column_wrapper<T> wrap_hasnull_F(num_gen, num_gen + column_size);
   cudf::column_view hasnull_F = wrap_hasnull_F;
@@ -164,7 +167,7 @@ void bench_iterator_thrust_raw(nvbench::state& state)
     1, cudf::get_default_stream(), cudf::get_current_device_resource_ref());
 
   auto stream = cudf::get_default_stream();
-  state.set_cuda_stream(nvbench::make_cuda_stream_view(stream.value()));
+  state.set_cuda_stream(nvbench::make_cuda_stream_view(stream.get()));
 
   auto const data_size = column_size * sizeof(T);
   state.add_global_memory_reads<nvbench::int8_t>(data_size);
@@ -178,7 +181,7 @@ void bench_iterator_thrust_iter(nvbench::state& state)
 {
   using T                = double;
   auto const column_size = static_cast<cudf::size_type>(state.get_int64("num_rows"));
-  auto num_gen           = thrust::counting_iterator<cudf::size_type>(0);
+  auto num_gen           = cuda::counting_iterator<cudf::size_type>{0};
 
   cudf::test::fixed_width_column_wrapper<T> wrap_hasnull_F(num_gen, num_gen + column_size);
   cudf::column_view hasnull_F = wrap_hasnull_F;
@@ -188,7 +191,7 @@ void bench_iterator_thrust_iter(nvbench::state& state)
     1, cudf::get_default_stream(), cudf::get_current_device_resource_ref());
 
   auto stream = cudf::get_default_stream();
-  state.set_cuda_stream(nvbench::make_cuda_stream_view(stream.value()));
+  state.set_cuda_stream(nvbench::make_cuda_stream_view(stream.get()));
 
   auto const data_size = column_size * sizeof(T);
   state.add_global_memory_reads<nvbench::int8_t>(data_size);

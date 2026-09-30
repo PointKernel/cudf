@@ -1,5 +1,5 @@
 /*
- * SPDX-FileCopyrightText: Copyright (c) 2021-2025, NVIDIA CORPORATION.
+ * SPDX-FileCopyrightText: Copyright (c) 2021-2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
 
@@ -10,11 +10,15 @@
 #include <cuda/std/limits>
 #include <cuda/std/type_traits>
 
+#ifndef __CUDACC_RTC__
 #include <algorithm>
 #include <string>
+#endif
 
 namespace CUDF_EXPORT numeric {
 namespace detail {
+
+#ifndef __CUDACC_RTC__
 
 template <typename T>
 auto to_string(T value) -> std::string
@@ -34,13 +38,15 @@ auto to_string(T value) -> std::string
       value /= 10;
     } while (value);
     if (sign) s.push_back('-');
-    std::reverse(s.begin(), s.end());
+    std::ranges::reverse(s);
     return s;
   } else {
     return std::to_string(value);
   }
   return std::string{};  // won't ever hit here, need to suppress warning though
 }
+
+#endif
 
 template <typename T>
 CUDF_HOST_DEVICE constexpr auto abs(T value)

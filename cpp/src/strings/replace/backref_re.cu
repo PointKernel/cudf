@@ -1,5 +1,5 @@
 /*
- * SPDX-FileCopyrightText: Copyright (c) 2020-2024, NVIDIA CORPORATION.
+ * SPDX-FileCopyrightText: Copyright (c) 2020-2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
 
@@ -19,7 +19,7 @@
 #include <cudf/utilities/default_stream.hpp>
 #include <cudf/utilities/memory_resource.hpp>
 
-#include <rmm/cuda_stream_view.hpp>
+#include <cuda/stream>
 
 #include <regex>
 
@@ -94,7 +94,7 @@ std::pair<std::string, std::vector<backref_type>> parse_backrefs(std::string_vie
 std::unique_ptr<column> replace_with_backrefs(strings_column_view const& input,
                                               regex_program const& prog,
                                               std::string_view replacement,
-                                              rmm::cuda_stream_view stream,
+                                              cuda::stream_ref stream,
                                               rmm::device_async_resource_ref mr)
 {
   if (input.is_empty()) return make_empty_column(type_id::STRING);
@@ -108,9 +108,10 @@ std::unique_ptr<column> replace_with_backrefs(strings_column_view const& input,
   // parse the repl string for back-ref indicators
   auto group_count = std::min(99, d_prog->group_counts());  // group count should NOT exceed 99
   auto const parse_result                    = parse_backrefs(replacement, group_count);
-  rmm::device_uvector<backref_type> backrefs = cudf::detail::make_device_uvector_async(
+  rmm::device_uvector<backref_type> backrefs = cudf::detail::make_device_uvector(
     parse_result.second, stream, cudf::get_current_device_resource_ref());
-  string_scalar repl_scalar(parse_result.first, true, stream);
+  string_scalar repl_scalar(
+    parse_result.first, true, stream, cudf::get_current_device_resource_ref());
   string_view const d_repl_template = repl_scalar.value(stream);
 
   auto const d_strings = column_device_view::create(input.parent(), stream);
@@ -137,7 +138,7 @@ std::unique_ptr<column> replace_with_backrefs(strings_column_view const& input,
 std::unique_ptr<column> replace_with_backrefs(strings_column_view const& strings,
                                               regex_program const& prog,
                                               std::string_view replacement,
-                                              rmm::cuda_stream_view stream,
+                                              cuda::stream_ref stream,
                                               rmm::device_async_resource_ref mr)
 {
   CUDF_FUNC_RANGE();

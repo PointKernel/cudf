@@ -1,5 +1,5 @@
 /*
- * SPDX-FileCopyrightText: Copyright (c) 2019-2026, NVIDIA CORPORATION.
+ * SPDX-FileCopyrightText: Copyright (c) 2019-2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
 
@@ -17,13 +17,13 @@
 #include <cudf/utilities/memory_resource.hpp>
 #include <cudf/utilities/span.hpp>
 
-#include <rmm/cuda_stream_view.hpp>
 #include <rmm/device_uvector.hpp>
 #include <rmm/exec_policy.hpp>
 
+#include <cuda/iterator>
+#include <cuda/stream>
 #include <thrust/execution_policy.h>
 #include <thrust/for_each.h>
-#include <thrust/iterator/counting_iterator.h>
 #include <thrust/transform.h>
 
 namespace cudf {
@@ -58,7 +58,7 @@ struct calculate_quantile_fn {
 
     size_type offset = i * num_quantiles;
     thrust::for_each_n(thrust::seq,
-                       thrust::make_counting_iterator(0),
+                       cuda::counting_iterator<cudf::size_type>{0},
                        num_quantiles,
                        [d_result = d_result, segment_size, offset, this](size_type j) {
                          if (segment_size == 0) {
@@ -79,7 +79,7 @@ struct quantiles_functor {
                                      size_type const num_groups,
                                      device_span<double const> quantile,
                                      interpolation interpolation,
-                                     rmm::cuda_stream_view stream,
+                                     cuda::stream_ref stream,
                                      rmm::device_async_resource_ref mr)
     requires(std::is_arithmetic_v<T>)
   {
@@ -103,8 +103,8 @@ struct quantiles_functor {
     // For each group, calculate quantile
     if (!cudf::is_dictionary(values.type())) {
       auto values_iter = values_view->begin<T>();
-      thrust::for_each_n(rmm::exec_policy_nosync(stream),
-                         thrust::make_counting_iterator(0),
+      thrust::for_each_n(rmm::exec_policy_nosync(stream, cudf::get_current_device_resource_ref()),
+                         cuda::counting_iterator<cudf::size_type>{0},
                          num_groups,
                          calculate_quantile_fn<ResultType, decltype(values_iter)>{
                            values_iter,
@@ -117,8 +117,8 @@ struct quantiles_functor {
                            null_count.data()});
     } else {
       auto values_iter = cudf::dictionary::detail::make_dictionary_iterator<T>(*values_view);
-      thrust::for_each_n(rmm::exec_policy_nosync(stream),
-                         thrust::make_counting_iterator(0),
+      thrust::for_each_n(rmm::exec_policy_nosync(stream, cudf::get_current_device_resource_ref()),
+                         cuda::counting_iterator<cudf::size_type>{0},
                          num_groups,
                          calculate_quantile_fn<ResultType, decltype(values_iter)>{
                            values_iter,
@@ -152,7 +152,7 @@ std::unique_ptr<column> group_quantiles(column_view const& values,
                                         size_type const num_groups,
                                         std::vector<double> const& quantiles,
                                         interpolation interp,
-                                        rmm::cuda_stream_view stream,
+                                        cuda::stream_ref stream,
                                         rmm::device_async_resource_ref mr)
 {
   auto dv_quantiles = cudf::detail::make_device_uvector_async(

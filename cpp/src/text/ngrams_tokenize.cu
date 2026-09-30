@@ -1,5 +1,5 @@
 /*
- * SPDX-FileCopyrightText: Copyright (c) 2020-2026, NVIDIA CORPORATION.
+ * SPDX-FileCopyrightText: Copyright (c) 2020-2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
 
@@ -21,13 +21,12 @@
 #include <nvtext/detail/tokenize.hpp>
 #include <nvtext/ngrams_tokenize.hpp>
 
-#include <rmm/cuda_stream_view.hpp>
 #include <rmm/exec_policy.hpp>
 
 #include <cuda/functional>
+#include <cuda/iterator>
+#include <cuda/stream>
 #include <thrust/for_each.h>
-#include <thrust/functional.h>
-#include <thrust/iterator/counting_iterator.h>
 #include <thrust/transform.h>
 
 namespace nvtext {
@@ -130,7 +129,7 @@ std::unique_ptr<cudf::column> ngrams_tokenize(cudf::strings_column_view const& s
                                               cudf::size_type ngrams,
                                               cudf::string_scalar const& delimiter,
                                               cudf::string_scalar const& separator,
-                                              rmm::cuda_stream_view stream,
+                                              cuda::stream_ref stream,
                                               rmm::device_async_resource_ref mr)
 {
   CUDF_EXPECTS(delimiter.is_valid(stream), "Parameter delimiter must be valid");
@@ -164,8 +163,8 @@ std::unique_ptr<cudf::column> ngrams_tokenize(cudf::strings_column_view const& s
   rmm::device_uvector<position_pair> token_positions(total_tokens, stream);
   auto d_token_positions = token_positions.data();
   thrust::for_each_n(
-    rmm::exec_policy_nosync(stream),
-    thrust::make_counting_iterator<cudf::size_type>(0),
+    rmm::exec_policy_nosync(stream, cudf::get_current_device_resource_ref()),
+    cuda::counting_iterator<cudf::size_type>{0},
     strings_count,
     string_tokens_positions_fn{d_strings, d_delimiter, d_token_offsets, d_token_positions});
 
@@ -209,8 +208,8 @@ std::unique_ptr<cudf::column> ngrams_tokenize(cudf::strings_column_view const& s
   // Generate the ngrams into the chars column data buffer.
   // The ngram_builder_fn functor also fills the ngram_sizes vector with the
   // size of each ngram.
-  thrust::for_each_n(rmm::exec_policy_nosync(stream),
-                     thrust::make_counting_iterator<cudf::size_type>(0),
+  thrust::for_each_n(rmm::exec_policy_nosync(stream, cudf::get_current_device_resource_ref()),
+                     cuda::counting_iterator<cudf::size_type>{0},
                      strings_count,
                      ngram_builder_fn{d_strings,
                                       d_separator,
@@ -222,11 +221,14 @@ std::unique_ptr<cudf::column> ngrams_tokenize(cudf::strings_column_view const& s
                                       d_ngram_offsets,
                                       ngram_sizes.data()});
   // build the offsets column -- converting the ngram sizes into offsets
-  auto offsets_column = std::get<0>(
-    cudf::detail::make_offsets_child_column(ngram_sizes.begin(), ngram_sizes.end(), stream, mr));
+  auto offsets_column = std::get<0>(cudf::strings::detail::make_offsets_child_column(
+    ngram_sizes.begin(), ngram_sizes.end(), stream, mr));
   // create the output strings column
-  return make_strings_column(
-    total_ngrams, std::move(offsets_column), chars.release(), 0, rmm::device_buffer{});
+  return make_strings_column(total_ngrams,
+                             std::move(offsets_column),
+                             chars.release(),
+                             0,
+                             cudf::create_null_mask(0, cudf::mask_state::UNALLOCATED));
 }
 
 }  // namespace detail
@@ -237,7 +239,7 @@ std::unique_ptr<cudf::column> ngrams_tokenize(cudf::strings_column_view const& s
                                               cudf::size_type ngrams,
                                               cudf::string_scalar const& delimiter,
                                               cudf::string_scalar const& separator,
-                                              rmm::cuda_stream_view stream,
+                                              cuda::stream_ref stream,
                                               rmm::device_async_resource_ref mr)
 {
   CUDF_FUNC_RANGE();
