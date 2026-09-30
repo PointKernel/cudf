@@ -73,46 +73,6 @@ CUDF_HOST_DEVICE constexpr S round_up_safe(S number_to_round, S modulus)
 }
 
 /**
- * @brief Rounds `number_to_round` down to the last multiple of modulus
- *
- * @deprecated Use `cuda::round_down` from `<cuda/cmath>` instead.
- *
- * @tparam S type to return
- * @param number_to_round number that is being rounded
- * @param modulus value to which to round
- * @return largest integer not greater than `number_to_round` and modulo `S` is zero.
- *
- * @note This function assumes that `number_to_round` is non-negative and
- * `modulus` is positive and does not check for overflow.
- */
-template <typename S>
-[[deprecated("Use cuda::round_down from <cuda/cmath> instead.")]]
-CUDF_HOST_DEVICE constexpr S round_down_safe(S number_to_round, S modulus) noexcept
-{
-  return cuda::round_down(number_to_round, modulus);
-}
-
-/**
- * @brief Rounds `number_to_round` up to the next multiple of modulus
- *
- * @deprecated Use `cuda::round_up` from `<cuda/cmath>` instead.
- *
- * @tparam S type to return
- * @param number_to_round number that is being rounded
- * @param modulus value to which to round
- * @return smallest integer greater than `number_to_round` and modulo `S` is zero.
- *
- * @note This function assumes that `number_to_round` is non-negative and
- * `modulus` is positive. The rounded result must be representable in `S`.
- */
-template <typename S>
-[[deprecated("Use cuda::round_up from <cuda/cmath> instead.")]]
-CUDF_HOST_DEVICE constexpr S round_up_unsafe(S number_to_round, S modulus) noexcept
-{
-  return cuda::round_up(number_to_round, modulus);
-}
-
-/**
  * Divides the left-hand-side by the right-hand-side, rounding up
  * to an integral multiple of the right-hand-side, e.g. (9,5) -> 2 , (10,5) -> 2, (11,5) -> 3.
  *
