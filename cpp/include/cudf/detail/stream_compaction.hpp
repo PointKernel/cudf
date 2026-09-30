@@ -72,7 +72,7 @@ std::unique_ptr<table> unique(table_view const& input,
                               duplicate_keep_option keep,
                               null_equality nulls_equal,
                               cuda::stream_ref stream,
-                              rmm::device_async_resource_ref mr);
+                              memory_resources mr);
 
 /**
  * @copydoc cudf::distinct

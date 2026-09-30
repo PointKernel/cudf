@@ -522,6 +522,7 @@ ConfigureTest(
   stream_compaction/distinct_tests.cpp
   stream_compaction/drop_nans_tests.cpp
   stream_compaction/drop_nulls_tests.cpp
+  stream_compaction/schema_dispatch_tests.cpp
   stream_compaction/stable_distinct_tests.cpp
   stream_compaction/unique_tests.cpp
 )

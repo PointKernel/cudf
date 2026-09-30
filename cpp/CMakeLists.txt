@@ -1102,6 +1102,7 @@ add_library(
   src/stream_compaction/drop_nans.cu
   src/stream_compaction/drop_nulls.cu
   src/stream_compaction/filter/filter.cu
+  src/stream_compaction/row_equality.cu
   src/stream_compaction/stable_distinct.cu
   src/stream_compaction/unique.cu
   src/strings/attributes.cu

@@ -301,18 +301,16 @@ enum class duplicate_keep_option {
  * @param[in] nulls_equal     flag to denote nulls are equal if null_equality::EQUAL, nulls are not
  *                            equal if null_equality::UNEQUAL
  * @param[in] stream          CUDA stream used for device memory operations and kernel launches
- * @param[in] mr              Device memory resource used to allocate the returned table's device
- *                            memory
+ * @param[in] mr              Memory resources used for output and temporary allocations
  *
  * @return Table with unique rows from each sequence of equivalent rows as specified by `keep`
  */
-std::unique_ptr<table> unique(
-  table_view const& input,
-  std::vector<size_type> const& keys,
-  duplicate_keep_option keep,
-  null_equality nulls_equal         = null_equality::EQUAL,
-  cuda::stream_ref stream           = cudf::get_default_stream(),
-  rmm::device_async_resource_ref mr = cudf::get_current_device_resource_ref());
+std::unique_ptr<table> unique(table_view const& input,
+                              std::vector<size_type> const& keys,
+                              duplicate_keep_option keep,
+                              null_equality nulls_equal = null_equality::EQUAL,
+                              cuda::stream_ref stream   = cudf::get_default_stream(),
+                              memory_resources mr       = cudf::get_current_device_resource_ref());
 
 /**
  * @brief Create a new table without duplicate rows.
