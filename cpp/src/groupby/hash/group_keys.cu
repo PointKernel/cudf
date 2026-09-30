@@ -12,6 +12,7 @@
 #include <cudf/detail/device_scalar.hpp>
 #include <cudf/detail/utilities/integer_utils.hpp>
 #include <cudf/detail/utilities/vector_factories.hpp>
+#include <cudf/null_mask.hpp>
 #include <cudf/utilities/error.hpp>
 #include <cudf/utilities/span.hpp>
 
@@ -448,8 +449,9 @@ grouped_keys group_keys(table_view const& keys,
   auto [row_bitmask_data, row_bitmask] =
     include_null_keys == null_policy::EXCLUDE
       ? compute_row_bitmask(keys, stream, temporary_resources)
-      : std::pair<rmm::device_buffer, bitmask_type const*>{
-          rmm::device_buffer{0, stream, mr.get_temporary_mr()}, nullptr};
+      : std::pair<cuda::device_buffer<std::byte>, bitmask_type const*>{
+          cudf::create_null_mask(0, cudf::mask_state::UNALLOCATED, stream, mr.get_temporary_mr()),
+          nullptr};
   auto preprocessed_keys =
     cudf::detail::row::hash::preprocessed_table::create(keys, stream, mr.get_temporary_mr());
   auto const comparator = cudf::detail::row::equality::self_comparator{preprocessed_keys};

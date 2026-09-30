@@ -9,6 +9,7 @@
 #include "groupby/common/utils.hpp"
 
 #include <cudf/detail/gather.hpp>
+#include <cudf/null_mask.hpp>
 #include <cudf/table/table_view.hpp>
 #include <cudf/utilities/error.hpp>
 #include <cudf/utilities/memory_resource.hpp>
@@ -45,7 +46,8 @@ streaming_groupby::impl::batch_insert_result streaming_groupby::impl::probe_and_
   auto [bitmask_buffer, batch_bitmask] =
     skip_rows_with_nulls
       ? detail::compute_row_bitmask(batch_keys, stream, cudf::memory_resources{temp_mr, temp_mr})
-      : std::pair<rmm::device_buffer, bitmask_type const*>{rmm::device_buffer{0, stream}, nullptr};
+      : std::pair<cuda::device_buffer<std::byte>, bitmask_type const*>{
+          cudf::create_null_mask(0, cudf::mask_state::UNALLOCATED, stream, temp_mr), nullptr};
 
   // Precompute batch hash values.  Caching is faster than inlining the row hasher
   rmm::device_uvector<hash_value_type> batch_hash_cache(batch_size, stream, temp_mr);
