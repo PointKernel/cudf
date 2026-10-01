@@ -1097,7 +1097,7 @@ ColumnDeviceView* child_columns_to_device_array(ColumnViewIterator child_begin,
                                                 void* h_ptr,
                                                 void* d_ptr)
 {
-  ColumnDeviceView* d_children =
+  auto d_children =
     static_cast<ColumnDeviceView*>(cuda::align_up(d_ptr, alignof(ColumnDeviceView)));
   auto num_children = std::distance(child_begin, child_end);
   if (num_children > 0) {
