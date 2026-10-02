@@ -25,6 +25,7 @@
 #include <cub/block/block_scan.cuh>
 #include <cub/warp/warp_reduce.cuh>
 #include <cuda/iterator>
+#include <cuda/mdspan>
 #include <cuda/std/chrono>
 #include <cuda/std/functional>
 #include <cuda/std/iterator>
@@ -43,8 +44,6 @@
 namespace cudf::io::parquet::detail {
 
 namespace {
-
-using ::cudf::detail::device_2dspan;
 
 using cudf::io::detail::codec_exec_result;
 using cudf::io::detail::codec_status;
@@ -384,7 +383,7 @@ inline void __device__ set_page_data_start(state_type* s)
 // blockDim {512,1,1}
 template <int block_size>
 CUDF_KERNEL void __launch_bounds__(block_size)
-  gpuInitRowGroupFragments(device_2dspan<PageFragment> frag,
+  gpuInitRowGroupFragments(cuda::device_mdspan<PageFragment, cuda::std::dextents<size_t, 2>> frag,
                            device_span<parquet_column_device_view const> col_desc,
                            device_span<partition_info const> partitions,
                            device_span<int const> part_frag_offset,
@@ -394,7 +393,7 @@ CUDF_KERNEL void __launch_bounds__(block_size)
 
   frag_init_state_s* const s          = &state_g;
   auto const t                        = threadIdx.x;
-  auto const num_fragments_per_column = frag.size().second;
+  auto const num_fragments_per_column = frag.extent(1);
 
   if (t == 0) { s->col = col_desc[blockIdx.x]; }
   __syncthreads();
@@ -407,14 +406,14 @@ CUDF_KERNEL void __launch_bounds__(block_size)
       int const p            = it - part_frag_offset.begin() - 1;
       int const part_end_row = partitions[p].start_row + partitions[p].num_rows;
       s->frag.start_row = (frag_y - part_frag_offset[p]) * fragment_size + partitions[p].start_row;
-      s->frag.chunk     = frag[blockIdx.x][frag_y].chunk;
+      s->frag.chunk     = frag(blockIdx.x, frag_y).chunk;
       init_frag_state(s, fragment_size, part_end_row);
     }
     __syncthreads();
 
     calculate_frag_size<block_size>(s, t);
     __syncthreads();
-    if (t == 0) { frag[blockIdx.x][frag_y] = s->frag; }
+    if (t == 0) { frag(blockIdx.x, frag_y) = s->frag; }
   }
 }
 
@@ -555,7 +554,7 @@ __device__ size_t delta_data_len(Type physical_type,
 
 // blockDim {128,1,1}
 CUDF_KERNEL void __launch_bounds__(128)
-  gpuInitPages(device_2dspan<EncColumnChunk> chunks,
+  gpuInitPages(cuda::device_mdspan<EncColumnChunk, cuda::std::dextents<size_t, 2>> chunks,
                device_span<EncPage> pages,
                device_span<size_type> page_sizes,
                device_span<size_type const> comp_page_sizes,
@@ -585,7 +584,7 @@ CUDF_KERNEL void __launch_bounds__(128)
 
   if (t == 0) {
     col_g  = col_desc[blockIdx.x];
-    ck_g   = chunks[blockIdx.y][blockIdx.x];
+    ck_g   = chunks(blockIdx.y, blockIdx.x);
     page_g = {};
   }
   __syncthreads();
@@ -632,7 +631,7 @@ CUDF_KERNEL void __launch_bounds__(128)
         page_g.compressed_data = ck_g.compressed_bfr + comp_page_offset;
         page_g.num_fragments   = 0;
         page_g.page_type       = PageType::DICTIONARY_PAGE;
-        page_g.chunk           = &chunks[blockIdx.y][blockIdx.x];
+        page_g.chunk           = &chunks(blockIdx.y, blockIdx.x);
         page_g.chunk_id        = blockIdx.y * num_columns + blockIdx.x;
         page_g.hdr_size        = 0;
         page_g.def_lvl_bytes   = 0;
@@ -737,7 +736,7 @@ CUDF_KERNEL void __launch_bounds__(128)
         }
         if (!t) {
           page_g.num_fragments  = fragments_in_chunk - page_start;
-          page_g.chunk          = &chunks[blockIdx.y][blockIdx.x];
+          page_g.chunk          = &chunks(blockIdx.y, blockIdx.x);
           page_g.chunk_id       = blockIdx.y * num_columns + blockIdx.x;
           page_g.page_type      = data_page_type;
           page_g.hdr_size       = 0;
@@ -900,7 +899,7 @@ CUDF_KERNEL void __launch_bounds__(128)
   __syncthreads();
   if (t == 0) {
     if (not pages.empty()) ck_g.pages = &pages[ck_g.first_page];
-    chunks[blockIdx.y][blockIdx.x] = ck_g;
+    chunks(blockIdx.y, blockIdx.x) = ck_g;
     if (chunk_grstats) chunk_grstats[blockIdx.y * num_columns + blockIdx.x] = pagestats_g;
   }
 }
@@ -3400,15 +3399,15 @@ CUDF_KERNEL void __launch_bounds__(1)
   ck_g->var_bytes_size    = var_bytes;
 }
 
-void InitRowGroupFragments(device_2dspan<PageFragment> frag,
+void InitRowGroupFragments(cuda::device_mdspan<PageFragment, cuda::std::dextents<size_t, 2>> frag,
                            device_span<parquet_column_device_view const> col_desc,
                            device_span<partition_info const> partitions,
                            device_span<int const> part_frag_offset,
                            uint32_t fragment_size,
                            cuda::stream_ref stream)
 {
-  auto const num_columns              = frag.size().first;
-  auto const num_fragments_per_column = frag.size().second;
+  auto const num_columns              = frag.extent(0);
+  auto const num_fragments_per_column = frag.extent(1);
   auto const grid_y = std::min(static_cast<uint32_t>(num_fragments_per_column), MAX_GRID_Y_SIZE);
   dim3 const dim_grid(num_columns, grid_y);  // 1 threadblock per fragment
   gpuInitRowGroupFragments<512><<<dim_grid, 512, 0, stream.get()>>>(
@@ -3435,7 +3434,7 @@ void InitFragmentStatistics(device_span<statistics_group> groups,
   CUDF_CUDA_TRY(cudaGetLastError());
 }
 
-void InitEncoderPages(device_2dspan<EncColumnChunk> chunks,
+void InitEncoderPages(cuda::device_mdspan<EncColumnChunk, cuda::std::dextents<size_t, 2>> chunks,
                       device_span<EncPage> pages,
                       device_span<size_type> page_sizes,
                       device_span<size_type const> comp_page_sizes,
@@ -3451,7 +3450,7 @@ void InitEncoderPages(device_2dspan<EncColumnChunk> chunks,
                       kernel_error::pointer error_code,
                       cuda::stream_ref stream)
 {
-  auto num_rowgroups = chunks.size().first;
+  auto num_rowgroups = chunks.extent(0);
   dim3 dim_grid(num_columns, num_rowgroups);  // 1 threadblock per rowgroup
   gpuInitPages<<<dim_grid, encode_block_size, 0, stream.get()>>>(chunks,
                                                                  pages,

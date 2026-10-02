@@ -18,6 +18,9 @@
 #include <cudf/strings/strings_column_view.hpp>
 #include <cudf/structs/structs_column_view.hpp>
 
+#include <cuda/mdspan>
+#include <cuda/std/span>
+
 #include <algorithm>
 #include <format>
 #include <functional>
@@ -84,15 +87,16 @@ void fill_table_meta(table_input_metadata& table_meta)
 }
 
 std::optional<size_type> compute_smaller_fragment_size(
-  cudf::detail::host_2dspan<PageFragment const> fragments,
+  cuda::host_mdspan<PageFragment const, cuda::std::dextents<size_t, 2>> fragments,
   host_span<parquet_column_device_view const> col_desc,
   size_type input_fragment_size)
 {
   auto fragment_size     = input_fragment_size;
-  auto const num_columns = fragments.size().first;
+  auto const num_columns = fragments.extent(0);
 
   for (auto col_idx = 0; std::cmp_less(col_idx, num_columns); ++col_idx) {
-    for (auto const& frag : fragments[col_idx]) {
+    for (auto const& frag : cuda::std::span{fragments.data_handle() + col_idx * fragments.extent(1),
+                                            fragments.extent(1)}) {
       auto const page_size =
         max_fragment_page_size(frag.fragment_data_size, frag.num_values, col_desc[col_idx]);
       if (page_size <= MAX_PARQUET_PAGE_SIZE) { continue; }

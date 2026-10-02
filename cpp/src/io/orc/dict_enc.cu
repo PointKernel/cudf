@@ -14,6 +14,7 @@
 #include <cudf/io/orc_types.hpp>
 
 #include <cuda/atomic>
+#include <cuda/mdspan>
 #include <cuda/stream>
 
 #include <algorithm>
@@ -23,21 +24,22 @@ namespace cudf::io::orc::detail {
 /**
  * @brief Counts the number of characters in each rowgroup of each string column.
  */
-CUDF_KERNEL void rowgroup_char_counts_kernel(device_2dspan<size_type> char_counts,
-                                             device_span<orc_column_device_view const> orc_columns,
-                                             device_2dspan<rowgroup_rows const> rowgroup_bounds,
-                                             device_span<uint32_t const> str_col_indexes)
+CUDF_KERNEL void rowgroup_char_counts_kernel(
+  cuda::device_mdspan<size_type, cuda::std::dextents<size_t, 2>> char_counts,
+  device_span<orc_column_device_view const> orc_columns,
+  cuda::device_mdspan<rowgroup_rows const, cuda::std::dextents<size_t, 2>> rowgroup_bounds,
+  device_span<uint32_t const> str_col_indexes)
 {
   // Index of the column in the `str_col_indexes` array
   auto const str_col_idx = blockIdx.x % str_col_indexes.size();
   // Index of the column in the `orc_columns` array
   auto const col_idx       = str_col_indexes[str_col_idx];
   auto const row_group_idx = (blockIdx.x / str_col_indexes.size()) * blockDim.x + threadIdx.x;
-  if (row_group_idx >= rowgroup_bounds.size().first) { return; }
+  if (row_group_idx >= rowgroup_bounds.extent(0)) { return; }
 
   auto const& str_col  = orc_columns[col_idx];
-  auto const start_row = rowgroup_bounds[row_group_idx][col_idx].begin + str_col.offset();
-  auto const num_rows  = rowgroup_bounds[row_group_idx][col_idx].size();
+  auto const start_row = rowgroup_bounds(row_group_idx, col_idx).begin + str_col.offset();
+  auto const num_rows  = rowgroup_bounds(row_group_idx, col_idx).size();
 
   size_type char_count = 0;
   if (num_rows > 0) {
@@ -45,18 +47,19 @@ CUDF_KERNEL void rowgroup_char_counts_kernel(device_2dspan<size_type> char_count
     auto const offsets_itr = cudf::detail::input_offsetalator(offsets.head(), offsets.type());
     char_count = static_cast<size_type>(offsets_itr[start_row + num_rows] - offsets_itr[start_row]);
   }
-  char_counts[str_col_idx][row_group_idx] = char_count;
+  char_counts(str_col_idx, row_group_idx) = char_count;
 }
 
-void rowgroup_char_counts(device_2dspan<size_type> counts,
-                          device_span<orc_column_device_view const> orc_columns,
-                          device_2dspan<rowgroup_rows const> rowgroup_bounds,
-                          device_span<uint32_t const> str_col_indexes,
-                          cuda::stream_ref stream)
+void rowgroup_char_counts(
+  cuda::device_mdspan<size_type, cuda::std::dextents<size_t, 2>> counts,
+  device_span<orc_column_device_view const> orc_columns,
+  cuda::device_mdspan<rowgroup_rows const, cuda::std::dextents<size_t, 2>> rowgroup_bounds,
+  device_span<uint32_t const> str_col_indexes,
+  cuda::stream_ref stream)
 {
-  if (rowgroup_bounds.count() == 0) { return; }
+  if (rowgroup_bounds.size() == 0) { return; }
 
-  auto const num_rowgroups = rowgroup_bounds.size().first;
+  auto const num_rowgroups = rowgroup_bounds.extent(0);
   if (str_col_indexes.empty()) { return; }
 
   int block_size    = 0;  // suggested thread count to use
@@ -119,14 +122,14 @@ int blocks_per_dictionary(Kernel kernel,
  * @brief Builds the hash map of unique values for every stripe dictionary.
  */
 template <int block_size, cuda::thread_scope Scope>
-CUDF_KERNEL void __launch_bounds__(block_size)
-  populate_dictionary_hash_maps_kernel(device_2dspan<stripe_dictionary> dictionaries,
-                                       device_span<orc_column_device_view const> columns)
+CUDF_KERNEL void __launch_bounds__(block_size) populate_dictionary_hash_maps_kernel(
+  cuda::device_mdspan<stripe_dictionary, cuda::std::dextents<size_t, 2>> dictionaries,
+  device_span<orc_column_device_view const> columns)
 {
   // blockIdx.x selects the dictionary, blockIdx.y splits its rows across blocks
-  auto const num_stripes = dictionaries.size().second;
+  auto const num_stripes = dictionaries.extent(1);
   auto const t           = threadIdx.x;
-  auto& dict             = dictionaries[blockIdx.x / num_stripes][blockIdx.x % num_stripes];
+  auto& dict             = dictionaries(blockIdx.x / num_stripes, blockIdx.x % num_stripes);
   auto const& col        = columns[dict.column_idx];
 
   // Make a view of the hash map
@@ -194,12 +197,12 @@ CUDF_KERNEL void __launch_bounds__(block_size)
 }
 
 template <int block_size>
-CUDF_KERNEL void __launch_bounds__(block_size)
-  collect_map_entries_kernel(device_2dspan<stripe_dictionary> dictionaries)
+CUDF_KERNEL void __launch_bounds__(block_size) collect_map_entries_kernel(
+  cuda::device_mdspan<stripe_dictionary, cuda::std::dextents<size_t, 2>> dictionaries)
 {
-  auto const col_idx    = blockIdx.x / dictionaries.size().second;
-  auto const stripe_idx = blockIdx.x % dictionaries.size().second;
-  auto const& dict      = dictionaries[col_idx][stripe_idx];
+  auto const col_idx    = blockIdx.x / dictionaries.extent(1);
+  auto const stripe_idx = blockIdx.x % dictionaries.extent(1);
+  auto const& dict      = dictionaries(col_idx, stripe_idx);
 
   if (not dict.is_enabled) { return; }
 
@@ -224,13 +227,13 @@ CUDF_KERNEL void __launch_bounds__(block_size)
 }
 
 template <int block_size>
-CUDF_KERNEL void __launch_bounds__(block_size)
-  get_dictionary_indices_kernel(device_2dspan<stripe_dictionary> dictionaries,
-                                device_span<orc_column_device_view const> columns)
+CUDF_KERNEL void __launch_bounds__(block_size) get_dictionary_indices_kernel(
+  cuda::device_mdspan<stripe_dictionary, cuda::std::dextents<size_t, 2>> dictionaries,
+  device_span<orc_column_device_view const> columns)
 {
   // blockIdx.x selects the dictionary, blockIdx.y splits its rows across blocks
-  auto const num_stripes = dictionaries.size().second;
-  auto const& dict       = dictionaries[blockIdx.x / num_stripes][blockIdx.x % num_stripes];
+  auto const num_stripes = dictionaries.extent(1);
+  auto const& dict       = dictionaries(blockIdx.x / num_stripes, blockIdx.x % num_stripes);
   if (not dict.is_enabled) { return; }
 
   auto const& col = columns[dict.column_idx];
@@ -267,21 +270,22 @@ CUDF_KERNEL void __launch_bounds__(block_size)
   }
 }
 
-void populate_dictionary_hash_maps(device_2dspan<stripe_dictionary> dictionaries,
-                                   device_span<orc_column_device_view const> columns,
-                                   size_type max_dict_rows,
-                                   cuda::stream_ref stream)
+void populate_dictionary_hash_maps(
+  cuda::device_mdspan<stripe_dictionary, cuda::std::dextents<size_t, 2>> dictionaries,
+  device_span<orc_column_device_view const> columns,
+  size_type max_dict_rows,
+  cuda::stream_ref stream)
 {
-  if (dictionaries.count() == 0) { return; }
+  if (dictionaries.size() == 0) { return; }
   constexpr int block_size = 256;
 
   auto const blocks_per_dict = blocks_per_dictionary(
     populate_dictionary_hash_maps_kernel<block_size, cuda::thread_scope_device>,
     block_size,
-    dictionaries.count(),
+    dictionaries.size(),
     max_dict_rows);
 
-  dim3 const grid{static_cast<unsigned int>(dictionaries.count()),
+  dim3 const grid{static_cast<unsigned int>(dictionaries.size()),
                   static_cast<unsigned int>(blocks_per_dict)};
 
   if (blocks_per_dict == 1) {
@@ -294,27 +298,30 @@ void populate_dictionary_hash_maps(device_2dspan<stripe_dictionary> dictionaries
   CUDF_CUDA_TRY(cudaGetLastError());
 }
 
-void collect_map_entries(device_2dspan<stripe_dictionary> dictionaries, cuda::stream_ref stream)
+void collect_map_entries(
+  cuda::device_mdspan<stripe_dictionary, cuda::std::dextents<size_t, 2>> dictionaries,
+  cuda::stream_ref stream)
 {
-  if (dictionaries.count() == 0) { return; }
+  if (dictionaries.size() == 0) { return; }
   constexpr int block_size = 1024;
   collect_map_entries_kernel<block_size>
-    <<<dictionaries.count(), block_size, 0, stream.get()>>>(dictionaries);
+    <<<dictionaries.size(), block_size, 0, stream.get()>>>(dictionaries);
   CUDF_CUDA_TRY(cudaGetLastError());
 }
 
-void get_dictionary_indices(device_2dspan<stripe_dictionary> dictionaries,
-                            device_span<orc_column_device_view const> columns,
-                            size_type max_dict_rows,
-                            cuda::stream_ref stream)
+void get_dictionary_indices(
+  cuda::device_mdspan<stripe_dictionary, cuda::std::dextents<size_t, 2>> dictionaries,
+  device_span<orc_column_device_view const> columns,
+  size_type max_dict_rows,
+  cuda::stream_ref stream)
 {
-  if (dictionaries.count() == 0) { return; }
+  if (dictionaries.size() == 0) { return; }
   constexpr int block_size = 1024;
 
   auto const blocks_per_dict = blocks_per_dictionary(
-    get_dictionary_indices_kernel<block_size>, block_size, dictionaries.count(), max_dict_rows);
+    get_dictionary_indices_kernel<block_size>, block_size, dictionaries.size(), max_dict_rows);
 
-  dim3 const grid{static_cast<unsigned int>(dictionaries.count()),
+  dim3 const grid{static_cast<unsigned int>(dictionaries.size()),
                   static_cast<unsigned int>(blocks_per_dict)};
   get_dictionary_indices_kernel<block_size>
     <<<grid, block_size, 0, stream.get()>>>(dictionaries, columns);

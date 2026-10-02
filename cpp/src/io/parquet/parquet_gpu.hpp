@@ -23,6 +23,7 @@
 
 #include <cuda/atomic>
 #include <cuda/iterator>
+#include <cuda/mdspan>
 #include <cuda/std/limits>
 #include <cuda/std/optional>
 #include <cuda/stream>
@@ -1194,7 +1195,7 @@ void decode_page_data(cudf::detail::hostdevice_span<PageInfo> pages,
  * @param[in] fragment_size Number of rows per fragment
  * @param[in] stream CUDA stream to use
  */
-void InitRowGroupFragments(cudf::detail::device_2dspan<PageFragment> frag,
+void InitRowGroupFragments(cuda::device_mdspan<PageFragment, cuda::std::dextents<size_t, 2>> frag,
                            device_span<parquet_column_device_view const> col_desc,
                            device_span<partition_info const> partitions,
                            device_span<int const> first_frag_in_part,
@@ -1248,7 +1249,7 @@ void InitFragmentStatistics(device_span<statistics_group> groups,
  * @param[out] error_code Error code for kernel failures
  * @param[in] stream CUDA stream to use
  */
-void InitEncoderPages(cudf::detail::device_2dspan<EncColumnChunk> chunks,
+void InitEncoderPages(cuda::device_mdspan<EncColumnChunk, cuda::std::dextents<size_t, 2>> chunks,
                       device_span<EncPage> pages,
                       device_span<size_type> page_sizes,
                       device_span<size_type const> comp_page_sizes,

@@ -38,9 +38,11 @@
 #include <cooperative_groups/memcpy_async.h>
 #include <cuda/functional>
 #include <cuda/iterator>
+#include <cuda/mdspan>
 #include <cuda/std/climits>
 #include <cuda/std/limits>
 #include <cuda/std/optional>
+#include <cuda/std/span>
 #include <cuda/std/utility>
 #include <cuda/stream>
 #include <thrust/execution_policy.h>
@@ -703,8 +705,8 @@ std::vector<std::vector<rowgroup_rows>> calculate_aligned_rowgroup_bounds(
 
   auto d_pd_set_counts_data = rmm::device_uvector<cudf::size_type>(
     orc_table.num_columns() * segmentation.num_rowgroups(), stream);
-  auto const d_pd_set_counts =
-    device_2dspan<cudf::size_type>{d_pd_set_counts_data, orc_table.num_columns()};
+  auto const d_pd_set_counts = cuda::device_mdspan<cudf::size_type, cuda::std::dextents<size_t, 2>>{
+    d_pd_set_counts_data.data(), segmentation.num_rowgroups(), orc_table.num_columns()};
   reduce_pushdown_masks(orc_table.d_columns, segmentation.rowgroups, d_pd_set_counts, stream);
 
   auto aligned_rgs = hostdevice_2dvector<rowgroup_rows>(
@@ -738,12 +740,12 @@ std::vector<std::vector<rowgroup_rows>> calculate_aligned_rowgroup_bounds(
       auto seek_last_borrow_rg = [&](auto rg_idx, size_type& bits_to_borrow) {
         auto curr         = rg_idx + 1;
         auto curr_rg_size = [&]() {
-          return parent_column.pushdown_mask != nullptr ? d_pd_set_counts[curr][parent_col_idx]
-                                                        : out_rowgroups[curr][col_idx].size();
+          return parent_column.pushdown_mask != nullptr ? d_pd_set_counts(curr, parent_col_idx)
+                                                        : out_rowgroups(curr, col_idx).size();
         };
         while (curr < stripe_end and curr_rg_size() <= bits_to_borrow) {
           // All bits from rowgroup borrowed, make the rowgroup empty
-          out_rowgroups[curr][col_idx].begin = out_rowgroups[curr][col_idx].end;
+          out_rowgroups(curr, col_idx).begin = out_rowgroups(curr, col_idx).end;
           bits_to_borrow -= curr_rg_size();
           ++curr;
         }
@@ -752,7 +754,7 @@ std::vector<std::vector<rowgroup_rows>> calculate_aligned_rowgroup_bounds(
 
       int previously_borrowed = 0;
       for (auto rg_idx = stripe.first; rg_idx + 1 < stripe_end; ++rg_idx) {
-        auto& rg = out_rowgroups[rg_idx][col_idx];
+        auto& rg = out_rowgroups(rg_idx, col_idx);
 
         if (parent_column.pushdown_mask == nullptr) {
           // No pushdown mask, all null mask bits will be encoded
@@ -762,11 +764,11 @@ std::vector<std::vector<rowgroup_rows>> calculate_aligned_rowgroup_bounds(
             auto const last_borrow_rg_idx = seek_last_borrow_rg(rg_idx, bits_to_borrow);
             if (last_borrow_rg_idx == stripe_end) {
               // Didn't find enough bits to borrow, move the rowgroup end to the stripe end
-              rg.end = out_rowgroups[stripe_end - 1][col_idx].end;
+              rg.end = out_rowgroups(stripe_end - 1, col_idx).end;
               // Done with this stripe
               break;
             }
-            auto& last_borrow_rg = out_rowgroups[last_borrow_rg_idx][col_idx];
+            auto& last_borrow_rg = out_rowgroups(last_borrow_rg_idx, col_idx);
             last_borrow_rg.begin += bits_to_borrow;
             rg.end = last_borrow_rg.begin;
             // Skip the rowgroups we emptied in the loop
@@ -776,7 +778,7 @@ std::vector<std::vector<rowgroup_rows>> calculate_aligned_rowgroup_bounds(
           // pushdown mask present; null mask bits w/ set pushdown mask bits will be encoded
           // Use the number of set bits in pushdown mask as size
           auto bits_to_borrow = [&]() {
-            auto const parent_valid_count = d_pd_set_counts[rg_idx][parent_col_idx];
+            auto const parent_valid_count = d_pd_set_counts(rg_idx, parent_col_idx);
             if (parent_valid_count < previously_borrowed) {
               // Borrow to make an empty rowgroup
               return previously_borrowed - parent_valid_count;
@@ -795,12 +797,12 @@ std::vector<std::vector<rowgroup_rows>> calculate_aligned_rowgroup_bounds(
           auto const last_borrow_rg_idx = seek_last_borrow_rg(rg_idx, bits_to_borrow);
           if (last_borrow_rg_idx == stripe_end) {
             // Didn't find enough bits to borrow, move the rowgroup end to the stripe end
-            rg.end = out_rowgroups[stripe_end - 1][col_idx].end;
+            rg.end = out_rowgroups(stripe_end - 1, col_idx).end;
             // Done with this stripe
             break;
           }
 
-          auto& last_borrow_rg = out_rowgroups[last_borrow_rg_idx][col_idx];
+          auto& last_borrow_rg = out_rowgroups(last_borrow_rg_idx, col_idx);
           // First row that does not need to be borrowed
           auto borrow_end = last_borrow_rg.begin;
 
@@ -927,9 +929,9 @@ std::pair<encoded_data, std::vector<extent_info>> encode_columns(
     chunks.count(),
     [chunks = chunks.device_view(),
      cols = device_span<orc_column_device_view const>{orc_table.d_columns}] __device__(auto& idx) {
-      auto const col_idx             = idx / chunks.size().second;
-      auto const rg_idx              = idx % chunks.size().second;
-      chunks[col_idx][rg_idx].column = &cols[col_idx];
+      auto const col_idx             = idx / chunks.extent(1);
+      auto const rg_idx              = idx % chunks.extent(1);
+      chunks(col_idx, rg_idx).column = &cols[col_idx];
     });
 
   auto validity_check_indices = [&](size_t col_idx) {
@@ -975,7 +977,8 @@ std::pair<encoded_data, std::vector<extent_info>> encode_columns(
   // whether an extent size may exceed what the encoder ends up writing.
   auto const num_streams = streams.size();
   std::vector<extent_info> extent_storage(segmentation.num_stripes() * num_streams);
-  auto const extents = host_2dspan<extent_info>{extent_storage, num_streams};
+  auto const extents = cuda::host_mdspan<extent_info, cuda::std::dextents<size_t, 2>>{
+    extent_storage.data(), segmentation.num_stripes(), num_streams};
   for (auto const& stripe : segmentation.stripes) {
     for (size_t col_idx = 0; col_idx < num_columns; col_idx++) {
       for (int strm_type = 0; strm_type < CI_NUM_STREAMS; ++strm_type) {
@@ -1037,7 +1040,7 @@ std::pair<encoded_data, std::vector<extent_info>> encode_columns(
           stripe_size += strm.lengths[strm_type] + uncomp_block_align - 1;
         });
 
-        auto& extent     = extents[stripe.id][strm_id];
+        auto& extent     = extents(stripe.id, strm_id);
         extent.size      = stripe_size;
         extent.has_slack = has_slack;
       }
@@ -1050,7 +1053,7 @@ std::pair<encoded_data, std::vector<extent_info>> encode_columns(
   size_t transient_arena_size  = 0;
   for (size_t s = 0; s < segmentation.num_stripes(); ++s) {
     for (size_t strm_id = 0; strm_id < num_streams; ++strm_id) {
-      auto& extent = extents[s][strm_id];
+      auto& extent = extents(s, strm_id);
       if (extent.size == 0) { continue; }
       extent.is_transient = segmentation.stripes[s].size > 1 and extent.has_slack;
       auto& arena_size    = extent.is_transient ? transient_arena_size : persistent_arena_size;
@@ -1067,7 +1070,7 @@ std::pair<encoded_data, std::vector<extent_info>> encode_columns(
     segmentation.num_stripes(), std::vector<device_span<uint8_t>>(num_streams));
   for (size_t s = 0; s < segmentation.num_stripes(); ++s) {
     for (size_t strm_id = 0; strm_id < num_streams; ++strm_id) {
-      auto const extent = extents[s][strm_id];
+      auto const extent = extents(s, strm_id);
       // Zero-size extents keep a null pointer, matching the empty device_uvector they replaced.
       if (extent.size == 0) { continue; }
       auto& arena               = extent.is_transient ? transient_buffer : persistent_buffer;
@@ -1158,12 +1161,13 @@ std::pair<encoded_data, std::vector<extent_info>> encode_columns(
  * @param[in] stream CUDA stream used for device memory operations and kernel launches
  * @return The stripes' information
  */
-std::vector<StripeInformation> gather_stripes(size_t num_index_streams,
-                                              file_segmentation const& segmentation,
-                                              host_2dspan<extent_info const> extents,
-                                              encoded_data* enc_data,
-                                              hostdevice_2dvector<stripe_stream>* strm_desc,
-                                              cuda::stream_ref stream)
+std::vector<StripeInformation> gather_stripes(
+  size_t num_index_streams,
+  file_segmentation const& segmentation,
+  cuda::host_mdspan<extent_info const, cuda::std::dextents<size_t, 2>> extents,
+  encoded_data* enc_data,
+  hostdevice_2dvector<stripe_stream>* strm_desc,
+  cuda::stream_ref stream)
 {
   if (segmentation.num_stripes() == 0) { return {}; }
 
@@ -1177,7 +1181,8 @@ std::vector<StripeInformation> gather_stripes(size_t num_index_streams,
     device_span<uint8_t> view{};
   };
   std::vector<gather_extent> gather_storage(segmentation.num_stripes() * num_streams_in_data);
-  auto const gather_extents = host_2dspan<gather_extent>{gather_storage, num_streams_in_data};
+  auto const gather_extents = cuda::host_mdspan<gather_extent, cuda::std::dextents<size_t, 2>>{
+    gather_storage.data(), segmentation.num_stripes(), num_streams_in_data};
 
   // Compute per-(stripe, stream) actual sizes and decide which need a gathered copy.
   for (auto const& stripe : segmentation.stripes) {
@@ -1200,10 +1205,10 @@ std::vector<StripeInformation> gather_stripes(size_t num_index_streams,
         // Compact when the chunks are not already contiguous, i.e. when the encoder wrote less
         // than the extent was sized for. Extents in `transient_buffer` are compacted regardless,
         // so that arena can be released below.
-        bool const gathered = (stripe.size > 1 and (extents[stripe.id][stream_id].is_transient or
+        bool const gathered = (stripe.size > 1 and (extents(stripe.id, stream_id).is_transient or
                                                     allocated_stripe_size > actual_stripe_size));
 
-        auto& extent    = gather_extents[stripe.id][stream_id];
+        auto& extent    = gather_extents(stripe.id, stream_id);
         extent.size     = actual_stripe_size;
         extent.gathered = gathered;
       }
@@ -1214,7 +1219,7 @@ std::vector<StripeInformation> gather_stripes(size_t num_index_streams,
   size_t gather_total = 0;
   for (size_t s = 0; s < segmentation.num_stripes(); ++s) {
     for (size_t strm_id = 0; strm_id < num_streams_in_data; ++strm_id) {
-      auto& extent = gather_extents[s][strm_id];
+      auto& extent = gather_extents(s, strm_id);
       if (!extent.gathered) { continue; }
       gather_total  = util::round_up_unsafe<size_t>(gather_total, extent_alignment);
       extent.offset = gather_total;
@@ -1232,7 +1237,7 @@ std::vector<StripeInformation> gather_stripes(size_t num_index_streams,
         auto const stream_id = col_streams[0].ids[k];
         if (stream_id == -1) { continue; }
 
-        auto& extent     = gather_extents[stripe.id][stream_id];
+        auto& extent     = gather_extents(stripe.id, stream_id);
         uint8_t* dst_ptr = nullptr;
         if (extent.gathered) {
           // Non-null even when the extent is empty, unlike the empty device_uvector this replaced.
@@ -1268,7 +1273,7 @@ std::vector<StripeInformation> gather_stripes(size_t num_index_streams,
   // spans, so consumers that read enc_data->data observe the post-gather state.
   for (size_t stripe_id = 0; stripe_id < enc_data->data.size(); ++stripe_id) {
     for (size_t stream_id = 0; stream_id < num_streams_in_data; ++stream_id) {
-      auto const extent = gather_extents[stripe_id][stream_id];
+      auto const extent = gather_extents(stripe_id, stream_id);
       if (extent.gathered) { enc_data->data[stripe_id][stream_id] = extent.view; }
     }
   }
@@ -1620,19 +1625,20 @@ encoded_footer_statistics finish_statistic_blobs(Footer const& footer,
  * @param[in] compression_blocksize The block size used for compression
  * @param[in] out_sink Sink for writing data
  */
-void write_index_stream(int32_t stripe_id,
-                        int32_t stream_id,
-                        host_span<orc_column_view const> columns,
-                        file_segmentation const& segmentation,
-                        host_2dspan<encoder_chunk_streams const> enc_streams,
-                        host_2dspan<stripe_stream const> strm_desc,
-                        host_span<codec_exec_result const> comp_res,
-                        host_span<col_stats_blob const> rg_stats,
-                        StripeInformation* stripe,
-                        orc_streams* streams,
-                        compression_type compression,
-                        size_t compression_blocksize,
-                        std::unique_ptr<data_sink> const& out_sink)
+void write_index_stream(
+  int32_t stripe_id,
+  int32_t stream_id,
+  host_span<orc_column_view const> columns,
+  file_segmentation const& segmentation,
+  cuda::host_mdspan<encoder_chunk_streams const, cuda::std::dextents<size_t, 2>> enc_streams,
+  cuda::host_mdspan<stripe_stream const, cuda::std::dextents<size_t, 2>> strm_desc,
+  host_span<codec_exec_result const> comp_res,
+  host_span<col_stats_blob const> rg_stats,
+  StripeInformation* stripe,
+  orc_streams* streams,
+  compression_type compression,
+  size_t compression_blocksize,
+  std::unique_ptr<data_sink> const& out_sink)
 {
   row_group_index_info present;
   row_group_index_info data;
@@ -1648,7 +1654,7 @@ void write_index_stream(int32_t stripe_id,
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wdangling-reference"
 #endif
-        auto const& ss = strm_desc[stripe_id][stream.ids[type] - (columns.size() + 1)];
+        auto const& ss = strm_desc(stripe_id, stream.ids[type] - (columns.size() + 1));
 #if defined(__GNUC__) && (__GNUC__ >= 14)
 #pragma GCC diagnostic pop
 #endif
@@ -1682,7 +1688,7 @@ void write_index_stream(int32_t stripe_id,
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wdangling-reference"
 #endif
-    auto const& strm = enc_streams[column_id][0];
+    auto const& strm = enc_streams(column_id, 0);
 #if defined(__GNUC__) && (__GNUC__ >= 14)
 #pragma GCC diagnostic pop
 #endif
@@ -1718,7 +1724,7 @@ void write_index_stream(int32_t stripe_id,
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wdangling-reference"
 #endif
-      const auto& strm = enc_streams[column_id][rowgroup];
+      const auto& strm = enc_streams(column_id, rowgroup);
 #if defined(__GNUC__) && (__GNUC__ >= 14)
 #pragma GCC diagnostic pop
 #endif
@@ -2070,7 +2076,11 @@ hostdevice_2dvector<rowgroup_rows> calculate_rowgroup_bounds(orc_table_view cons
      rg_bounds = rowgroup_bounds.device_view(),
      rowgroup_size] __device__(auto rg_idx) mutable {
       thrust::transform(
-        thrust::seq, cols.begin(), cols.end(), rg_bounds[rg_idx].begin(), [&](auto const& col) {
+        thrust::seq,
+        cols.begin(),
+        cols.end(),
+        rg_bounds.data_handle() + rg_idx * rg_bounds.extent(1),
+        [&](auto const& col) {
           // Root column
           if (!col.parent_index.has_value()) {
             size_type const rows_begin = rg_idx * rowgroup_size;
@@ -2081,7 +2091,7 @@ hostdevice_2dvector<rowgroup_rows> calculate_rowgroup_bounds(orc_table_view cons
             // Child column
             auto const parent_index           = *col.parent_index;
             orc_column_device_view parent_col = cols[parent_index];
-            auto const parent_rg              = rg_bounds[rg_idx][parent_index];
+            auto const parent_rg              = rg_bounds(rg_idx, parent_index);
             if (parent_col.type().id() != type_id::LIST) {
               auto const offset_diff = parent_col.offset() - col.offset();
               return rowgroup_rows{parent_rg.begin + offset_diff, parent_rg.end + offset_diff};
@@ -2159,7 +2169,7 @@ encoder_decimal_info decimal_chunk_sizes(orc_table_view& orc_table,
                      [src       = esizes.data(),
                       col_idx   = col_idx,
                       rg_bounds = segmentation.rowgroups.device_view()] __device__(auto idx) {
-                       return src[rg_bounds[idx][col_idx].end - 1];
+                       return src[rg_bounds(idx, col_idx).end - 1];
                      });
 
     rg_sizes.emplace(col_idx, cudf::detail::make_host_vector_async(d_tmp_rowgroup_sizes, stream));
@@ -2204,15 +2214,17 @@ std::unique_ptr<table_input_metadata> make_table_meta(table_view const& input)
 
 // Computes the number of characters in each rowgroup for each string column and attaches the
 // results to the corresponding orc_column_view. The owning host vector is returned.
-auto set_rowgroup_char_counts(orc_table_view& orc_table,
-                              device_2dspan<rowgroup_rows const> rowgroup_bounds,
-                              cuda::stream_ref stream)
+auto set_rowgroup_char_counts(
+  orc_table_view& orc_table,
+  cuda::device_mdspan<rowgroup_rows const, cuda::std::dextents<size_t, 2>> rowgroup_bounds,
+  cuda::stream_ref stream)
 {
-  auto const num_rowgroups = rowgroup_bounds.size().first;
+  auto const num_rowgroups = rowgroup_bounds.extent(0);
   auto const num_str_cols  = orc_table.num_string_columns();
 
   auto counts         = rmm::device_uvector<size_type>(num_str_cols * num_rowgroups, stream);
-  auto counts_2d_view = device_2dspan<size_type>(counts, num_rowgroups);
+  auto counts_2d_view = cuda::device_mdspan<size_type, cuda::std::dextents<size_t, 2>>(
+    counts.data(), num_str_cols, num_rowgroups);
   rowgroup_char_counts(counts_2d_view,
                        orc_table.d_columns,
                        rowgroup_bounds,
@@ -2244,7 +2256,7 @@ struct stripe_dictionaries {
     index_owner.clear();
     order_owner.clear();
 
-    for (auto& sd : views.host_view().flat_view()) {
+    for (auto& sd : cudf::host_span{views.base_host_ptr(), views.count(), true}) {
       sd.data       = {};
       sd.index      = {};
       sd.data_order = {};
@@ -2303,8 +2315,10 @@ stripe_dictionaries build_dictionaries(orc_table_view& orc_table,
   for (auto col_idx : orc_table.string_column_indices) {
     auto& str_column       = orc_table.column(col_idx);
     auto const str_col_idx = str_column.str_index();
-    str_column.attach_stripe_dicts(stripe_dicts[str_col_idx],
-                                   stripe_dicts.device_view()[str_col_idx]);
+    str_column.attach_stripe_dicts(
+      stripe_dicts[str_col_idx],
+      cuda::std::span{stripe_dicts.base_device_ptr() + str_col_idx * stripe_dicts.size().second,
+                      stripe_dicts.size().second});
     for (auto const& stripe : segmentation.stripes) {
       auto const stripe_idx = stripe.id;
       auto& sd              = stripe_dicts[str_col_idx][stripe_idx];
@@ -2383,7 +2397,8 @@ stripe_dictionaries build_dictionaries(orc_table_view& orc_table,
   map_storage.reset();
 
   // Clear map slots and attach order buffers
-  auto dictionaries_flat = stripe_dicts.host_view().flat_view();
+  auto dictionaries_flat =
+    cudf::host_span{stripe_dicts.base_host_ptr(), stripe_dicts.count(), true};
   for (auto& sd : dictionaries_flat) {
     if (not sd.is_enabled) { continue; }
 
@@ -2447,13 +2462,14 @@ struct stripe_stream_size_less {
   }
 };
 
-[[nodiscard]] uint32_t find_largest_stream_size(device_2dspan<stripe_stream const> ss,
-                                                cuda::stream_ref stream)
+[[nodiscard]] uint32_t find_largest_stream_size(
+  cuda::device_mdspan<stripe_stream const, cuda::std::dextents<size_t, 2>> ss,
+  cuda::stream_ref stream)
 {
   auto const longest_stream =
     thrust::max_element(rmm::exec_policy_nosync(stream, cudf::get_current_device_resource_ref()),
-                        ss.data(),
-                        ss.data() + ss.count(),
+                        ss.data_handle(),
+                        ss.data_handle() + ss.size(),
                         stripe_stream_size_less{});
 
   auto const h_longest_stream =
@@ -2541,12 +2557,14 @@ auto convert_table_to_orc_data(table_view const& input,
   auto const num_data_streams       = streams.size() - num_index_streams;
   hostdevice_2dvector<stripe_stream> strm_descs(
     segmentation.num_stripes(), num_data_streams, stream);
-  auto stripes = gather_stripes(num_index_streams,
-                                segmentation,
-                                host_2dspan<extent_info const>{extents, streams.size()},
-                                &enc_data,
-                                &strm_descs,
-                                stream);
+  auto stripes =
+    gather_stripes(num_index_streams,
+                   segmentation,
+                   cuda::host_mdspan<extent_info const, cuda::std::dextents<size_t, 2>>{
+                     extents.data(), segmentation.num_stripes(), streams.size()},
+                   &enc_data,
+                   &strm_descs,
+                   stream);
 
   if (num_rows == 0) {
     return std::tuple{std::move(enc_data),
@@ -2575,7 +2593,7 @@ auto convert_table_to_orc_data(table_view const& input,
   auto const padded_block_header_size =
     util::round_up_unsafe<size_t>(block_header_size, block_align);
 
-  for (auto& ss : strm_descs.host_view().flat_view()) {
+  for (auto& ss : cudf::host_span{strm_descs.base_host_ptr(), strm_descs.count(), true}) {
     size_t stream_size = ss.stream_size;
     if (compression != compression_type::NONE) {
       ss.first_block = num_compressed_blocks;
@@ -2624,7 +2642,7 @@ auto convert_table_to_orc_data(table_view const& input,
 
   auto const max_out_stream_size = [&]() {
     uint32_t max_stream_size = 0;
-    for (auto const& ss : strm_descs.host_view().flat_view()) {
+    for (auto const& ss : cudf::host_span{strm_descs.base_host_ptr(), strm_descs.count(), true}) {
       if (!out_sink.is_device_write_preferred(ss.stream_size)) {
         max_stream_size = std::max(max_stream_size, ss.stream_size);
       }
@@ -2793,16 +2811,17 @@ void writer::impl::update_statistics(
   }
 }
 
-void writer::impl::write_orc_data_to_sink(encoded_data const& enc_data,
-                                          file_segmentation const& segmentation,
-                                          orc_table_view const& orc_table,
-                                          device_span<uint8_t const> compressed_data,
-                                          host_span<codec_exec_result const> comp_results,
-                                          host_2dspan<stripe_stream const> strm_descs,
-                                          host_span<col_stats_blob const> rg_stats,
-                                          orc_streams& streams,
-                                          host_span<StripeInformation> stripes,
-                                          host_span<uint8_t> bounce_buffer)
+void writer::impl::write_orc_data_to_sink(
+  encoded_data const& enc_data,
+  file_segmentation const& segmentation,
+  orc_table_view const& orc_table,
+  device_span<uint8_t const> compressed_data,
+  host_span<codec_exec_result const> comp_results,
+  cuda::host_mdspan<stripe_stream const, cuda::std::dextents<size_t, 2>> strm_descs,
+  host_span<col_stats_blob const> rg_stats,
+  orc_streams& streams,
+  host_span<StripeInformation> stripes,
+  host_span<uint8_t> bounce_buffer)
 {
   if (orc_table.num_rows() == 0) { return; }
 
@@ -2832,7 +2851,8 @@ void writer::impl::write_orc_data_to_sink(encoded_data const& enc_data,
     }
 
     // Column data consisting one or more separate streams
-    for (auto const& strm_desc : strm_descs[stripe_id]) {
+    for (auto const& strm_desc : cuda::std::span{
+           strm_descs.data_handle() + stripe_id * strm_descs.extent(1), strm_descs.extent(1)}) {
       write_tasks.push_back(write_data_stream(
         strm_desc,
         enc_data.streams[strm_desc.column_id][segmentation.stripes[stripe_id].first],
