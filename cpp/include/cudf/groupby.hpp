@@ -96,9 +96,8 @@ class groupby {
    * @brief Construct a groupby object with the specified `keys`
    *
    * If the `keys` are already sorted, better performance may be achieved by
-   * passing `keys_are_sorted == true` and indicating the  ascending/descending
-   * order of each column and null order in  `column_order` and
-   * `null_precedence`, respectively.
+   * passing `keys_are_sorted == true`: equal keys are then expected to be
+   * adjacent and are grouped by comparing neighboring rows instead of hashing.
    *
    * @note This object does *not* maintain the lifetime of `keys`. It is the
    * user's responsibility to ensure the `groupby` object does not outlive the
@@ -109,11 +108,12 @@ class groupby {
    * NULL values should be included
    * @param keys_are_sorted Indicates whether rows in `keys` are already sorted
    * @param column_order If `keys_are_sorted == YES`, indicates whether each
-   * column is ascending/descending. If empty, assumes all  columns are
-   * ascending. Ignored if `keys_are_sorted == false`.
+   * column is ascending/descending. Grouping presorted keys only relies on equal
+   * keys being adjacent, so this does not affect the result. Ignored if
+   * `keys_are_sorted == false`.
    * @param null_precedence If `keys_are_sorted == YES`, indicates the ordering
-   * of null values in each column. Else, ignored. If empty, assumes all columns
-   * use `null_order::AFTER`. Ignored if `keys_are_sorted == false`.
+   * of null values in each column. Like `column_order`, this does not affect the
+   * result. Ignored if `keys_are_sorted == false`.
    */
   explicit groupby(table_view const& keys,
                    null_policy null_handling                      = null_policy::EXCLUDE,
@@ -301,6 +301,8 @@ class groupby {
    * a table of grouped keys and a table of grouped values. In addition, it holds
    * a vector of integer offsets into the rows of the tables, such that
    * `offsets[i+1] - offsets[i]` gives the size of group `i`.
+   *
+   * Rows within each group keep their input order; the order of the groups is arbitrary.
    */
   struct groups {
     std::unique_ptr<table> keys;     ///< Table of grouped keys
