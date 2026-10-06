@@ -462,7 +462,7 @@ TYPED_TEST(groupby_small_key_domain_test, CompleteNullableDomain)
       expected_keys,
       expected_counts,
       cudf::make_count_aggregation<cudf::groupby_aggregation>(cudf::null_policy::INCLUDE),
-      force_use_sort_impl::NO,
+      include_nth_aggregation::NO,
       policy);
   }
 }
