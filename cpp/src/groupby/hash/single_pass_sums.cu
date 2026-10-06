@@ -9,6 +9,7 @@
 #include <cudf/detail/aggregation/aggregation.cuh>
 #include <cudf/detail/aggregation/aggregation.hpp>
 #include <cudf/detail/iterator.cuh>
+#include <cudf/detail/null_mask.hpp>
 #include <cudf/utilities/error.hpp>
 #include <cudf/utilities/traits.hpp>
 #include <cudf/utilities/type_dispatcher.hpp>
@@ -178,6 +179,7 @@ struct fused_sums_fn {
     }
 
     std::vector<std::unique_ptr<column>> results;
+    column const* masked = nullptr;
     for (std::size_t i = 0; i < kinds.size(); ++i) {
       auto result = kinds[i] == aggregation::SUM              ? std::move(sum)
                     : kinds[i] == aggregation::SUM_OF_SQUARES ? std::move(sum_of_squares)
@@ -186,9 +188,18 @@ struct fused_sums_fn {
       auto const nullable =
         !is_intermediate[i] && kinds[i] != aggregation::COUNT_VALID && ctx.values.has_nulls();
       if (nullable && ctx.num_groups > 0) {
-        auto [null_mask, null_count] =
-          make_mask_from_counts(counts, counts + ctx.num_groups, stream, mr);
-        result->set_null_mask(std::move(null_mask), null_count);
+        if (masked == nullptr) {
+          auto [null_mask, null_count] =
+            make_mask_from_counts(counts, counts + ctx.num_groups, stream, mr);
+          result->set_null_mask(std::move(null_mask), null_count);
+          masked = result.get();
+        } else {
+          // Every sum of the column shares the validity of the first one.
+          result->set_null_mask(
+            cudf::detail::copy_bitmask(
+              masked->view().null_mask(), 0, ctx.num_groups, stream, mr.get_output_mr()),
+            masked->null_count());
+        }
       }
       results.push_back(std::move(result));
     }
@@ -270,14 +281,24 @@ struct fused_minmax_sum_fn {
                     mr);
     }
     std::vector<std::unique_ptr<column>> results;
+    column const* masked = nullptr;
     for (std::size_t i = 0; i < kinds.size(); ++i) {
       auto result = kinds[i] == aggregation::MIN   ? std::move(minimum)
                     : kinds[i] == aggregation::MAX ? std::move(maximum)
                                                    : std::move(sum);
       if (!is_intermediate[i] && ctx.values.has_nulls() && ctx.num_groups > 0) {
-        auto [null_mask, null_count] = make_mask_from_validity(
-          group_valid.data(), group_valid.data() + group_valid.size(), stream, mr);
-        result->set_null_mask(std::move(null_mask), null_count);
+        if (masked == nullptr) {
+          auto [null_mask, null_count] = make_mask_from_validity(
+            group_valid.data(), group_valid.data() + group_valid.size(), stream, mr);
+          result->set_null_mask(std::move(null_mask), null_count);
+          masked = result.get();
+        } else {
+          // Every extremum and sum of the column shares the validity of the first one.
+          result->set_null_mask(
+            cudf::detail::copy_bitmask(
+              masked->view().null_mask(), 0, ctx.num_groups, stream, mr.get_output_mr()),
+            masked->null_count());
+        }
       }
       results.push_back(std::move(result));
     }
