@@ -958,6 +958,17 @@ class GroupBy(Serializable, Reducible, Scannable):
     ) -> tuple[list[int], list[ColumnBase], list[ColumnBase]]:
         # Materialize iterator to avoid consuming it during access context setup
         values_list = list(values)
+        # First-appearance ordering needs the input position of every grouped
+        # row. Gather a range column along with the values instead of grouping
+        # a second time.
+        need_positions = (
+            order_groups
+            and not self._sort
+            and get_option("mode.pandas_compatible")
+            and self._group_ordering is None
+        )
+        if need_positions:
+            values_list.append(self._range_column_from_obj)
         key_dtypes = [col.dtype for col in self.grouping._key_columns]
         value_dtypes = [col.dtype for col in values_list]
         with access_columns(*values_list, mode="read", scope="internal"):
@@ -988,6 +999,7 @@ class GroupBy(Serializable, Reducible, Scannable):
             if grouped_values is not None
             else []
         )
+        positions = value_columns.pop() if need_positions else None
         if (
             not order_groups
             or len(offsets) <= 2
@@ -1012,9 +1024,7 @@ class GroupBy(Serializable, Reducible, Scannable):
                 )
                 group_order = cp.asnumpy(group_names.argsort())
             else:
-                _, _, (positions,) = self._groups(
-                    [self._range_column_from_obj], order_groups=False
-                )
+                assert positions is not None
                 first_positions = positions.take(group_starts)
                 group_order = first_positions.argsort().to_numpy()
 
