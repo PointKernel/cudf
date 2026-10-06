@@ -13,7 +13,6 @@
 #include <cudf/detail/gather.hpp>
 #include <cudf/detail/groupby/groupby_helper.hpp>
 #include <cudf/detail/labeling/label_segments.cuh>
-#include <cudf/detail/scatter.hpp>
 #include <cudf/detail/sorting.hpp>
 #include <cudf/null_mask.hpp>
 #include <cudf/utilities/error.hpp>
@@ -27,7 +26,9 @@
 #include <cuda/std/bit>
 #include <thrust/binary_search.h>
 #include <thrust/copy.h>
+#include <thrust/fill.h>
 #include <thrust/gather.h>
+#include <thrust/scatter.h>
 #include <thrust/sequence.h>
 
 #include <utility>
@@ -276,19 +277,22 @@ groupby_helper::index_vector const& groupby_helper::group_labels(cuda::stream_re
   return *_group_labels;
 }
 
-column_view groupby_helper::ungrouped_keys_labels(cuda::stream_ref stream)
+groupby_helper::index_vector const& groupby_helper::input_labels(cuda::stream_ref stream)
 {
-  if (_unsorted_keys_labels) { return _unsorted_keys_labels->view(); }
-  auto const mr     = cudf::get_current_device_resource_ref();
-  auto empty_labels = make_numeric_column(
-    data_type{type_to_id<size_type>()}, _keys.num_rows(), mask_state::ALL_NULL, stream, mr);
-  auto labels = column_view(device_span<size_type const>{group_labels(stream)});
+  if (_input_labels) { return *_input_labels; }
+  auto const mr      = cudf::get_current_device_resource_ref();
+  auto const policy  = rmm::exec_policy_nosync(stream, mr);
+  auto const& labels = group_labels(stream);
+  auto input         = std::make_unique<index_vector>(_keys.num_rows(), stream, mr);
+  // Excluded rows take the label past the last group so that they sort after every group.
+  if (labels.size() != input->size()) {
+    thrust::fill(policy, input->begin(), input->end(), num_groups(stream));
+  }
   // Labels are constant within each group, so the unordered CSR permutation is sufficient.
-  auto rows      = column_view(device_span<size_type const>{_groups->grouped_rows});
-  auto scattered = cudf::detail::scatter(
-    table_view{{labels}}, rows, table_view{{empty_labels->view()}}, stream, mr);
-  _unsorted_keys_labels = std::move(scattered->release()[0]);
-  return _unsorted_keys_labels->view();
+  thrust::scatter(
+    policy, labels.begin(), labels.end(), _groups->grouped_rows.begin(), input->begin());
+  _input_labels = std::move(input);
+  return *_input_labels;
 }
 
 groupby_helper::column_ptr groupby_helper::sorted_values(column_view const& values,
@@ -297,12 +301,9 @@ groupby_helper::column_ptr groupby_helper::sorted_values(column_view const& valu
 {
   // Group labels avoid sorting the original key columns. Starting with input rows also preserves
   // input order among equal values without materializing the stable CSR row permutation first.
-  auto order =
-    cudf::detail::stable_sorted_order(table_view{{ungrouped_keys_labels(stream), values}},
-                                      {},
-                                      std::vector<null_order>(2, null_order::AFTER),
-                                      stream,
-                                      mr);
+  auto const labels = column_view(device_span<size_type const>{input_labels(stream)});
+  auto order        = cudf::detail::stable_sorted_order(
+    table_view{{labels, values}}, {}, std::vector<null_order>(2, null_order::AFTER), stream, mr);
   auto rows   = cudf::detail::slice(order->view(), 0, num_keys(stream), stream);
   auto result = cudf::detail::gather(table_view{{values}},
                                      rows,

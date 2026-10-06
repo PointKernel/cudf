@@ -210,20 +210,18 @@ struct groupby_helper {
 
  private:
   /**
-   * @brief Get the group labels for ungrouped keys
+   * @brief Get the group label of every row of the ungrouped `keys`
    *
-   * Returns the group label for every row in the original `keys` table. For a
-   * given unique key row, its group label is equivalent to what is returned by
-   * `group_labels(stream)`. However, if a row contains a null value, and
-   * `include_null_keys == NO`, then its label is NULL.
+   * For an included row the label equals its label in `group_labels(stream)`; a
+   * row excluded by `include_null_keys == NO` gets `num_groups(stream)`, which
+   * sorts after every group.
    *
-   * Computes and stores unsorted labels on first invocation and returns stored
+   * Computes and stores the labels on first invocation and returns the stored
    * labels on subsequent calls.
    *
-   * @return A nullable column of `INT32` containing group labels in the order
-   *         of the ungrouped key table
+   * @return vector of group labels in the order of the ungrouped key table
    */
-  column_view ungrouped_keys_labels(cuda::stream_ref stream);
+  index_vector const& input_labels(cuda::stream_ref stream);
 
   /// Materialize grouping metadata, optionally retaining input order within groups.
   void build_groups(cuda::stream_ref stream, bool stable_rows = false, bool keep_labels = false);
@@ -231,9 +229,9 @@ struct groupby_helper {
   /// Materialize a stable row permutation only when an ordered operation needs it.
   void make_stable(cuda::stream_ref stream, bool keep_labels = false);
 
-  column_ptr _unsorted_keys_labels;             ///< Labels in input order, null for excluded rows
-  table_view _keys;                             ///< Input grouping keys
-  std::unique_ptr<hash::grouped_keys> _groups;  ///< HashCSR grouping metadata
+  index_vector_ptr _input_labels;  ///< Labels in input order; excluded rows get num_groups
+  table_view _keys;                ///< Input grouping keys
+  std::unique_ptr<hash::grouped_keys> _groups;            ///< HashCSR grouping metadata
   std::unique_ptr<hash::grouped_rows> _reduction_groups;  ///< Cached reduction scheduling
   index_vector_ptr _group_labels;                         ///< Labels in grouped order
   sorted _keys_pre_sorted;         ///< Whether key groups are already contiguous
