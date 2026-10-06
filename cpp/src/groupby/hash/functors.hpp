@@ -14,6 +14,7 @@
 #include <cuda/stream>
 
 #include <memory>
+#include <optional>
 
 namespace cudf {
 namespace groupby {
@@ -52,6 +53,7 @@ struct store_result_functor {
   column_view get_grouped_values()
   {
     if (is_presorted()) { return values; }
+    if (grouped_values_view) { return *grouped_values_view; }
 
     // Input order is required by NTH_ELEMENT, COLLECT_LIST and host UDFs even when a prior
     // aggregation on the same values requested a value-sorted view.
@@ -60,11 +62,25 @@ struct store_result_functor {
   };
 
   /**
+   * @brief Take ownership of the grouped values, keeping a view for later aggregations.
+   *
+   * The input itself is not ours to hand over, so presorted values are copied.
+   */
+  std::unique_ptr<column> take_grouped_values()
+  {
+    if (is_presorted()) { return std::make_unique<column>(values, stream, mr); }
+    if (!grouped_values) { grouped_values = helper.grouped_values(values, stream, mr); }
+    grouped_values_view = grouped_values->view();
+    return std::move(grouped_values);
+  }
+
+  /**
    * @brief Get grouped values for aggregations that do not depend on row order.
    */
   column_view get_unordered_grouped_values()
   {
     if (is_presorted()) { return values; }
+    if (grouped_values_view) { return *grouped_values_view; }
     if (grouped_values) { return grouped_values->view(); }
     // Stable rows serve both kinds of consumers, so gather the column once.
     if (helper.is_stable()) { return get_grouped_values(); }
@@ -96,8 +112,9 @@ struct store_result_functor {
   cuda::stream_ref stream;            ///< CUDA stream on which to execute kernels
   rmm::device_async_resource_ref mr;  ///< Memory resource to allocate space for results
 
-  std::unique_ptr<column> sorted_values;   ///< Memoised grouped and sorted values
-  std::unique_ptr<column> grouped_values;  ///< Memoised grouped values
+  std::unique_ptr<column> sorted_values;           ///< Memoised grouped and sorted values
+  std::unique_ptr<column> grouped_values;          ///< Memoised grouped values
+  std::optional<column_view> grouped_values_view;  ///< Grouped values handed to a result
   std::unique_ptr<column>
     unordered_grouped_values;  ///< Memoised values with no row-order guarantee
 };

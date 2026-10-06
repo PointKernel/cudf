@@ -262,7 +262,8 @@ void aggregate_result_functor::operator()<aggregation::COLLECT_LIST>(aggregation
 
   auto const null_handling =
     dynamic_cast<cudf::detail::collect_list_aggregation const&>(agg)._null_handling;
-  auto result = detail::group_collect(get_grouped_values(),
+  // The gathered column becomes the list child; later aggregations still see it through a view.
+  auto result = detail::group_collect(take_grouped_values(),
                                       helper.group_offsets(stream),
                                       helper.num_groups(stream),
                                       null_handling,
