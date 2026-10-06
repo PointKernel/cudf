@@ -284,7 +284,9 @@ std::pair<std::unique_ptr<table>, std::unique_ptr<table>> groupby::replace_nulls
 
   if (values.is_empty()) { return std::pair(empty_like(_keys), empty_like(values)); }
 
-  helper().grouped_order(stream, true);
+  auto const grouped_order = helper().grouped_order(stream, true);
+  auto const order         = device_span<size_type const>{grouped_order.begin<size_type>(),
+                                                          static_cast<std::size_t>(grouped_order.size())};
   auto const& group_labels = helper().group_labels(stream);
   std::vector<std::unique_ptr<column>> results;
   results.reserve(values.num_columns());
@@ -293,12 +295,10 @@ std::pair<std::unique_ptr<table>, std::unique_ptr<table>> groupby::replace_nulls
     cuda::counting_iterator{values.num_columns()},
     std::back_inserter(results),
     [&](auto i) {
-      bool nullable       = values.column(i).nullable();
-      auto final_mr       = nullable ? cudf::get_current_device_resource_ref() : mr;
-      auto grouped_values = helper().grouped_values(values.column(i), stream, final_mr);
-      return nullable ? detail::group_replace_nulls(
-                          *grouped_values, group_labels, replace_policies[i], stream, mr)
-                      : std::move(grouped_values);
+      return values.column(i).nullable()
+               ? detail::group_replace_nulls(
+                   values.column(i), order, group_labels, replace_policies[i], stream, mr)
+               : helper().grouped_values(values.column(i), stream, mr);
     });
 
   return std::pair(std::move(helper().grouped_keys(stream, mr)),
