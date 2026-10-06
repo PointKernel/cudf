@@ -12,6 +12,9 @@
 
 #include <cuda/stream>
 
+#include <cstddef>
+#include <optional>
+
 namespace cudf::groupby::detail::hash {
 
 /// The keys grouped by the HashCSR build.
@@ -26,25 +29,30 @@ struct grouped_keys {
 /**
  * @brief Groups input rows with HashCSR using preprocessed row operators.
  *
+ * Group offsets are built only when requested, and grouped rows additionally require the offsets.
  * When grouped rows are requested, `stable_rows` retains their original order within each group.
+ * `domain_capacity` bounds the table capacity for keys drawn from a small finite domain.
  */
 template <typename Equal, typename Hash>
 grouped_keys group_keys(size_type num_rows,
                         bitmask_type const* row_bitmask,
                         Equal const& d_row_equal,
                         Hash const& d_row_hash,
+                        bool need_group_offsets,
                         bool need_grouped_rows,
+                        std::optional<std::size_t> domain_capacity,
                         cuda::stream_ref stream,
                         cudf::memory_resources mr,
                         bool stable_rows = false);
 
 /**
- * @brief Groups input keys with HashCSR, optionally materializing their grouped row indices.
+ * @brief Groups input keys with HashCSR, optionally materializing group offsets and grouped rows.
  *
  * When grouped rows are requested, `stable_rows` retains their original order within each group.
  */
 grouped_keys group_keys(table_view const& keys,
                         null_policy include_null_keys,
+                        bool need_group_offsets,
                         bool need_grouped_rows,
                         cuda::stream_ref stream,
                         cudf::memory_resources mr,

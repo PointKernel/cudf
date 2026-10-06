@@ -630,7 +630,7 @@ class GroupBy(Serializable, Reducible, Scannable):
         self._sort = sort
         self._dropna = dropna
         self._group_keys = group_keys
-        self._selection: tuple[Any, ...] | None = None
+        self._selection = None
         self._group_ordering: tuple[list[int], ColumnBase | None] | None = None
 
         if isinstance(self._by, _Grouping):
@@ -658,7 +658,7 @@ class GroupBy(Serializable, Reducible, Scannable):
             or get_option("mode.pandas_compatible")
             or len(offsets) <= 2
         ):
-            order: Iterable[int] = range(len(offsets) - 1)
+            order = range(len(offsets) - 1)
         else:
             # Preserve the iterator's first-appearance ordering used by
             # ngroup and stack without ordering other native group results.

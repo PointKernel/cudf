@@ -14,8 +14,7 @@
 #include <cudf/utilities/memory_resource.hpp>
 #include <cudf/utilities/span.hpp>
 
-#include <rmm/device_uvector.hpp>
-
+#include <cuda/buffer>
 #include <cuda/std/array>
 #include <cuda/stream>
 
@@ -117,10 +116,10 @@ void compute_aggregations(std::span<aggregation_request const> requests,
       auto const grouped =
         grouped_rows{helper.unordered_grouped_order(stream),
                      helper.group_offsets(stream),
-                     rmm::device_uvector<size_type>{0, stream, temp_mr},
-                     rmm::device_uvector<size_type>{0, stream, temp_mr},
-                     rmm::device_uvector<cuda::std::array<size_type, 2>>{0, stream, temp_mr},
-                     rmm::device_uvector<size_type>{0, stream, temp_mr}};
+                     cuda::device_buffer<size_type>{stream, temp_mr},
+                     cuda::device_buffer<size_type>{stream, temp_mr},
+                     cuda::device_buffer<cuda::std::array<size_type, 2>>{stream, temp_mr},
+                     cuda::device_buffer<size_type>{stream, temp_mr}};
       return compute_single_pass_aggs(values, agg_kinds, is_agg_intermediate, grouped, stream, mr);
     }();
     for (std::size_t i = 0; i < results.size(); ++i) {
@@ -135,7 +134,7 @@ void compute_aggregations(std::span<aggregation_request const> requests,
 
       // The finalizers only combine the single-pass results with linear transformations such as
       // addition/multiplication (e.g. for variance/stddev); they do not aggregate further.
-      auto const finalizer = hash_compound_agg_finalizer(col, &cache, nullptr, stream, mr);
+      auto const finalizer = hash_compound_agg_finalizer(col, &cache, stream, mr);
       for (auto&& agg : agg_v) {
         if (cache.has_result(col, *agg)) { continue; }
         cudf::detail::aggregation_dispatcher(agg->kind, finalizer, *agg);

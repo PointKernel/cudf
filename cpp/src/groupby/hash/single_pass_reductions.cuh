@@ -14,19 +14,19 @@
 #include <cudf/detail/aggregation/aggregation.cuh>
 #include <cudf/detail/aggregation/aggregation.hpp>
 #include <cudf/detail/iterator.cuh>
+#include <cudf/detail/utilities/cuda_memcpy.hpp>
 #include <cudf/detail/utilities/element_argminmax.cuh>
 #include <cudf/detail/utilities/vector_factories.hpp>
-#include <cudf/detail/valid_if.cuh>
 #include <cudf/dictionary/dictionary_column_view.hpp>
+#include <cudf/null_mask.hpp>
 #include <cudf/reduction/detail/sum_overflow.cuh>
 #include <cudf/types.hpp>
+#include <cudf/utilities/bit.hpp>
 #include <cudf/utilities/error.hpp>
 #include <cudf/utilities/traits.hpp>
 #include <cudf/utilities/type_dispatcher.hpp>
 
-#include <rmm/device_buffer.hpp>
-#include <rmm/device_uvector.hpp>
-
+#include <cuda/buffer>
 #include <cuda/iterator>
 #include <cuda/std/algorithm>
 #include <cuda/std/cstdint>
@@ -51,26 +51,60 @@ std::unique_ptr<column> compute_nested_argminmax(reduction_context const& ctx,
                                                  cuda::stream_ref stream,
                                                  cudf::memory_resources mr);
 
-/// Reads a fixed-width element, going through the keys when the column is a dictionary.
-template <typename T>
-struct value_accessor {
-  column_device_view col;
-  bool is_dictionary;
+/// Stores each group's selected row and clears the validity of groups without a valid row.
+struct select_group_row_fn {
+  size_type* out;
+  bitmask_type* mask;
+  column_device_view values;
 
-  __device__ T operator()(size_type row) const
+  __device__ void operator()(cuda::std::ptrdiff_t group, size_type row) const
   {
-    if (is_dictionary) {
-      auto const keys = col.child(dictionary_column_view::keys_column_index);
-      return keys.element<T>(static_cast<size_type>(col.element<dictionary32>(row)));
+    out[group] = row;
+    if (mask != nullptr && (row < 0 || row >= values.size() || values.is_null(row))) {
+      cudf::clear_bit(mask, static_cast<size_type>(group));
     }
-    return col.element<T>(row);
   }
 };
+
+/**
+ * @brief Selects one input row per group and derives the result validity from that row.
+ *
+ * `reduce(output)` must write the selected row of every group through `output`. The selected row
+ * is valid iff the group contains any valid row. An all-null group may select a null row or the
+ * sentinel, so both are checked before reading its validity bit.
+ */
+template <typename Reduce>
+std::unique_ptr<column> select_group_rows(reduction_context const& ctx,
+                                          Reduce&& reduce,
+                                          cuda::stream_ref stream,
+                                          cudf::memory_resources mr)
+{
+  auto result = make_fixed_width_column(data_type{type_to_id<size_type>()},
+                                        ctx.num_groups,
+                                        mask_state::UNALLOCATED,
+                                        stream,
+                                        mr.get_output_mr());
+  if (ctx.num_groups == 0) { return result; }
+
+  auto const out = result->mutable_view().begin<size_type>();
+  auto null_mask =
+    cudf::create_null_mask(ctx.num_groups,
+                           ctx.nullable ? mask_state::ALL_VALID : mask_state::UNALLOCATED,
+                           stream,
+                           mr.get_output_mr());
+  auto const mask = reinterpret_cast<bitmask_type*>(null_mask.data());
+  reduce(cuda::tabulate_output_iterator{select_group_row_fn{out, mask, ctx.d_values}});
+  if (ctx.nullable) {
+    auto const null_count = count_group_nulls(mask, ctx.num_groups, stream, mr);
+    result->set_null_mask(std::move(null_mask), null_count);
+  }
+  return result;
+}
 
 template <typename T>
 value_accessor<T> reduction_context::accessor() const
 {
-  return {d_values, is_dictionary(values.type())};
+  return value_accessor<T>{d_values};
 }
 
 /// Maps a grouped position to the value of the input row at that position, substituting
@@ -141,18 +175,25 @@ struct split_valid_value_fn {
 };
 
 /// Maps a grouped position to a SUM_OVERFLOW accumulator, treating nulls as a zero contribution.
-template <typename DeviceType>
+template <typename DeviceType, bool Nullable = false>
 struct grouped_sum_overflow_fn {
   size_type const* grouped_rows;
   value_accessor<DeviceType> value;
   bool has_nulls;
 
-  __device__ cudf::reduction::detail::sum_overflow_result<DeviceType> operator()(
-    size_type position) const
+  using accumulator = cudf::reduction::detail::sum_overflow_result<DeviceType>;
+  using result_type = cuda::std::conditional_t<Nullable, valid_value<accumulator>, accumulator>;
+
+  __device__ result_type operator()(size_type position) const
   {
-    auto const row = grouped_rows[position];
-    if (has_nulls && value.col.is_null_nocheck(row)) { return {DeviceType{0}, 0}; }
-    return {value(row), 0};
+    auto const row    = grouped_rows[position];
+    bool const valid  = !has_nulls || !value.col.is_null_nocheck(row);
+    auto const result = accumulator{valid ? value(row) : DeviceType{0}, 0};
+    if constexpr (Nullable) {
+      return valid_value<accumulator>{result, valid};
+    } else {
+      return result;
+    }
   }
 };
 
@@ -221,11 +262,12 @@ struct grouped_reduction_fn {
     }
 
     // The validity of a group (any valid row) rides along with its value in one pass.
-    rmm::device_uvector<bool> group_valid(ctx.num_groups, stream, mr.get_temporary_mr());
+    cuda::device_buffer<bool> group_valid(
+      stream, mr.get_temporary_mr(), ctx.num_groups, cuda::no_init);
     auto const values = cudf::detail::make_counting_transform_iterator(
       0, grouped_valid_value_fn < Source, Result, K == aggregation::SUM_OF_SQUARES > {value});
     auto const outputs = cuda::transform_output_iterator{
-      cuda::make_zip_iterator(output, group_valid.begin()), split_valid_value_fn<Result>{}};
+      cuda::make_zip_iterator(output, group_valid.data()), split_valid_value_fn<Result>{}};
     reduce_groups(ctx.grouped,
                   values,
                   outputs,
@@ -233,8 +275,8 @@ struct grouped_reduction_fn {
                   valid_value<Result>{identity, false},
                   stream,
                   mr);
-    auto [null_mask, null_count] = cudf::detail::valid_if(
-      group_valid.begin(), group_valid.end(), cuda::std::identity{}, stream, mr);
+    auto [null_mask, null_count] = make_mask_from_validity(
+      group_valid.data(), group_valid.data() + group_valid.size(), stream, mr);
     result->set_null_mask(std::move(null_mask), null_count);
     return result;
   }
@@ -245,26 +287,27 @@ struct grouped_reduction_fn {
                                      cuda::stream_ref stream,
                                      cudf::memory_resources mr) const
   {
+    constexpr auto is_argmin = K == aggregation::ARGMIN;
     if constexpr (cudf::is_nested<T>()) {
-      return compute_nested_argminmax(ctx, K == aggregation::ARGMIN, stream, mr);
+      return compute_nested_argminmax(ctx, is_argmin, stream, mr);
     } else {
-      auto result = make_size_type_column(ctx, stream, mr);
-      if (ctx.num_groups == 0) { return result; }
-
       // The grouped rows are the input row indices themselves, so reducing them with the
       // element comparator yields the input index of each group's extremum. The sentinel identity
       // loses against every valid row and is left in place for all-null groups.
-      constexpr auto is_argmin = K == aggregation::ARGMIN;
-      reduce_groups(ctx.grouped,
-                    ctx.grouped.rows.begin(),
-                    result->mutable_view().begin<size_type>(),
-                    cudf::detail::element_argminmax_fn<rep_type_t<T>>{
-                      ctx.d_values, ctx.values.has_nulls(), is_argmin},
-                    is_argmin ? cudf::detail::ARGMIN_SENTINEL : cudf::detail::ARGMAX_SENTINEL,
-                    stream,
-                    mr);
-      set_group_null_mask(*result, ctx, stream, mr);
-      return result;
+      return select_group_rows(
+        ctx,
+        [&](auto output) {
+          reduce_groups(ctx.grouped,
+                        ctx.grouped.rows.begin(),
+                        output,
+                        cudf::detail::element_argminmax_fn<rep_type_t<T>>{
+                          ctx.d_values, ctx.values.has_nulls(), is_argmin},
+                        is_argmin ? cudf::detail::ARGMIN_SENTINEL : cudf::detail::ARGMAX_SENTINEL,
+                        stream,
+                        mr);
+        },
+        stream,
+        mr);
     }
   }
 
@@ -284,27 +327,53 @@ struct grouped_reduction_fn {
                                                   mask_state::UNALLOCATED,
                                                   stream,
                                                   mr.get_output_mr());
+    auto null_mask = cudf::create_null_mask(0, mask_state::UNALLOCATED, stream, mr.get_output_mr());
+    size_type null_count{0};
     if (ctx.num_groups > 0) {
-      auto const values = cudf::detail::make_counting_transform_iterator(
-        0,
-        grouped_sum_overflow_fn<Source>{
-          ctx.grouped.rows.data(), ctx.accessor<Source>(), ctx.values.has_nulls()});
-      auto const children = cuda::transform_output_iterator{
-        cuda::make_zip_iterator(sum_child->mutable_view().begin<Source>(),
-                                overflow_child->mutable_view().begin<bool>()),
-        split_sum_overflow_fn<Source>{}};
-      reduce_groups(ctx.grouped,
-                    values,
-                    children,
-                    cudf::reduction::detail::overflow_sum_op<Source>{},
-                    accumulator{},
-                    stream,
-                    mr);
+      if (ctx.nullable) {
+        null_mask =
+          cudf::create_null_mask(ctx.num_groups, mask_state::ALL_VALID, stream, mr.get_output_mr());
+        auto const mask   = reinterpret_cast<bitmask_type*>(null_mask.data());
+        auto const values = cudf::detail::make_counting_transform_iterator(
+          0,
+          grouped_sum_overflow_fn<Source, true>{
+            ctx.grouped.rows.data(), ctx.accessor<Source>(), ctx.values.has_nulls()});
+        auto const output = cuda::tabulate_output_iterator{
+          [sums      = sum_child->mutable_view().begin<Source>(),
+           overflows = overflow_child->mutable_view().begin<bool>(),
+           mask] __device__(cuda::std::ptrdiff_t group, valid_value<accumulator> const& result) {
+            sums[group]      = result.value.sum;
+            overflows[group] = result.value.wraps != 0;
+            if (!result.valid) { cudf::clear_bit(mask, static_cast<size_type>(group)); }
+          }};
+        reduce_groups(
+          ctx.grouped,
+          values,
+          output,
+          valid_value_op<cudf::reduction::detail::overflow_sum_op<Source>, accumulator>{},
+          valid_value<accumulator>{accumulator{}, false},
+          stream,
+          mr);
+        null_count = count_group_nulls(mask, ctx.num_groups, stream, mr);
+      } else {
+        auto const values = cudf::detail::make_counting_transform_iterator(
+          0,
+          grouped_sum_overflow_fn<Source>{
+            ctx.grouped.rows.data(), ctx.accessor<Source>(), ctx.values.has_nulls()});
+        auto const children = cuda::transform_output_iterator{
+          cuda::make_zip_iterator(sum_child->mutable_view().begin<Source>(),
+                                  overflow_child->mutable_view().begin<bool>()),
+          split_sum_overflow_fn<Source>{}};
+        reduce_groups(ctx.grouped,
+                      values,
+                      children,
+                      cudf::reduction::detail::overflow_sum_op<Source>{},
+                      accumulator{},
+                      stream,
+                      mr);
+      }
     }
 
-    auto [null_mask, null_count] = ctx.nullable && ctx.num_groups > 0
-                                     ? reduce_group_validity(ctx, stream, mr)
-                                     : std::pair{rmm::device_buffer{}, size_type{0}};
     std::vector<std::unique_ptr<column>> children;
     children.push_back(std::move(sum_child));
     children.push_back(std::move(overflow_child));
@@ -376,8 +445,11 @@ struct grouped_reductions_fn {
       using Descriptor     = column_reduction<ValueIterator, OutputIterator>;
       static_assert(cuda::std::is_trivially_copyable_v<Descriptor>);
       auto columns = cudf::detail::make_empty_host_vector<Descriptor>(num_columns, stream);
-      rmm::device_uvector<bool> group_valid(
-        Nullable ? static_cast<std::size_t>(num_columns) * first.num_groups : 0, stream, temp_mr);
+      cuda::device_buffer<bool> group_valid(
+        stream,
+        temp_mr,
+        Nullable ? static_cast<std::size_t>(num_columns) * first.num_groups : 0,
+        cuda::no_init);
       for (size_type i = 0; i < num_columns; ++i) {
         auto const& ctx  = contexts[i];
         auto const value = value_fn{
@@ -394,7 +466,12 @@ struct grouped_reductions_fn {
         columns.push_back(
           {values, make_output(results[i]->mutable_view().template begin<Result>(), validity)});
       }
-      auto device_columns  = cudf::detail::make_device_uvector(columns, stream, temp_mr);
+      cuda::device_buffer<Descriptor> device_columns(
+        stream, temp_mr, columns.size(), cuda::no_init);
+      cudf::detail::cuda_memcpy(
+        device_span<Descriptor>{device_columns.data(), device_columns.size()},
+        host_span<Descriptor const>{columns},
+        stream);
       auto const operation = [] {
         if constexpr (Nullable) {
           return valid_value_op<Op, Result>{};
@@ -410,17 +487,17 @@ struct grouped_reductions_fn {
         }
       }();
       reduce_group_columns(first.grouped,
-                           reduction_columns{device_columns.begin(), num_columns},
+                           reduction_columns{device_columns.data(), num_columns},
                            operation,
                            init,
                            stream,
                            mr);
       if constexpr (Nullable) {
         for (size_type i = 0; i < num_columns; ++i) {
-          auto const begin = group_valid.begin() + static_cast<std::size_t>(i) * first.num_groups;
+          auto const begin = group_valid.data() + static_cast<std::size_t>(i) * first.num_groups;
           auto const resources = is_intermediate[i] ? cudf::memory_resources{temp_mr, temp_mr} : mr;
-          auto [mask, null_count] = cudf::detail::valid_if(
-            begin, begin + first.num_groups, cuda::std::identity{}, stream, resources);
+          auto [mask, null_count] =
+            make_mask_from_validity(begin, begin + first.num_groups, stream, resources);
           results[i]->set_null_mask(std::move(mask), null_count);
         }
       }

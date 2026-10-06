@@ -357,7 +357,7 @@ streaming_groupby::impl::do_finalize(cuda::stream_ref stream,
     // dedupes: skip if (column, kind) is already there from a prior agg in the group.
     for (auto const& req : column_grouped) {
       auto const finalizer =
-        detail::hash::hash_compound_agg_finalizer(req.values, &cache, nullptr, stream, mr);
+        detail::hash::hash_compound_agg_finalizer(req.values, &cache, stream, mr);
       for (auto const& agg : req.aggregations) {
         if (cache.has_result(req.values, *agg)) continue;
         cudf::detail::aggregation_dispatcher(agg->kind, finalizer, *agg);

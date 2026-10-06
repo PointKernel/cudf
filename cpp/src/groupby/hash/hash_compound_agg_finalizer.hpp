@@ -19,13 +19,11 @@ struct hash_compound_agg_finalizer {
   column_view const col;
   data_type const input_type;
   cudf::detail::result_cache* const cache;
-  bitmask_type const* const d_row_bitmask;
   cuda::stream_ref const stream;
   cudf::memory_resources const mr;
 
   hash_compound_agg_finalizer(column_view const& col,
                               cudf::detail::result_cache* cache,
-                              bitmask_type const* d_row_bitmask,
                               cuda::stream_ref stream,
                               cudf::memory_resources mr);
 

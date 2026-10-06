@@ -40,34 +40,36 @@ std::unique_ptr<column> compute_nested_argminmax(reduction_context const& ctx,
                                                  cuda::stream_ref stream,
                                                  cudf::memory_resources mr)
 {
-  auto result = make_size_type_column(ctx, stream, mr);
-  if (ctx.num_groups == 0) { return result; }
-
-  // Top-level nulls become the sentinel before comparison. Keep only child nulls in the
-  // comparator view, retaining the input offset for sliced lists and structs.
-  auto const values     = column_view{ctx.values.type(),
-                                  ctx.values.size(),
-                                  ctx.values.head(),
-                                  nullptr,
-                                  0,
-                                  ctx.values.offset(),
-                                      {ctx.values.child_begin(), ctx.values.child_end()}};
-  using generator       = cudf::reduction::detail::arg_minmax_binop_generator;
-  auto const comparator = is_argmin ? generator::create<aggregation::ARGMIN>(values, stream)
-                                    : generator::create<aggregation::ARGMAX>(values, stream);
-  auto const sentinel   = is_argmin ? cudf::detail::ARGMIN_SENTINEL : cudf::detail::ARGMAX_SENTINEL;
-  auto const indices =
-    cuda::transform_iterator{ctx.grouped.rows.begin(),
-                             valid_nested_index_fn{ctx.d_values, sentinel, ctx.values.has_nulls()}};
-  reduce_groups(ctx.grouped,
-                indices,
-                result->mutable_view().begin<size_type>(),
-                input_order_argminmax_fn{comparator.binop()},
-                sentinel,
-                stream,
-                mr);
-  set_group_null_mask(*result, ctx, stream, mr);
-  return result;
+  return select_group_rows(
+    ctx,
+    [&](auto output) {
+      // Top-level nulls become the sentinel before comparison. Keep only child nulls in the
+      // comparator view, retaining the input offset for sliced lists and structs.
+      auto const values     = column_view{ctx.values.type(),
+                                      ctx.values.size(),
+                                      ctx.values.head(),
+                                      nullptr,
+                                      0,
+                                      ctx.values.offset(),
+                                          {ctx.values.child_begin(), ctx.values.child_end()}};
+      using generator       = cudf::reduction::detail::arg_minmax_binop_generator;
+      auto const comparator = is_argmin ? generator::create<aggregation::ARGMIN>(values, stream)
+                                        : generator::create<aggregation::ARGMAX>(values, stream);
+      auto const sentinel =
+        is_argmin ? cudf::detail::ARGMIN_SENTINEL : cudf::detail::ARGMAX_SENTINEL;
+      auto const indices = cuda::transform_iterator{
+        ctx.grouped.rows.begin(),
+        valid_nested_index_fn{ctx.d_values, sentinel, ctx.values.has_nulls()}};
+      reduce_groups(ctx.grouped,
+                    indices,
+                    output,
+                    input_order_argminmax_fn{comparator.binop()},
+                    sentinel,
+                    stream,
+                    mr);
+    },
+    stream,
+    mr);
 }
 
 template std::unique_ptr<column> compute_reduction<aggregation::ARGMIN>(

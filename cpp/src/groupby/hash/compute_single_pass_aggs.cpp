@@ -34,43 +34,7 @@
 
 namespace cudf::groupby::detail::hash {
 
-std::unique_ptr<column> make_size_type_column(reduction_context const& ctx,
-                                              cuda::stream_ref stream,
-                                              cudf::memory_resources mr)
-{
-  return make_fixed_width_column(data_type{type_to_id<size_type>()},
-                                 ctx.num_groups,
-                                 mask_state::UNALLOCATED,
-                                 stream,
-                                 mr.get_output_mr());
-}
-
 namespace {
-
-/// Calls `f.template operator()<K>(args...)` for the reduction kind `kind`.
-template <typename F, typename... Args>
-auto dispatch_reduction_kind(aggregation::Kind kind, F&& f, Args&&... args)
-{
-  switch (kind) {
-    case aggregation::SUM:
-      return f.template operator()<aggregation::SUM>(std::forward<Args>(args)...);
-    case aggregation::PRODUCT:
-      return f.template operator()<aggregation::PRODUCT>(std::forward<Args>(args)...);
-    case aggregation::SUM_OF_SQUARES:
-      return f.template operator()<aggregation::SUM_OF_SQUARES>(std::forward<Args>(args)...);
-    case aggregation::MIN:
-      return f.template operator()<aggregation::MIN>(std::forward<Args>(args)...);
-    case aggregation::MAX:
-      return f.template operator()<aggregation::MAX>(std::forward<Args>(args)...);
-    case aggregation::ARGMIN:
-      return f.template operator()<aggregation::ARGMIN>(std::forward<Args>(args)...);
-    case aggregation::ARGMAX:
-      return f.template operator()<aggregation::ARGMAX>(std::forward<Args>(args)...);
-    case aggregation::SUM_OVERFLOW:
-      return f.template operator()<aggregation::SUM_OVERFLOW>(std::forward<Args>(args)...);
-    default: CUDF_FAIL("Unsupported hash groupby aggregation");
-  }
-}
 
 struct compute_reduction_fn {
   reduction_context const& ctx;
@@ -78,7 +42,14 @@ struct compute_reduction_fn {
   template <aggregation::Kind K>
   std::unique_ptr<column> operator()(cuda::stream_ref stream, cudf::memory_resources mr) const
   {
-    return compute_reduction<K>(ctx, stream, mr);
+    if constexpr (K == aggregation::SUM || K == aggregation::PRODUCT ||
+                  K == aggregation::SUM_OF_SQUARES || K == aggregation::MIN ||
+                  K == aggregation::MAX || K == aggregation::ARGMIN || K == aggregation::ARGMAX ||
+                  K == aggregation::SUM_OVERFLOW) {
+      return compute_reduction<K>(ctx, stream, mr);
+    } else {
+      CUDF_FAIL("Unsupported hash groupby aggregation");
+    }
   }
 };
 
@@ -107,7 +78,8 @@ std::unique_ptr<column> compute_aggregation(aggregation::Kind kind,
   switch (kind) {
     case aggregation::COUNT_VALID: return count_groups(ctx, true, stream, mr);
     case aggregation::COUNT_ALL: return count_groups(ctx, false, stream, mr);
-    default: return dispatch_reduction_kind(kind, compute_reduction_fn{ctx}, stream, mr);
+    default:
+      return cudf::detail::aggregation_dispatcher(kind, compute_reduction_fn{ctx}, stream, mr);
   }
 }
 
@@ -175,8 +147,16 @@ std::vector<std::unique_ptr<column>> compute_single_pass_aggs(
     auto const sum =
       std::find(agg_kinds.begin() + begin, agg_kinds.begin() + end, aggregation::SUM);
     auto const sum_index = static_cast<std::size_t>(sum - agg_kinds.begin());
-    // Do not consume a SUM that already participates in the existing additive fusion.
-    if (sum == agg_kinds.begin() + end || fused_end(sum_index, values_type) > sum_index + 1) {
+    // Without SUM, fuse only direct groups to avoid enlarging long-group partials.
+    if (sum == agg_kinds.begin() + end) {
+      if (!grouped.group_chunks.empty()) { return begin + 1; }
+      // Keep neighboring same-kind batches intact instead of adding reduction launches.
+      if ((begin > 0 && agg_kinds[begin - 1] == agg_kinds[begin]) ||
+          (end < num_aggs && agg_kinds[end - 1] == agg_kinds[end])) {
+        return begin + 1;
+      }
+    } else if (fused_end(sum_index, values_type) > sum_index + 1) {
+      // Preserve a SUM that already participates in the existing additive fusion.
       return begin + 1;
     }
     return end;
@@ -264,7 +244,7 @@ std::vector<std::unique_ptr<column>> compute_single_pass_aggs(
                                  is_agg_intermediate.subspan(i, end - i),
                                  stream,
                                  mr);
-      std::move(fused.begin(), fused.end(), std::back_inserter(results));
+      std::ranges::move(fused, std::back_inserter(results));
     } else if (end = batch_end(i, values_type, nullable); end > i + 1) {
       std::vector<decltype(d_col)> device_views;
       std::vector<reduction_context> contexts;
@@ -278,9 +258,9 @@ std::vector<std::unique_ptr<column>> compute_single_pass_aggs(
         contexts.push_back(
           {next, *device_views.back(), values_type, grouped, num_groups, nullable});
       }
-      auto batch = dispatch_reduction_kind(
+      auto batch = cudf::detail::aggregation_dispatcher(
         kind, compute_reductions_fn{contexts, is_agg_intermediate.subspan(i, end - i)}, stream, mr);
-      std::move(batch.begin(), batch.end(), std::back_inserter(results));
+      std::ranges::move(batch, std::back_inserter(results));
     } else {
       auto const resources = is_agg_intermediate[i] ? cudf::memory_resources{mr.get_temporary_mr(),
                                                                              mr.get_temporary_mr()}

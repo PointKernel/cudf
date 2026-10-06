@@ -9,13 +9,11 @@
 #include <cudf/detail/aggregation/aggregation.cuh>
 #include <cudf/detail/aggregation/aggregation.hpp>
 #include <cudf/detail/iterator.cuh>
-#include <cudf/detail/valid_if.cuh>
 #include <cudf/utilities/error.hpp>
 #include <cudf/utilities/traits.hpp>
 #include <cudf/utilities/type_dispatcher.hpp>
 
-#include <rmm/device_uvector.hpp>
-
+#include <cuda/buffer>
 #include <cuda/iterator>
 #include <cuda/std/functional>
 #include <cuda/std/tuple>
@@ -81,12 +79,16 @@ struct fused_minmax_sum {
 
 template <typename Source, typename Result>
 struct fused_minmax_sum_op {
+  bool compute_sum;
+
   __device__ fused_minmax_sum<Source, Result> operator()(
     fused_minmax_sum<Source, Result> const& lhs, fused_minmax_sum<Source, Result> const& rhs) const
   {
     return {cudf::detail::corresponding_operator_t<aggregation::MIN>{}(lhs.minimum, rhs.minimum),
             cudf::detail::corresponding_operator_t<aggregation::MAX>{}(lhs.maximum, rhs.maximum),
-            cudf::detail::corresponding_operator_t<aggregation::SUM>{}(lhs.sum, rhs.sum),
+            compute_sum
+              ? cudf::detail::corresponding_operator_t<aggregation::SUM>{}(lhs.sum, rhs.sum)
+              : Result{0},
             lhs.valid || rhs.valid};
   }
 };
@@ -96,6 +98,7 @@ struct grouped_fused_minmax_sum_fn {
   size_type const* grouped_rows;
   value_accessor<Source> value;
   bool has_nulls;
+  bool compute_sum;
   fused_minmax_sum<Source, Result> identity;
 
   __device__ fused_minmax_sum<Source, Result> operator()(size_type position) const
@@ -103,16 +106,24 @@ struct grouped_fused_minmax_sum_fn {
     auto const row = grouped_rows[position];
     if (has_nulls && value.col.is_null_nocheck(row)) { return identity; }
     auto const result = value(row);
-    return {result, result, static_cast<Result>(result), true};
+    return {result, result, compute_sum ? static_cast<Result>(result) : Result{0}, true};
   }
 };
 
 template <typename Source, typename Result>
 struct split_fused_minmax_sum_fn {
-  __device__ cuda::std::tuple<Source, Source, Result, bool> operator()(
-    fused_minmax_sum<Source, Result> const& value) const
+  Source* minimum;
+  Source* maximum;
+  Result* sum;
+  bool* valid;
+
+  __device__ void operator()(cuda::std::ptrdiff_t group,
+                             fused_minmax_sum<Source, Result> const& value) const
   {
-    return {value.minimum, value.maximum, value.sum, value.valid};
+    minimum[group] = value.minimum;
+    maximum[group] = value.maximum;
+    if (sum != nullptr) { sum[group] = value.sum; }
+    if (valid != nullptr) { valid[group] = value.valid; }
   }
 };
 
@@ -175,12 +186,8 @@ struct fused_sums_fn {
       auto const nullable =
         !is_intermediate[i] && kinds[i] != aggregation::COUNT_VALID && ctx.values.has_nulls();
       if (nullable && ctx.num_groups > 0) {
-        auto [null_mask, null_count] = cudf::detail::valid_if(
-          counts,
-          counts + ctx.num_groups,
-          [] __device__(size_type count) { return count > 0; },
-          stream,
-          mr);
+        auto [null_mask, null_count] =
+          make_mask_from_counts(counts, counts + ctx.num_groups, stream, mr);
         result->set_null_mask(std::move(null_mask), null_count);
       }
       results.push_back(std::move(result));
@@ -201,6 +208,7 @@ struct fused_sums_fn {
 };
 
 /// Reduces consecutive MIN/MAX/SUM requests on one input with one value load per row.
+/// MIN/MAX pairs share this reducer without allocating or computing an unrequested SUM.
 struct fused_minmax_sum_fn {
   template <typename T>
     requires(is_reduction_supported<T>(aggregation::SUM) &&
@@ -228,8 +236,14 @@ struct fused_minmax_sum_fn {
     };
     auto minimum = make_output(aggregation::MIN);
     auto maximum = make_output(aggregation::MAX);
-    auto sum     = make_output(aggregation::SUM);
-    rmm::device_uvector<bool> group_valid(ctx.num_groups, stream, mr.get_temporary_mr());
+    auto sum     = std::find(kinds.begin(), kinds.end(), aggregation::SUM) == kinds.end()
+                     ? nullptr
+                     : make_output(aggregation::SUM);
+    auto const needs_validity =
+      ctx.values.has_nulls() &&
+      std::ranges::any_of(is_intermediate, [](auto intermediate) { return !intermediate; });
+    cuda::device_buffer<bool> group_valid(
+      stream, mr.get_temporary_mr(), needs_validity ? ctx.num_groups : 0, cuda::no_init);
     if (ctx.num_groups > 0) {
       auto const identity = fused_minmax_sum<Source, Result>{Min::template identity<Source>(),
                                                              Max::template identity<Source>(),
@@ -237,16 +251,23 @@ struct fused_minmax_sum_fn {
                                                              false};
       auto const values   = cudf::detail::make_counting_transform_iterator(
         0,
-        grouped_fused_minmax_sum_fn<Source, Result>{
-          ctx.grouped.rows.data(), ctx.accessor<Source>(), ctx.values.has_nulls(), identity});
-      auto const outputs = cuda::transform_output_iterator{
-        cuda::make_zip_iterator(minimum->mutable_view().template begin<Source>(),
-                                maximum->mutable_view().template begin<Source>(),
-                                sum->mutable_view().template begin<Result>(),
-                                group_valid.begin()),
-        split_fused_minmax_sum_fn<Source, Result>{}};
-      reduce_groups(
-        ctx.grouped, values, outputs, fused_minmax_sum_op<Source, Result>{}, identity, stream, mr);
+        grouped_fused_minmax_sum_fn<Source, Result>{ctx.grouped.rows.data(),
+                                                      ctx.accessor<Source>(),
+                                                      ctx.values.has_nulls(),
+                                                      sum != nullptr,
+                                                      identity});
+      auto const outputs = cuda::tabulate_output_iterator{split_fused_minmax_sum_fn<Source, Result>{
+        minimum->mutable_view().template begin<Source>(),
+        maximum->mutable_view().template begin<Source>(),
+        sum ? sum->mutable_view().template begin<Result>() : nullptr,
+        group_valid.data()}};
+      reduce_groups(ctx.grouped,
+                    values,
+                    outputs,
+                    fused_minmax_sum_op<Source, Result>{sum != nullptr},
+                    identity,
+                    stream,
+                    mr);
     }
     std::vector<std::unique_ptr<column>> results;
     for (std::size_t i = 0; i < kinds.size(); ++i) {
@@ -254,8 +275,8 @@ struct fused_minmax_sum_fn {
                     : kinds[i] == aggregation::MAX ? std::move(maximum)
                                                    : std::move(sum);
       if (!is_intermediate[i] && ctx.values.has_nulls() && ctx.num_groups > 0) {
-        auto [null_mask, null_count] = cudf::detail::valid_if(
-          group_valid.begin(), group_valid.end(), cuda::std::identity{}, stream, mr);
+        auto [null_mask, null_count] = make_mask_from_validity(
+          group_valid.data(), group_valid.data() + group_valid.size(), stream, mr);
         result->set_null_mask(std::move(null_mask), null_count);
       }
       results.push_back(std::move(result));

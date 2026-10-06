@@ -6,6 +6,8 @@
 #pragma once
 
 #include "compute_single_pass_aggs.hpp"
+#include "groupby/common/utils.hpp"
+#include "groupby/common/value_accessor.cuh"
 
 #include <cudf/aggregation.hpp>
 #include <cudf/column/column.hpp>
@@ -15,8 +17,7 @@
 #include <cudf/utilities/memory_resource.hpp>
 #include <cudf/utilities/span.hpp>
 
-#include <rmm/device_buffer.hpp>
-
+#include <cuda/buffer>
 #include <cuda/stream>
 
 #include <cstdint>
@@ -38,9 +39,6 @@ constexpr bool is_fusable_minmax_sum(aggregation::Kind kind)
   return kind == aggregation::MIN || kind == aggregation::MAX || kind == aggregation::SUM;
 }
 
-template <typename T>
-struct value_accessor;
-
 struct reduction_context {
   column_view const& values;
   column_device_view const& d_values;
@@ -54,17 +52,10 @@ struct reduction_context {
 };
 
 // Shared host helpers are defined only in the frontend, keeping their reduction kernels unique.
-std::pair<rmm::device_buffer, size_type> reduce_group_validity(reduction_context const& ctx,
-                                                               cuda::stream_ref stream,
-                                                               cudf::memory_resources mr);
-void set_group_null_mask(column& result,
-                         reduction_context const& ctx,
-                         cuda::stream_ref stream,
-                         cudf::memory_resources mr);
-std::unique_ptr<column> make_size_type_column(reduction_context const& ctx,
-                                              cuda::stream_ref stream,
-                                              cudf::memory_resources mr);
-
+size_type count_group_nulls(bitmask_type const* mask,
+                            size_type num_groups,
+                            cuda::stream_ref stream,
+                            cudf::memory_resources mr);
 std::unique_ptr<column> count_groups(reduction_context const& ctx,
                                      bool valid_only,
                                      cuda::stream_ref stream,

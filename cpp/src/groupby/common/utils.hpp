@@ -13,8 +13,6 @@
 #include <cudf/utilities/memory_resource.hpp>
 #include <cudf/utilities/span.hpp>
 
-#include <rmm/device_buffer.hpp>
-
 #include <cuda/buffer>
 #include <cuda/stream>
 
@@ -24,6 +22,12 @@
 #include <vector>
 
 namespace cudf::groupby::detail {
+
+// Non-template bridges share mask-kernel instantiations across groupby reductions.
+std::pair<cuda::device_buffer<std::byte>, size_type> make_mask_from_validity(
+  bool* begin, bool* end, cuda::stream_ref stream, cudf::memory_resources mr);
+std::pair<cuda::device_buffer<std::byte>, size_type> make_mask_from_counts(
+  size_type const* begin, size_type const* end, cuda::stream_ref stream, cudf::memory_resources mr);
 
 template <typename RequestType>
 inline std::vector<aggregation_result> extract_results(std::span<RequestType const> requests,
@@ -58,13 +62,10 @@ inline std::vector<aggregation_result> extract_results(std::span<RequestType con
 /**
  * @brief Compute a combined null bitmask for multi-column keys.
  *
- * @param keys Table of groupby keys
- * @param stream CUDA stream used for device memory operations
- * @param mr Memory resources; the output resource allocates the returned bitmask
  * @return Pair of {buffer, raw_pointer} where pointer is null if no nulls exist.
  */
 std::pair<cuda::device_buffer<std::byte>, bitmask_type const*> compute_row_bitmask(
-  table_view const& keys, cuda::stream_ref stream, cudf::memory_resources mr);
+  table_view const& keys, cuda::stream_ref stream);
 
 /// Whether the aggregation decomposes into the shared single-pass reductions.
 constexpr bool is_hash_aggregation(aggregation::Kind k)

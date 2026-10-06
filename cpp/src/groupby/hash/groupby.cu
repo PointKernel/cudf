@@ -691,7 +691,7 @@ std::pair<std::unique_ptr<table>, std::vector<aggregation_result>> detail::hash:
   std::span<aggregation_request const> requests,
   detail::groupby_helper& helper,
   cuda::stream_ref stream,
-  rmm::device_async_resource_ref mr)
+  cudf::memory_resources mr)
 {
   // Build ordered rows directly when any request needs them, before metadata or unordered
   // requests can materialize an intermediate permutation. Existing cached groups are reused.
@@ -735,15 +735,15 @@ std::pair<std::unique_ptr<table>, std::vector<aggregation_result>> detail::hash:
 
   for (auto const& request : requests) {
     auto store_functor = detail::aggregate_result_functor(
-      request.values, helper, cache, stream, mr, expose_intermediates);
+      request.values, helper, cache, stream, mr.get_output_mr(), expose_intermediates);
     for (auto const& agg : request.aggregations) {
       cudf::detail::aggregation_dispatcher(agg->kind, store_functor, *agg);
     }
   }
 
-  auto results = detail::extract_results(requests, cache, stream, mr);
+  auto results = detail::extract_results(requests, cache, stream, mr.get_output_mr());
 
-  return std::pair(helper.unique_keys(stream, mr), std::move(results));
+  return std::pair(helper.unique_keys(stream, mr.get_output_mr()), std::move(results));
 }
 }  // namespace groupby
 }  // namespace cudf

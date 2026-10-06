@@ -45,7 +45,7 @@ rmm::device_uvector<size_type> included_rows(table_view const& keys,
   auto rows         = rmm::device_uvector<size_type>(keys.num_rows(), stream, mr);
   auto [row_bitmask_data, row_bitmask] =
     include_null_keys == null_policy::EXCLUDE
-      ? compute_row_bitmask(keys, stream, cudf::memory_resources{mr, mr})
+      ? compute_row_bitmask(keys, stream)
       : std::pair<cuda::device_buffer<std::byte>, bitmask_type const*>{
           cudf::create_null_mask(0, cudf::mask_state::UNALLOCATED, stream, mr), nullptr};
   if (row_bitmask == nullptr) {
@@ -160,7 +160,7 @@ void groupby_helper::build_groups(cuda::stream_ref stream, bool stable_rows)
   auto const mr = cudf::get_current_device_resource_ref();
   if (_keys_pre_sorted == sorted::NO && _keys.num_rows() != 0) {
     _groups = std::make_unique<hash::grouped_keys>(hash::group_keys(
-      _keys, _include_null_keys, true, stream, cudf::memory_resources{mr, mr}, stable_rows));
+      _keys, _include_null_keys, true, true, stream, cudf::memory_resources{mr, mr}, stable_rows));
     _stable = stable_rows;
     return;
   }
@@ -325,7 +325,7 @@ std::unique_ptr<table> groupby_helper::unique_keys(cuda::stream_ref stream,
     // later operation can populate the helper with complete grouped rows.
     auto const temp_mr = cudf::get_current_device_resource_ref();
     key_groups         = std::make_unique<hash::grouped_keys>(hash::group_keys(
-      _keys, _include_null_keys, false, stream, cudf::memory_resources{temp_mr, temp_mr}));
+      _keys, _include_null_keys, false, false, stream, cudf::memory_resources{temp_mr, temp_mr}));
   } else {
     build_groups(stream);
   }

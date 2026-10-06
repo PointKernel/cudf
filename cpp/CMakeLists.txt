@@ -736,6 +736,7 @@ add_library(
   src/groupby/common/groupby_helper.cu
   src/groupby/common/groupby_helper_nested.cu
   src/groupby/common/m2_var_std.cu
+  src/groupby/common/null_mask.cu
   src/groupby/common/utils.cpp
   src/groupby/groupby.cu
   src/groupby/hash/compute_groupby.cu
@@ -1076,7 +1077,6 @@ add_library(
   src/sort/sort_column.cu
   src/sort/sort_radix.cu
   src/sort/sorted_order_radix.cu
-  src/sort/stable_sort_column.cu
   src/sort/stable_sort.cu
   src/sort/top_k.cu
   src/stream_compaction/apply_mask.cu
@@ -1188,6 +1188,7 @@ add_library(
   src/text/vocabulary_tokenize.cu
   src/text/wordpiece_tokenize.cu
   src/transform/bools_to_mask.cu
+  src/transform/checked_arithmetic.cu
   src/transform/compute_column.cu
   src/transform/compute_column_kernel_complex.cu
   src/transform/compute_column_kernel_null_complex.cu

@@ -15,10 +15,9 @@
 #include <cudf/utilities/memory_resource.hpp>
 #include <cudf/utilities/span.hpp>
 
-#include <rmm/device_uvector.hpp>
-
 #include <cub/block/block_reduce.cuh>
 #include <cub/warp/warp_reduce.cuh>
+#include <cuda/buffer>
 #include <cuda/iterator>
 #include <cuda/std/algorithm>
 #include <cuda/std/array>
@@ -204,7 +203,7 @@ void reduce_group_columns(grouped_rows const& grouped,
 {
   auto const num_groups        = static_cast<size_type>(grouped.offsets.size() - 1);
   auto const num_warp_groups   = static_cast<size_type>(grouped.warp_groups.size());
-  auto const num_long_groups   = grouped.group_chunks.is_empty()
+  auto const num_long_groups   = grouped.group_chunks.empty()
                                    ? size_type{0}
                                    : static_cast<size_type>(grouped.group_chunks.size() - 1);
   auto const num_direct_groups = num_warp_groups - num_long_groups;
@@ -251,7 +250,7 @@ void reduce_group_columns(grouped_rows const& grouped,
                                  stream.get()>>>(grouped.offsets, columns, op, init);
     CUDF_CUDA_TRY(cudaGetLastError());
   }
-  auto const group_ids = grouped.warp_groups.begin();
+  auto const group_ids = grouped.warp_groups.data();
   if (!long_groups_only && num_direct_groups > 0) {
     reduce_segments<cudf::detail::warp_size>(
       num_direct_groups,
@@ -265,18 +264,20 @@ void reduce_group_columns(grouped_rows const& grouped,
       stream);
   }
   if (num_long_groups == 0) { return; }
-  rmm::device_uvector<T> partials(
-    static_cast<std::size_t>(num_chunks) * columns.size(), stream, mr.get_temporary_mr());
+  cuda::device_buffer<T> partials(stream,
+                                  mr.get_temporary_mr(),
+                                  static_cast<std::size_t>(num_chunks) * columns.size(),
+                                  cuda::no_init);
   auto const begins = cuda::transform_iterator{
-    grouped.chunk_ranges.begin(),
+    grouped.chunk_ranges.data(),
     [] __device__(cuda::std::array<size_type, 2> const& range) -> size_type { return range[0]; }};
   auto const ends = cuda::transform_iterator{
-    grouped.chunk_ranges.begin(),
+    grouped.chunk_ranges.data(),
     [] __device__(cuda::std::array<size_type, 2> const& range) -> size_type { return range[1]; }};
   auto const chunk_groups = cuda::transform_iterator{
-    grouped.chunk_order.begin(),
-    [group_chunks     = grouped.group_chunks.begin(),
-     group_chunks_end = grouped.group_chunks.end(),
+    grouped.chunk_order.data(),
+    [group_chunks     = grouped.group_chunks.data(),
+     group_chunks_end = grouped.group_chunks.data() + grouped.group_chunks.size(),
      long_group_ids   = group_ids + num_direct_groups] __device__(size_type chunk) -> size_type {
       auto const index =
         cuda::std::upper_bound(group_chunks, group_chunks_end, chunk) - group_chunks - 1;
@@ -285,17 +286,17 @@ void reduce_group_columns(grouped_rows const& grouped,
   auto const reduce_partials = [&](auto first_columns, auto final_columns) {
     reduce_segments<reduction_block_size>(
       num_chunks,
-      cuda::make_permutation_iterator(begins, grouped.chunk_order.begin()),
-      cuda::make_permutation_iterator(ends, grouped.chunk_order.begin()),
+      cuda::make_permutation_iterator(begins, grouped.chunk_order.data()),
+      cuda::make_permutation_iterator(ends, grouped.chunk_order.data()),
       first_columns,
-      grouped.chunk_order.begin(),
+      grouped.chunk_order.data(),
       chunk_groups,
       op,
       init,
       stream);
     reduce_segments<reduction_block_size>(num_long_groups,
-                                          grouped.group_chunks.begin(),
-                                          grouped.group_chunks.begin() + 1,
+                                          grouped.group_chunks.data(),
+                                          grouped.group_chunks.data() + 1,
                                           final_columns,
                                           group_ids + num_direct_groups,
                                           group_ids + num_direct_groups,
@@ -306,8 +307,8 @@ void reduce_group_columns(grouped_rows const& grouped,
   using ValueIterator  = decltype(std::declval<Column>().values);
   using OutputIterator = decltype(std::declval<Column>().output);
   if constexpr (cuda::std::is_same_v<Columns, Column>) {
-    reduce_partials(column_reduction{columns.values, partials.begin()},
-                    column_reduction{partials.begin(), columns.output});
+    reduce_partials(column_reduction{columns.values, partials.data()},
+                    column_reduction{partials.data(), columns.output});
   } else {
     // Block passes interleave columns within a batch; partials remain column-major.
     auto const first_columns = cudf::detail::make_counting_transform_iterator(
