@@ -43,8 +43,6 @@ bool uses_group_labels(aggregation::Kind kind)
 {
   switch (kind) {
     case aggregation::NTH_ELEMENT:
-    case aggregation::COVARIANCE:
-    case aggregation::CORRELATION:
     case aggregation::HOST_UDF: return true;
     default: return false;
   }
@@ -64,7 +62,9 @@ bool needs_stable_groups(aggregation::Kind kind)
     case aggregation::QUANTILE:
     case aggregation::MEDIAN:
     case aggregation::NUNIQUE:
-    case aggregation::TDIGEST: return false;
+    case aggregation::TDIGEST:
+    case aggregation::COVARIANCE:
+    case aggregation::CORRELATION: return false;
     default: return true;
   }
 }
@@ -451,8 +451,9 @@ void aggregate_result_functor::operator()<aggregation::COVARIANCE>(aggregation c
 
   cache.add_result(values,
                    agg,
-                   detail::group_covariance(get_grouped_values().child(0),
-                                            get_grouped_values().child(1),
+                   detail::group_covariance(values_child0,
+                                            values_child1,
+                                            helper.reduction_groups(stream),
                                             helper.group_labels(stream),
                                             helper.num_groups(stream),
                                             count,
@@ -512,8 +513,9 @@ void aggregate_result_functor::operator()<aggregation::CORRELATION>(aggregation 
     auto const& cov_agg_obj = dynamic_cast<cudf::detail::covariance_aggregation const&>(*cov_agg);
     cache.add_result(values,
                      *cov_agg,
-                     detail::group_covariance(get_grouped_values().child(0),
-                                              get_grouped_values().child(1),
+                     detail::group_covariance(values_child0,
+                                              values_child1,
+                                              helper.reduction_groups(stream),
                                               helper.group_labels(stream),
                                               helper.num_groups(stream),
                                               count,

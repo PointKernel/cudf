@@ -21,6 +21,9 @@
 namespace cudf {
 namespace groupby {
 namespace detail {
+namespace hash {
+struct grouped_rows;
+}  // namespace hash
 /**
  * @brief Internal API to compute histogram for each group in @p values.
  *
@@ -251,13 +254,17 @@ std::unique_ptr<column> group_merge_histogram(column_view const& values,
 /**
  * @brief Internal API to find covariance of child columns of a non-nullable struct column.
  *
- * @param values_0 The first grouped values column to compute covariance
- * @param values_1 The second grouped values column to compute covariance
- * @param group_labels ID of group that the corresponding value belongs to
+ * The children are read in their input order through the grouped rows, so no grouped copy of the
+ * values is needed.
+ *
+ * @param values_0 The first ungrouped values column to compute covariance
+ * @param values_1 The second ungrouped values column to compute covariance
+ * @param grouped The input rows grouped by key with their reduction schedule
+ * @param group_labels ID of the group of each grouped row
  * @param num_groups Number of groups.
- * @param count The count of valid rows of the grouped values of both columns
- * @param mean_0 The mean of the first grouped values column
- * @param mean_1 The mean of the second grouped values column
+ * @param count The count of rows valid in both columns of each group
+ * @param mean_0 The mean of the first values column in each group
+ * @param mean_1 The mean of the second values column in each group
  * @param min_periods The minimum number of non-null rows required to consider the covariance
  * @param ddof The delta degrees of freedom used in the calculation of the variance
  * @param stream CUDA stream used for device memory operations and kernel launches.
@@ -265,6 +272,7 @@ std::unique_ptr<column> group_merge_histogram(column_view const& values,
  */
 std::unique_ptr<column> group_covariance(column_view const& values_0,
                                          column_view const& values_1,
+                                         hash::grouped_rows const& grouped,
                                          cudf::device_span<size_type const> group_labels,
                                          size_type num_groups,
                                          column_view const& count,
