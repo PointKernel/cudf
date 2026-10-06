@@ -68,51 +68,30 @@ std::unique_ptr<column> group_nth_element(column_view const& values,
         return (n < 0) ? group_size >= (-n) : group_size > n;
       });
   } else {  // skip nulls (equivalent to pandas nth(dropna='any'))
-    // Returns index of nth value.
+    // The scan numbers the valid rows within each group, and its output visitor records the row
+    // whose number is the requested one. `group_sizes` holds the valid count of each group, so a
+    // negative `n` counts back from the last valid row.
     auto values_view = column_device_view::create(values, stream);
     auto bitmask_iterator =
       cuda::transform_iterator(cudf::detail::make_validity_iterator(*values_view),
                                cuda::proclaim_return_type<size_type>(
                                  [] __device__(auto b) { return static_cast<size_type>(b); }));
-    rmm::device_uvector<size_type> intra_group_index(values.size(), stream);
-    // intra group index for valids only.
+    auto const record_nth = cuda::tabulate_output_iterator{
+      [n,
+       bitmask_iterator,
+       group_sizes  = group_sizes.begin<size_type>(),
+       group_labels = group_labels.begin(),
+       nth_index    = nth_index.begin()] __device__(cuda::std::ptrdiff_t i, size_type intra) {
+        auto const group = group_labels[i];
+        auto const nth   = n < 0 ? group_sizes[group] + n : n;
+        if (bitmask_iterator[i] && intra == nth) { nth_index[group] = static_cast<size_type>(i); }
+      }};
     thrust::exclusive_scan_by_key(
       rmm::exec_policy_nosync(stream, cudf::get_current_device_resource_ref()),
       group_labels.begin(),
       group_labels.end(),
       bitmask_iterator,
-      intra_group_index.begin());
-    // group_size to recalculate n if n<0
-    rmm::device_uvector<size_type> group_count = [&] {
-      if (n < 0) {
-        rmm::device_uvector<size_type> group_count(num_groups, stream);
-        cudf::detail::reduce_by_key_async(group_labels.begin(),
-                                          group_labels.end(),
-                                          bitmask_iterator,
-                                          cuda::make_discard_iterator(),
-                                          group_count.begin(),
-                                          cuda::std::plus<size_type>(),
-                                          stream);
-        return group_count;
-      } else {
-        return rmm::device_uvector<size_type>(0, stream);
-      }
-    }();
-    // gather the valid index == n
-    thrust::scatter_if(rmm::exec_policy_nosync(stream, cudf::get_current_device_resource_ref()),
-                       cuda::counting_iterator<size_type>{0},
-                       cuda::counting_iterator<size_type>{values.size()},
-                       group_labels.begin(),                   // map
-                       cuda::counting_iterator<size_type>{0},  // stencil
-                       nth_index.begin(),
-                       [n,
-                        bitmask_iterator,
-                        group_size        = group_count.begin(),
-                        group_labels      = group_labels.begin(),
-                        intra_group_index = intra_group_index.begin()] __device__(auto i) -> bool {
-                         auto nth = ((n < 0) ? group_size[group_labels[i]] + n : n);
-                         return (bitmask_iterator[i] && intra_group_index[i] == nth);
-                       });
+      record_nth);
   }
 
   auto output_table = cudf::detail::gather(table_view{{values}},
