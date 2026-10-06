@@ -252,7 +252,7 @@ struct GroupByMinFixedPointTest : public cudf::test::BaseFixture {};
 
 TYPED_TEST_SUITE(GroupByMinFixedPointTest, cudf::test::FixedPointTypes);
 
-TYPED_TEST(GroupByMinFixedPointTest, GroupBySortMinDecimalAsValue)
+TYPED_TEST(GroupByMinFixedPointTest, MinDecimalAsValue)
 {
   using namespace numeric;
   using decimalXX  = TypeParam;

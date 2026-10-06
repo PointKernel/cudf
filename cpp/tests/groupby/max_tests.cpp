@@ -259,7 +259,7 @@ struct GroupByMaxFixedPointTest : public cudf::test::BaseFixture {};
 
 TYPED_TEST_SUITE(GroupByMaxFixedPointTest, cudf::test::FixedPointTypes);
 
-TYPED_TEST(GroupByMaxFixedPointTest, GroupBySortMaxDecimalAsValue)
+TYPED_TEST(GroupByMaxFixedPointTest, MaxDecimalAsValue)
 {
   using namespace numeric;
   using decimalXX  = TypeParam;

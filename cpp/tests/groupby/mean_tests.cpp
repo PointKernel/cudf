@@ -149,7 +149,7 @@ struct FixedPointTestBothReps : public cudf::test::BaseFixture {};
 
 TYPED_TEST_SUITE(FixedPointTestBothReps, cudf::test::FixedPointTypes);
 
-TYPED_TEST(FixedPointTestBothReps, GroupBySortMeanDecimalAsValue)
+TYPED_TEST(FixedPointTestBothReps, MeanDecimalAsValue)
 {
   using namespace numeric;
   using decimalXX  = TypeParam;

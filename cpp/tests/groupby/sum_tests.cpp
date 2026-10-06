@@ -188,7 +188,7 @@ struct GroupBySumFixedPointTest : public cudf::test::BaseFixture {};
 
 TYPED_TEST_SUITE(GroupBySumFixedPointTest, cudf::test::FixedPointTypes);
 
-TYPED_TEST(GroupBySumFixedPointTest, GroupBySortSumDecimalAsValue)
+TYPED_TEST(GroupBySumFixedPointTest, SumDecimalAsValue)
 {
   using namespace numeric;
   using decimalXX  = TypeParam;
