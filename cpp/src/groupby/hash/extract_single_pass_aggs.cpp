@@ -25,8 +25,6 @@ namespace cudf::groupby::detail::hash {
 
 // Groupby-specific functor for collecting simple aggregations
 struct simple_aggregation_collector {
-  bool direct_m2 = false;
-
   // Default case: return clone of the aggregation
   template <aggregation::Kind k>
   std::vector<std::unique_ptr<aggregation>> operator()(data_type col_type,
@@ -94,11 +92,6 @@ template <>
 std::vector<std::unique_ptr<aggregation>> simple_aggregation_collector::operator()<aggregation::M2>(
   data_type, aggregation const&) const
 {
-  if (direct_m2) {
-    std::vector<std::unique_ptr<aggregation>> aggs;
-    aggs.push_back(make_m2_aggregation());
-    return aggs;
-  }
   return collect_m2_simple_aggs();
 }
 
@@ -107,12 +100,6 @@ template <>
 std::vector<std::unique_ptr<aggregation>>
 simple_aggregation_collector::operator()<aggregation::VARIANCE>(data_type, aggregation const&) const
 {
-  if (direct_m2) {
-    std::vector<std::unique_ptr<aggregation>> aggs;
-    aggs.push_back(make_m2_aggregation());
-    aggs.push_back(make_count_aggregation());
-    return aggs;
-  }
   return collect_m2_simple_aggs();
 }
 
@@ -121,12 +108,6 @@ template <>
 std::vector<std::unique_ptr<aggregation>>
 simple_aggregation_collector::operator()<aggregation::STD>(data_type, aggregation const&) const
 {
-  if (direct_m2) {
-    std::vector<std::unique_ptr<aggregation>> aggs;
-    aggs.push_back(make_m2_aggregation());
-    aggs.push_back(make_count_aggregation());
-    return aggs;
-  }
   return collect_m2_simple_aggs();
 }
 
@@ -135,9 +116,7 @@ std::tuple<table_view,
            std::vector<std::unique_ptr<aggregation>>,
            std::vector<int8_t>,
            bool>
-extract_single_pass_aggs(std::span<aggregation_request const> requests,
-                         cuda::stream_ref stream,
-                         bool direct_m2)
+extract_single_pass_aggs(std::span<aggregation_request const> requests, cuda::stream_ref stream)
 {
   auto agg_kinds = cudf::detail::make_empty_host_vector<aggregation::Kind>(requests.size(), stream);
   std::vector<column_view> columns;
@@ -182,7 +161,7 @@ extract_single_pass_aggs(std::span<aggregation_request const> requests,
                                : request.values.type();
     for (auto const& agg : input_aggs) {
       auto spass_aggs = cudf::detail::aggregation_dispatcher(
-        agg->kind, simple_aggregation_collector{direct_m2}, values_type, *agg);
+        agg->kind, simple_aggregation_collector{}, values_type, *agg);
       if (spass_aggs.size() > 1 || !spass_aggs.front()->is_equal(*agg)) {
         has_compound_aggs = true;
       }

@@ -28,7 +28,6 @@ namespace cudf::groupby::detail::hash {
  *
  * @param requests The aggregation requests
  * @param stream The CUDA stream
- * @param direct_m2 Whether M2 is computed directly instead of from raw moments
  *
  * @return A tuple containing:
  *         - A table_view containing the input values columns for the single-pass aggregations,
@@ -43,9 +42,7 @@ std::tuple<table_view,
            std::vector<std::unique_ptr<aggregation>>,
            std::vector<int8_t>,
            bool>
-extract_single_pass_aggs(std::span<aggregation_request const> requests,
-                         cuda::stream_ref stream,
-                         bool direct_m2 = false);
+extract_single_pass_aggs(std::span<aggregation_request const> requests, cuda::stream_ref stream);
 
 /**
  * @brief Get simple aggregations from groupby aggregation
