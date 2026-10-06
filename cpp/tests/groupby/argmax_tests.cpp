@@ -254,6 +254,23 @@ TEST_F(groupby_argmax_struct_test, basic)
   test_single_agg(keys, vals, expect_keys, expect_indices, std::move(agg));
 }
 
+TEST_F(groupby_argmax_struct_test, ties)
+{
+  // Equal struct rows select the first row of the group, as for flat values.
+  auto const keys = cudf::test::fixed_width_column_wrapper<int32_t>{1, 2, 1, 2, 1};
+  auto const vals = [] {
+    auto child1 = cudf::test::strings_column_wrapper{"b", "a", "a", "a", "a"};
+    auto child2 = cudf::test::fixed_width_column_wrapper<int32_t>{1, 1, 1, 1, 1};
+    return cudf::test::structs_column_wrapper{{child1, child2}};
+  }();
+
+  auto const expect_keys    = cudf::test::fixed_width_column_wrapper<int32_t>{1, 2};
+  auto const expect_indices = cudf::test::fixed_width_column_wrapper<int32_t>{0, 1};
+
+  auto agg = cudf::make_argmax_aggregation<cudf::groupby_aggregation>();
+  test_single_agg(keys, vals, expect_keys, expect_indices, std::move(agg));
+}
+
 TEST_F(groupby_argmax_struct_test, slice_input)
 {
   constexpr int32_t dont_care{1};

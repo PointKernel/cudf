@@ -6,19 +6,25 @@
 #include "reductions/nested_types_extrema_utils.cuh"
 #include "single_pass_reductions.cuh"
 
+#include <cuda/std/algorithm>
+
 namespace cudf::groupby::detail::hash {
 
 namespace {
 
 template <typename BinOp>
-struct input_order_argminmax_fn {
+struct first_row_argminmax_fn {
   BinOp binop;
+  bool is_argmin;
 
   __device__ size_type operator()(size_type lhs, size_type rhs) const
   {
-    // Match a stable input-order fold on ties: ARGMIN retains the last row and ARGMAX the first.
-    // CSR rows and partial reductions can arrive in either order.
-    return lhs < rhs ? binop(lhs, rhs) : binop(rhs, lhs);
+    // Equal rows select the smaller row index whatever order the CSR rows and partial reductions
+    // arrive in: the row comparator keeps its second argument on ties for ARGMIN and its first
+    // for ARGMAX, so the smaller index takes that position.
+    auto const first  = cuda::std::min(lhs, rhs);
+    auto const second = cuda::std::max(lhs, rhs);
+    return is_argmin ? binop(second, first) : binop(first, second);
   }
 };
 
@@ -63,7 +69,7 @@ std::unique_ptr<column> compute_nested_argminmax(reduction_context const& ctx,
       reduce_groups(ctx.grouped,
                     indices,
                     output,
-                    input_order_argminmax_fn{comparator.binop()},
+                    first_row_argminmax_fn{comparator.binop(), is_argmin},
                     sentinel,
                     stream,
                     mr);
