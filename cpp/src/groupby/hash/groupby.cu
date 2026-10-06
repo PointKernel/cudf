@@ -38,6 +38,18 @@ namespace groupby {
 namespace detail {
 namespace {
 
+/// Whether a stable aggregation also consumes the group label of every grouped row.
+bool uses_group_labels(aggregation::Kind kind)
+{
+  switch (kind) {
+    case aggregation::NTH_ELEMENT:
+    case aggregation::COVARIANCE:
+    case aggregation::CORRELATION:
+    case aggregation::HOST_UDF: return true;
+    default: return false;
+  }
+}
+
 bool needs_stable_groups(aggregation::Kind kind)
 {
   if (is_hash_aggregation(kind)) { return false; }
@@ -695,12 +707,15 @@ std::pair<std::unique_ptr<table>, std::vector<aggregation_result>> detail::hash:
 {
   // Build ordered rows directly when any request needs them, before metadata or unordered
   // requests can materialize an intermediate permutation. Existing cached groups are reused.
-  if (std::any_of(requests.begin(), requests.end(), [](auto const& request) {
-        return std::any_of(request.aggregations.begin(),
-                           request.aggregations.end(),
-                           [](auto const& agg) { return detail::needs_stable_groups(agg->kind); });
-      })) {
-    helper.grouped_order(stream);
+  auto const any_agg = [&](auto predicate) {
+    return std::any_of(requests.begin(), requests.end(), [&](auto const& request) {
+      return std::any_of(request.aggregations.begin(),
+                         request.aggregations.end(),
+                         [&](auto const& agg) { return predicate(agg->kind); });
+    });
+  };
+  if (any_agg(detail::needs_stable_groups)) {
+    helper.grouped_order(stream, any_agg(detail::uses_group_labels));
   }
 
   // Share primitive results and compound dependencies across all requests.

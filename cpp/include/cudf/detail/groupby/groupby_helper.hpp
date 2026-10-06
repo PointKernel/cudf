@@ -137,6 +137,11 @@ struct groupby_helper {
   bool is_presorted() const { return _is_presorted; }
 
   /**
+   * @brief Check whether the cached grouped rows already retain input order within each group
+   */
+  bool is_stable() const { return _stable; }
+
+  /**
    * @brief Return the effective number of keys
    *
    * When include_null_keys = YES, returned value is same as `keys.num_rows()`
@@ -154,11 +159,12 @@ struct groupby_helper {
    * for null keys.
    *
    * Computes and stores a stable grouped order on first invocation, and returns
-   * the stored order on subsequent calls.
+   * the stored order on subsequent calls. Pass `keep_labels` when `group_labels`
+   * will be requested too, so the labels sorted alongside the rows are kept.
    *
    * @return the grouped row indices for `keys`.
    */
-  column_view grouped_order(cuda::stream_ref stream);
+  column_view grouped_order(cuda::stream_ref stream, bool keep_labels = false);
 
   /**
    * @brief Get grouped row indices without requiring input order within each group.
@@ -220,10 +226,10 @@ struct groupby_helper {
   column_view ungrouped_keys_labels(cuda::stream_ref stream);
 
   /// Materialize grouping metadata, optionally retaining input order within groups.
-  void build_groups(cuda::stream_ref stream, bool stable_rows = false);
+  void build_groups(cuda::stream_ref stream, bool stable_rows = false, bool keep_labels = false);
 
   /// Materialize a stable row permutation only when an ordered operation needs it.
-  void make_stable(cuda::stream_ref stream);
+  void make_stable(cuda::stream_ref stream, bool keep_labels = false);
 
   column_ptr _unsorted_keys_labels;             ///< Labels in input order, null for excluded rows
   table_view _keys;                             ///< Input grouping keys

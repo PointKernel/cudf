@@ -24,14 +24,18 @@ struct grouped_keys {
   rmm::device_uvector<size_type> key_rows;       ///< One representative input row per group
   rmm::device_uvector<size_type> group_offsets;  ///< `num_groups + 1` offsets into `grouped_rows`
   rmm::device_uvector<size_type> grouped_rows;   ///< Input rows reordered so groups are contiguous
+  rmm::device_uvector<size_type> group_labels;   ///< Group of each grouped row when the stable
+                                                 ///< build kept its sort keys, otherwise empty
 };
 
 /**
  * @brief Groups input rows with HashCSR using preprocessed row operators.
  *
  * Group offsets are built only when requested, and grouped rows additionally require the offsets.
- * When grouped rows are requested, `stable_rows` retains their original order within each group.
- * `domain_capacity` bounds the table capacity for keys drawn from a small finite domain.
+ * When grouped rows are requested, `stable_rows` retains their original order within each group,
+ * and `keep_labels` additionally returns the group of every grouped row when the stable order was
+ * produced by sorting group labels. `domain_capacity` bounds the table capacity for keys drawn
+ * from a small finite domain.
  */
 template <typename Equal, typename Hash>
 grouped_keys group_keys(size_type num_rows,
@@ -43,12 +47,14 @@ grouped_keys group_keys(size_type num_rows,
                         std::optional<std::size_t> domain_capacity,
                         cuda::stream_ref stream,
                         cudf::memory_resources mr,
-                        bool stable_rows = false);
+                        bool stable_rows = false,
+                        bool keep_labels = false);
 
 /**
  * @brief Groups input keys with HashCSR, optionally materializing group offsets and grouped rows.
  *
- * When grouped rows are requested, `stable_rows` retains their original order within each group.
+ * When grouped rows are requested, `stable_rows` retains their original order within each group,
+ * and `keep_labels` additionally returns the group of every grouped row when available.
  */
 grouped_keys group_keys(table_view const& keys,
                         null_policy include_null_keys,
@@ -56,6 +62,7 @@ grouped_keys group_keys(table_view const& keys,
                         bool need_grouped_rows,
                         cuda::stream_ref stream,
                         cudf::memory_resources mr,
-                        bool stable_rows = false);
+                        bool stable_rows = false,
+                        bool keep_labels = false);
 
 }  // namespace cudf::groupby::detail::hash

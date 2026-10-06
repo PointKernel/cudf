@@ -159,18 +159,27 @@ std::size_t estimate_capacity(size_type num_rows,
   return std::max<std::size_t>(hash_csr_min_estimated_capacity, static_cast<std::size_t>(estimate));
 }
 
+/// Stable grouped rows and, when kept, the group of each grouped row.
+struct stable_rows {
+  rmm::device_uvector<size_type> rows;
+  rmm::device_uvector<size_type> labels;
+};
+
 /**
  * @brief Materializes stable grouped rows directly from the HashCSR build positions.
+ *
+ * Sorting the rows by group label also sorts the labels, so `keep_labels` returns them instead of
+ * discarding them. The singleton and single-group shortcuts do not sort and return no labels.
  */
-rmm::device_uvector<size_type> stable_grouped_rows(
-  size_type num_rows,
-  size_type num_grouped_rows,
-  device_span<size_type const> key_rows,
-  rmm::device_uvector<build_position_type> positions,
-  rmm::device_uvector<size_type> slot_counts,
-  rmm::device_uvector<cuda::std::uint32_t> group_slots,
-  cuda::stream_ref stream,
-  cudf::memory_resources mr)
+stable_rows stable_grouped_rows(size_type num_rows,
+                                size_type num_grouped_rows,
+                                device_span<size_type const> key_rows,
+                                rmm::device_uvector<build_position_type> positions,
+                                rmm::device_uvector<size_type> slot_counts,
+                                rmm::device_uvector<cuda::std::uint32_t> group_slots,
+                                bool keep_labels,
+                                cuda::stream_ref stream,
+                                cudf::memory_resources mr)
 {
   auto const temp_mr    = mr.get_temporary_mr();
   auto const output_mr  = mr.get_output_mr();
@@ -188,7 +197,7 @@ rmm::device_uvector<size_type> stable_grouped_rows(
     release(group_slots);
     rmm::device_uvector<size_type> rows(num_grouped_rows, stream, output_mr);
     thrust::copy(policy, key_rows.begin(), key_rows.end(), rows.begin());
-    return rows;
+    return {std::move(rows), rmm::device_uvector<size_type>{0, stream, output_mr}};
   }
   if (num_groups == 1) {
     release(slot_counts);
@@ -206,7 +215,7 @@ rmm::device_uvector<size_type> stable_grouped_rows(
                         return positions[row].first != hash_csr_no_slot;
                       });
     }
-    return rows;
+    return {std::move(rows), rmm::device_uvector<size_type>{0, stream, output_mr}};
   }
 
   // The count indices can be hash slots or representative rows. Reuse their counts for
@@ -250,7 +259,14 @@ rmm::device_uvector<size_type> stable_grouped_rows(
   // Excluded rows sort into a sentinel tail. Retain exactly the included prefix's storage.
   grouped_rows.resize(num_grouped_rows, stream);
   grouped_rows.shrink_to_fit(stream);
-  return grouped_rows;
+  if (!keep_labels) {
+    return {std::move(grouped_rows), rmm::device_uvector<size_type>{0, stream, output_mr}};
+  }
+  auto grouped_labels = group_ids.Current() == input_labels.data() ? std::move(input_labels)
+                                                                   : std::move(ordered_labels);
+  grouped_labels.resize(num_grouped_rows, stream);
+  grouped_labels.shrink_to_fit(stream);
+  return {std::move(grouped_rows), std::move(grouped_labels)};
 }
 
 }  // namespace
@@ -272,7 +288,8 @@ grouped_keys group_keys(size_type num_rows,
                         std::optional<std::size_t> domain_capacity,
                         cuda::stream_ref stream,
                         cudf::memory_resources mr,
-                        bool stable_rows)
+                        bool stable_rows,
+                        bool keep_labels)
 {
   CUDF_EXPECTS(need_group_offsets || !need_grouped_rows, "Grouped rows require group offsets");
   auto const temp_mr   = mr.get_temporary_mr();
@@ -381,13 +398,10 @@ grouped_keys group_keys(size_type num_rows,
     capacity = full_capacity;
   }
 
+  auto const no_rows = [&] { return rmm::device_uvector<size_type>{0, stream, output_mr}; };
   if (!need_group_offsets) {
     auto const num_groups = static_cast<size_type>(key_rows.size());
-    return {num_groups,
-            0,
-            std::move(key_rows),
-            rmm::device_uvector<size_type>{0, stream, output_mr},
-            rmm::device_uvector<size_type>{0, stream, output_mr}};
+    return {num_groups, 0, std::move(key_rows), no_rows(), no_rows(), no_rows()};
   }
 
   auto const num_groups = static_cast<size_type>(group_slots.size());
@@ -417,8 +431,12 @@ grouped_keys group_keys(size_type num_rows,
       }};
     thrust::sequence(
       policy, singleton_outputs, singleton_outputs + group_offsets.size(), size_type{0});
-    return {
-      num_groups, num_rows, std::move(key_rows), std::move(group_offsets), std::move(grouped_rows)};
+    return {num_groups,
+            num_rows,
+            std::move(key_rows),
+            std::move(group_offsets),
+            std::move(grouped_rows),
+            no_rows()};
   }
 
   auto const slot_rows = slots.begin();
@@ -448,23 +466,26 @@ grouped_keys group_keys(size_type num_rows,
             num_grouped_rows,
             std::move(key_rows),
             std::move(group_offsets),
-            rmm::device_uvector<size_type>{0, stream, output_mr}};
+            no_rows(),
+            no_rows()};
   }
 
   if (stable_rows) {
-    auto grouped_rows = stable_grouped_rows(num_rows,
-                                            num_grouped_rows,
-                                            key_rows,
-                                            std::move(positions),
-                                            std::move(slot_counts),
-                                            std::move(group_slots),
-                                            stream,
-                                            mr);
+    auto stable = stable_grouped_rows(num_rows,
+                                      num_grouped_rows,
+                                      key_rows,
+                                      std::move(positions),
+                                      std::move(slot_counts),
+                                      std::move(group_slots),
+                                      keep_labels,
+                                      stream,
+                                      mr);
     return {num_groups,
             num_grouped_rows,
             std::move(key_rows),
             std::move(group_offsets),
-            std::move(grouped_rows)};
+            std::move(stable.rows),
+            std::move(stable.labels)};
   }
 
   // Reuse the slot counts to hold the start offset of the group of each occupied slot, then
@@ -483,7 +504,8 @@ grouped_keys group_keys(size_type num_rows,
           num_grouped_rows,
           std::move(key_rows),
           std::move(group_offsets),
-          std::move(grouped_rows)};
+          std::move(grouped_rows),
+          no_rows()};
 }
 
 grouped_keys group_keys(table_view const& keys,
@@ -492,7 +514,8 @@ grouped_keys group_keys(table_view const& keys,
                         bool need_grouped_rows,
                         cuda::stream_ref stream,
                         cudf::memory_resources mr,
-                        bool stable_rows)
+                        bool stable_rows,
+                        bool keep_labels)
 {
   auto const num_rows             = keys.num_rows();
   auto const skip_rows_with_nulls = include_null_keys == null_policy::EXCLUDE;
@@ -521,7 +544,8 @@ grouped_keys group_keys(table_view const& keys,
                       domain_capacity,
                       stream,
                       mr,
-                      stable_rows);
+                      stable_rows,
+                      keep_labels);
   }
   return group_keys(num_rows,
                     row_bitmask,
@@ -532,7 +556,8 @@ grouped_keys group_keys(table_view const& keys,
                     domain_capacity,
                     stream,
                     mr,
-                    stable_rows);
+                    stable_rows,
+                    keep_labels);
 }
 
 template grouped_keys group_keys<row_comparator_t, row_hash_t>(size_type,
@@ -544,6 +569,7 @@ template grouped_keys group_keys<row_comparator_t, row_hash_t>(size_type,
                                                                std::optional<std::size_t>,
                                                                cuda::stream_ref,
                                                                cudf::memory_resources,
+                                                               bool,
                                                                bool);
 
 template grouped_keys group_keys<nullable_row_comparator_t, row_hash_t>(
@@ -556,6 +582,7 @@ template grouped_keys group_keys<nullable_row_comparator_t, row_hash_t>(
   std::optional<std::size_t>,
   cuda::stream_ref,
   cudf::memory_resources,
+  bool,
   bool);
 
 }  // namespace cudf::groupby::detail::hash

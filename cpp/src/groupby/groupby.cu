@@ -284,7 +284,7 @@ std::pair<std::unique_ptr<table>, std::unique_ptr<table>> groupby::replace_nulls
 
   if (values.is_empty()) { return std::pair(empty_like(_keys), empty_like(values)); }
 
-  helper().grouped_order(stream);
+  helper().grouped_order(stream, true);
   auto const& group_labels = helper().group_labels(stream);
   std::vector<std::unique_ptr<column>> results;
   results.reserve(values.num_columns());

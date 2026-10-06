@@ -66,6 +66,7 @@ rmm::device_uvector<size_type> included_rows(table_view const& keys,
 void stabilize_rows(hash::grouped_keys& groups,
                     groupby_helper::index_vector const* cached_labels,
                     size_type num_rows,
+                    bool keep_labels,
                     cuda::stream_ref stream)
 {
   using index_vector    = groupby_helper::index_vector;
@@ -135,6 +136,13 @@ void stabilize_rows(hash::grouped_keys& groups,
   } else if (rows.Current() == ordered_rows.data()) {
     groups.grouped_rows = std::move(ordered_rows);
   }
+  // The sorted labels are the group of each grouped row; keep them for group_labels().
+  if (keep_labels && cached_labels == nullptr) {
+    groups.group_labels = group_ids.Current() == input_labels.data() ? std::move(input_labels)
+                                                                     : std::move(ordered_labels);
+    groups.group_labels.resize(size, stream);
+    groups.group_labels.shrink_to_fit(stream);
+  }
 }
 
 }  // namespace
@@ -154,13 +162,19 @@ groupby_helper::~groupby_helper()                                    = default;
 groupby_helper::groupby_helper(groupby_helper&&) noexcept            = default;
 groupby_helper& groupby_helper::operator=(groupby_helper&&) noexcept = default;
 
-void groupby_helper::build_groups(cuda::stream_ref stream, bool stable_rows)
+void groupby_helper::build_groups(cuda::stream_ref stream, bool stable_rows, bool keep_labels)
 {
   if (_groups) { return; }
   auto const mr = cudf::get_current_device_resource_ref();
   if (_keys_pre_sorted == sorted::NO && _keys.num_rows() != 0) {
-    _groups = std::make_unique<hash::grouped_keys>(hash::group_keys(
-      _keys, _include_null_keys, true, true, stream, cudf::memory_resources{mr, mr}, stable_rows));
+    _groups = std::make_unique<hash::grouped_keys>(hash::group_keys(_keys,
+                                                                    _include_null_keys,
+                                                                    true,
+                                                                    true,
+                                                                    stream,
+                                                                    cudf::memory_resources{mr, mr},
+                                                                    stable_rows,
+                                                                    keep_labels));
     _stable = stable_rows;
     return;
   }
@@ -183,14 +197,18 @@ void groupby_helper::build_groups(cuda::stream_ref stream, bool stable_rows)
                  offsets.begin() + num_groups,
                  rows.begin(),
                  key_rows.begin());
-  _groups = std::make_unique<hash::grouped_keys>(
-    hash::grouped_keys{num_groups, size, std::move(key_rows), std::move(offsets), std::move(rows)});
+  _groups = std::make_unique<hash::grouped_keys>(hash::grouped_keys{num_groups,
+                                                                    size,
+                                                                    std::move(key_rows),
+                                                                    std::move(offsets),
+                                                                    std::move(rows),
+                                                                    index_vector{0, stream, mr}});
   _stable = true;
 }
 
-void groupby_helper::make_stable(cuda::stream_ref stream)
+void groupby_helper::make_stable(cuda::stream_ref stream, bool keep_labels)
 {
-  build_groups(stream, true);
+  build_groups(stream, true, keep_labels);
   if (_stable) { return; }
   // Scheduling contains spans into the current row buffer and hints derived from its order.
   _reduction_groups.reset();
@@ -200,7 +218,7 @@ void groupby_helper::make_stable(cuda::stream_ref stream)
     // A single group is the stable compaction of all included input rows.
     _groups->grouped_rows = included_rows(_keys, _include_null_keys, stream);
   } else if (num_groups > 1 && num_groups < size) {
-    stabilize_rows(*_groups, _group_labels.get(), _keys.num_rows(), stream);
+    stabilize_rows(*_groups, _group_labels.get(), _keys.num_rows(), keep_labels, stream);
   }
   _stable = true;
 }
@@ -211,9 +229,9 @@ size_type groupby_helper::num_keys(cuda::stream_ref stream)
   return _groups->num_grouped_rows;
 }
 
-column_view groupby_helper::grouped_order(cuda::stream_ref stream)
+column_view groupby_helper::grouped_order(cuda::stream_ref stream, bool keep_labels)
 {
-  make_stable(stream);
+  make_stable(stream, keep_labels);
   return column_view(device_span<size_type const>{_groups->grouped_rows});
 }
 
@@ -243,6 +261,11 @@ groupby_helper::index_vector const& groupby_helper::group_offsets(cuda::stream_r
 groupby_helper::index_vector const& groupby_helper::group_labels(cuda::stream_ref stream)
 {
   if (_group_labels) { return *_group_labels; }
+  if (num_keys(stream) != 0 && !_groups->group_labels.is_empty()) {
+    // The stable build sorted the labels along with the rows.
+    _group_labels = std::make_unique<index_vector>(std::move(_groups->group_labels));
+    return *_group_labels;
+  }
   auto labels = std::make_unique<index_vector>(num_keys(stream), stream);
   if (!labels->is_empty()) {
     auto const& offsets = group_offsets(stream);

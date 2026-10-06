@@ -203,7 +203,7 @@ std::pair<std::unique_ptr<table>, std::vector<aggregation_result>> groupby::scan
   cuda::stream_ref stream,
   rmm::device_async_resource_ref mr)
 {
-  helper().grouped_order(stream);
+  helper().grouped_order(stream, true);
 
   // Reuse repeated scan results across requests.
   cudf::detail::result_cache cache(requests.size());
