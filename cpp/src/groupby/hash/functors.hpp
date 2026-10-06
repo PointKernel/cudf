@@ -66,6 +66,8 @@ struct store_result_functor {
   {
     if (is_presorted()) { return values; }
     if (grouped_values) { return grouped_values->view(); }
+    // Stable rows serve both kinds of consumers, so gather the column once.
+    if (helper.is_stable()) { return get_grouped_values(); }
 
     // Keep this cache separate: order-sensitive aggregations must always obtain a stable view.
     return unordered_grouped_values
