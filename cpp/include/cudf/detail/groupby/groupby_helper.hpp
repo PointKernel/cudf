@@ -134,12 +134,12 @@ struct groupby_helper {
   /**
    * @brief Check whether grouped values can use the input order without filtering or gathering
    */
-  bool is_presorted() const { return _is_presorted; }
+  [[nodiscard]] bool is_presorted() const { return _is_presorted; }
 
   /**
    * @brief Check whether the cached grouped rows already retain input order within each group
    */
-  bool is_stable() const { return _stable; }
+  [[nodiscard]] bool is_stable() const { return _stable; }
 
   /**
    * @brief Return the effective number of keys
