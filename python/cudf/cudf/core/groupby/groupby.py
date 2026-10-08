@@ -1035,13 +1035,23 @@ class GroupBy(Serializable, Reducible, Scannable):
                 sizes = np.diff(old_offsets)[group_order]
                 new_offsets = np.zeros_like(old_offsets)
                 np.cumsum(sizes, out=new_offsets[1:])
-                row_order = cp.arange(offsets[-1], dtype=SIZE_TYPE_DTYPE)
-                row_order += cp.repeat(
-                    cp.asarray(
-                        old_offsets[:-1][group_order] - new_offsets[:-1]
-                    ),
-                    cp.asarray(sizes),
+                # Every row of a group moves by the same amount, so repeat the
+                # per-group shift over the group sizes and add it to the new
+                # positions.
+                shifts = as_column(
+                    old_offsets[:-1][group_order] - new_offsets[:-1]
                 )
+                counts = as_column(sizes)
+                with access_columns(
+                    shifts, counts, mode="read", scope="internal"
+                ):
+                    repeated = ColumnBase.from_pylibcudf(
+                        plc.filling.repeat(
+                            plc.Table([shifts.plc_column]), counts.plc_column
+                        ).columns()[0]
+                    )
+                row_order = cp.arange(offsets[-1], dtype=SIZE_TYPE_DTYPE)
+                row_order += repeated.values
                 self._group_ordering = (
                     new_offsets.tolist(),
                     as_column(row_order),
@@ -3003,10 +3013,10 @@ class GroupBy(Serializable, Reducible, Scannable):
               Speed
               count   mean  std    min    25%    50%    75%    max
         Score
-        30        1  370.0  NaN  370.0  370.0  370.0  370.0  370.0
         50        1  380.0  NaN  380.0  380.0  380.0  380.0  380.0
-        80        1   26.0  NaN   26.0   26.0   26.0   26.0   26.0
+        30        1  370.0  NaN  370.0  370.0  370.0  370.0  370.0
         90        1   24.0  NaN   24.0   24.0   24.0   24.0   24.0
+        80        1   26.0  NaN   26.0   26.0   26.0   26.0   26.0
 
         """
         if percentiles is not None:
