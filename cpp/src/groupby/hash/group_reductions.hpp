@@ -53,6 +53,23 @@ std::unique_ptr<column> group_histogram(column_view const& values,
                                         rmm::device_async_resource_ref mr);
 
 /**
+ * @brief Build one-entry histograms when each grouped value is its own group.
+ *
+ * Takes ownership of the values as the histogram value child. Null values remain entries with
+ * count one; the returned lists and their struct elements are non-nullable.
+ *
+ * @throws std::invalid_argument if the values have a nested type
+ *
+ * @param values Owned grouped values, one per group
+ * @param stream CUDA stream used for device memory operations and kernel launches
+ * @param mr Memory resources for output and temporary allocations
+ * @return A lists column containing one `STRUCT<value, count>` entry per group
+ */
+std::unique_ptr<column> make_singleton_histograms(std::unique_ptr<column> values,
+                                                  cuda::stream_ref stream,
+                                                  cudf::memory_resources mr);
+
+/**
  * @brief Internal API to calculate groupwise quantiles
  *
  * @code{.pseudo}

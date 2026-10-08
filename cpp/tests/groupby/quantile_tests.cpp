@@ -139,7 +139,6 @@ TYPED_TEST(groupby_quantile_test, multiple_quantile)
                   expect_keys,
                   expect_vals,
                   std::move(agg),
-                  include_nth_aggregation::YES,
                   cudf::null_policy::EXCLUDE,
                   cudf::sorted::NO,
                   {},

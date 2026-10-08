@@ -82,6 +82,7 @@ struct store_result_functor {
     if (is_presorted()) { return values; }
     if (grouped_values_view) { return *grouped_values_view; }
     if (grouped_values) { return grouped_values->view(); }
+    if (sorted_values) { return sorted_values->view(); }
     // Stable rows serve both kinds of consumers, so gather the column once.
     if (helper.is_stable()) { return get_grouped_values(); }
 

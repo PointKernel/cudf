@@ -10,6 +10,7 @@
 
 #include <cudf/column/column_factories.hpp>
 #include <cudf/detail/copy.hpp>
+#include <cudf/detail/device_scalar.hpp>
 #include <cudf/detail/gather.hpp>
 #include <cudf/detail/groupby/groupby_helper.hpp>
 #include <cudf/detail/labeling/label_segments.cuh>
@@ -18,12 +19,16 @@
 #include <cudf/utilities/error.hpp>
 #include <cudf/utilities/span.hpp>
 
-#include <rmm/device_buffer.hpp>
 #include <rmm/exec_policy.hpp>
 
-#include <cub/device/device_radix_sort.cuh>
+#include <cub/device/device_select.cuh>
+#include <cuda/buffer>
 #include <cuda/iterator>
 #include <cuda/std/bit>
+#include <cuda/std/cstddef>
+#include <cuda/std/execution>
+#include <cuda/std/functional>
+#include <cuda/std/iterator>
 #include <thrust/binary_search.h>
 #include <thrust/copy.h>
 #include <thrust/fill.h>
@@ -31,9 +36,32 @@
 #include <thrust/scatter.h>
 #include <thrust/sequence.h>
 
+#include <cstddef>
 #include <utility>
 
 namespace cudf::groupby::detail {
+
+size_type compact_group_offsets(bool* flags,
+                                size_type size,
+                                size_type* offsets,
+                                cuda::stream_ref stream,
+                                cudf::memory_resources mr)
+{
+  auto const temp_mr = mr.get_temporary_mr();
+  auto const begin   = cuda::counting_iterator<size_type>{0};
+  // Preserve the counting iterator's difference type used by the former copy_if call.
+  auto const num_items  = cuda::std::distance(begin, begin + size);
+  auto num_selected     = cudf::detail::device_scalar<cuda::std::size_t>(stream, temp_mr);
+  using stream_property = cuda::std::execution::prop<cuda::get_stream_t, cuda::stream_ref>;
+  using resource_property =
+    cuda::std::execution::prop<cuda::mr::get_memory_resource_t, rmm::device_async_resource_ref>;
+  cuda::std::execution::env<stream_property, resource_property> env{
+    stream_property{cuda::get_stream_t{}, stream},
+    resource_property{cuda::mr::get_memory_resource_t{}, temp_mr}};
+  CUDF_CUDA_TRY(cub::DeviceSelect::FlaggedIf(
+    begin, flags, offsets, num_selected.data(), num_items, cuda::std::identity{}, env));
+  return static_cast<size_type>(num_selected.value(stream));
+}
 
 namespace {
 
@@ -121,26 +149,24 @@ void stabilize_rows(hash::grouped_keys& groups,
   // exclusions, retain its exact-sized allocation for the sorted prefix instead.
   auto alternate_rows = index_vector(filtered ? num_rows : 0, stream, mr);
   auto* alternate     = filtered ? alternate_rows.data() : groups.grouped_rows.data();
-  auto group_ids      = cub::DoubleBuffer<size_type>{input_labels.data(), ordered_labels.data()};
-  auto rows           = cub::DoubleBuffer<size_type>{ordered_rows.data(), alternate};
   // Only excluded rows use the sentinel group ID, which sorts after every included group.
   auto const end_bit =
     cuda::std::bit_width(static_cast<uint32_t>(filtered ? num_groups : num_groups - 1));
-  std::size_t temp_bytes = 0;
-  CUDF_CUDA_TRY(cub::DeviceRadixSort::SortPairs(
-    nullptr, temp_bytes, group_ids, rows, num_rows, 0, end_bit, stream.get()));
-  auto temp = rmm::device_buffer(temp_bytes, stream, mr);
-  CUDF_CUDA_TRY(cub::DeviceRadixSort::SortPairs(
-    temp.data(), temp_bytes, group_ids, rows, num_rows, 0, end_bit, stream.get()));
+  auto const sorted = hash::stable_sort_group_rows({input_labels.data(), ordered_rows.data()},
+                                                   {ordered_labels.data(), alternate},
+                                                   num_rows,
+                                                   end_bit,
+                                                   stream,
+                                                   cudf::memory_resources{mr, mr});
   if (filtered) {
-    thrust::copy_n(policy, rows.Current(), size, groups.grouped_rows.begin());
-  } else if (rows.Current() == ordered_rows.data()) {
+    thrust::copy_n(policy, sorted.rows, size, groups.grouped_rows.begin());
+  } else if (sorted.rows == ordered_rows.data()) {
     groups.grouped_rows = std::move(ordered_rows);
   }
   // The sorted labels are the group of each grouped row; keep them for group_labels().
   if (keep_labels && cached_labels == nullptr) {
-    groups.group_labels = group_ids.Current() == input_labels.data() ? std::move(input_labels)
-                                                                     : std::move(ordered_labels);
+    groups.group_labels =
+      sorted.labels == input_labels.data() ? std::move(input_labels) : std::move(ordered_labels);
     groups.group_labels.resize(size, stream);
     groups.group_labels.shrink_to_fit(stream);
   }
@@ -163,15 +189,27 @@ groupby_helper::~groupby_helper()                                    = default;
 groupby_helper::groupby_helper(groupby_helper&&) noexcept            = default;
 groupby_helper& groupby_helper::operator=(groupby_helper&&) noexcept = default;
 
-void groupby_helper::build_groups(cuda::stream_ref stream, bool stable_rows, bool keep_labels)
+void groupby_helper::build_groups(cuda::stream_ref stream,
+                                  bool stable_rows,
+                                  bool keep_labels,
+                                  bool need_grouped_rows)
 {
-  if (_groups) { return; }
+  if (_groups) {
+    if (!need_grouped_rows ||
+        _groups->grouped_rows.size() == static_cast<std::size_t>(_groups->num_grouped_rows)) {
+      return;
+    }
+    // A previous counts-only aggregation needed no row permutation. Build it only when a later
+    // operation needs rows; no result cache is shared across aggregation calls.
+    _groups.reset();
+    _stable = false;
+  }
   auto const mr = cudf::get_current_device_resource_ref();
   if (_keys_pre_sorted == sorted::NO && _keys.num_rows() != 0) {
     _groups = std::make_unique<hash::grouped_keys>(hash::group_keys(_keys,
                                                                     _include_null_keys,
                                                                     true,
-                                                                    true,
+                                                                    need_grouped_rows,
                                                                     stream,
                                                                     cudf::memory_resources{mr, mr},
                                                                     stable_rows,
@@ -192,12 +230,15 @@ void groupby_helper::build_groups(cuda::stream_ref stream, bool stable_rows, boo
       : compute_group_offsets<false>(_keys, rows.data(), size, offsets, stream);
   offsets.set_element_async(num_groups, size, stream);
   offsets.resize(static_cast<std::size_t>(num_groups) + 1, stream);
-  auto key_rows = index_vector(num_groups, stream, mr);
-  thrust::gather(rmm::exec_policy_nosync(stream, mr),
-                 offsets.begin(),
-                 offsets.begin() + num_groups,
-                 rows.begin(),
-                 key_rows.begin());
+  // Without filtered rows, each group offset already identifies its representative input row.
+  auto key_rows = index_vector(_is_presorted ? 0 : num_groups, stream, mr);
+  if (!_is_presorted) {
+    thrust::gather(rmm::exec_policy_nosync(stream, mr),
+                   offsets.begin(),
+                   offsets.begin() + num_groups,
+                   rows.begin(),
+                   key_rows.begin());
+  }
   _groups = std::make_unique<hash::grouped_keys>(hash::grouped_keys{num_groups,
                                                                     size,
                                                                     std::move(key_rows),
@@ -226,7 +267,7 @@ void groupby_helper::make_stable(cuda::stream_ref stream, bool keep_labels)
 
 size_type groupby_helper::num_keys(cuda::stream_ref stream)
 {
-  build_groups(stream);
+  build_groups(stream, false, false, false);
   return _groups->num_grouped_rows;
 }
 
@@ -255,12 +296,14 @@ hash::grouped_rows const& groupby_helper::reduction_groups(cuda::stream_ref stre
 
 groupby_helper::index_vector const& groupby_helper::group_offsets(cuda::stream_ref stream)
 {
-  build_groups(stream);
+  build_groups(stream, false, false, false);
   return _groups->group_offsets;
 }
 
 groupby_helper::index_vector const& groupby_helper::group_labels(cuda::stream_ref stream)
 {
+  // Labels must use the final grouping order before any row consumer can observe them.
+  build_groups(stream);
   if (_group_labels) { return *_group_labels; }
   if (num_keys(stream) != 0 && !_groups->group_labels.is_empty()) {
     // The stable build sorted the labels along with the rows.
@@ -341,21 +384,26 @@ groupby_helper::column_ptr groupby_helper::unordered_grouped_values(
 }
 
 std::unique_ptr<table> groupby_helper::unique_keys(cuda::stream_ref stream,
-                                                   rmm::device_async_resource_ref mr)
+                                                   cudf::memory_resources mr)
 {
   std::unique_ptr<hash::grouped_keys> key_groups;
   if (!_groups && _keys_pre_sorted == sorted::NO && _keys.num_rows() != 0) {
     // Empty aggregation requests need only representatives. Keep this metadata local so a
     // later operation can populate the helper with complete grouped rows.
-    auto const temp_mr = cudf::get_current_device_resource_ref();
+    auto const temp_mr = mr.get_temporary_mr();
     key_groups         = std::make_unique<hash::grouped_keys>(hash::group_keys(
       _keys, _include_null_keys, false, false, stream, cudf::memory_resources{temp_mr, temp_mr}));
   } else {
-    build_groups(stream);
+    build_groups(stream, false, false, false);
   }
   auto const& groups = key_groups ? *key_groups : *_groups;
+  auto const key_rows =
+    groups.key_rows.is_empty()
+      ? device_span<size_type const>{groups.group_offsets.data(),
+                                     static_cast<std::size_t>(groups.num_groups)}
+      : device_span<size_type const>{groups.key_rows};
   return cudf::detail::gather(_keys,
-                              groups.key_rows,
+                              key_rows,
                               out_of_bounds_policy::DONT_CHECK,
                               negative_index_policy::NOT_ALLOWED,
                               stream,

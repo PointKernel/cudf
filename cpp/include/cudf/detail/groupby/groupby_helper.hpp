@@ -115,9 +115,11 @@ struct groupby_helper {
   /**
    * @brief Get a table of unique keys
    *
+   * @param stream CUDA stream used for device operations
+   * @param mr Memory resources for output and temporary allocations
    * @return a new table in which each row is a unique row in the grouped key table.
    */
-  std::unique_ptr<table> unique_keys(cuda::stream_ref stream, rmm::device_async_resource_ref mr);
+  std::unique_ptr<table> unique_keys(cuda::stream_ref stream, cudf::memory_resources mr);
 
   /**
    * @brief Get a table of grouped keys
@@ -223,8 +225,11 @@ struct groupby_helper {
    */
   index_vector const& input_labels(cuda::stream_ref stream);
 
-  /// Materialize grouping metadata, optionally retaining input order within groups.
-  void build_groups(cuda::stream_ref stream, bool stable_rows = false, bool keep_labels = false);
+  /// Materialize grouping metadata, optionally retaining rows and their input order.
+  void build_groups(cuda::stream_ref stream,
+                    bool stable_rows       = false,
+                    bool keep_labels       = false,
+                    bool need_grouped_rows = true);
 
   /// Materialize a stable row permutation only when an ordered operation needs it.
   void make_stable(cuda::stream_ref stream, bool keep_labels = false);

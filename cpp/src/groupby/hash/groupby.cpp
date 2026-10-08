@@ -38,11 +38,20 @@ namespace groupby {
 namespace detail {
 namespace {
 
-/// Whether a stable aggregation also consumes the group label of every grouped row.
+/// Whether an aggregation consumes group labels directly or while sorting its values.
 bool uses_group_labels(aggregation::Kind kind)
 {
   switch (kind) {
+    case aggregation::HISTOGRAM:
+    case aggregation::QUANTILE:
+    case aggregation::MEDIAN:
+    case aggregation::NUNIQUE:
     case aggregation::NTH_ELEMENT:
+    case aggregation::COVARIANCE:
+    case aggregation::CORRELATION:
+    case aggregation::TDIGEST:
+    case aggregation::MERGE_TDIGEST:
+    case aggregation::BITWISE_AGG:
     case aggregation::HOST_UDF: return true;
     default: return false;
   }
@@ -158,13 +167,20 @@ void aggregate_result_functor::operator()<aggregation::HISTOGRAM>(aggregation co
 {
   if (cache.has_result(values, agg)) return;
 
-  cache.add_result(values,
-                   agg,
-                   detail::group_histogram(get_unordered_grouped_values(),
-                                           helper.group_labels(stream),
-                                           helper.num_groups(stream),
-                                           stream,
-                                           mr));
+  auto const num_groups = helper.num_groups(stream);
+  if (num_groups == helper.num_keys(stream)) {
+    cache.add_result(
+      values,
+      agg,
+      detail::make_singleton_histograms(take_grouped_values(), stream, cudf::memory_resources{mr}));
+    return;
+  }
+
+  cache.add_result(
+    values,
+    agg,
+    detail::group_histogram(
+      get_unordered_grouped_values(), helper.group_labels(stream), num_groups, stream, mr));
 }
 
 template <>
@@ -262,13 +278,25 @@ void aggregate_result_functor::operator()<aggregation::COLLECT_LIST>(aggregation
 
   auto const null_handling =
     dynamic_cast<cudf::detail::collect_list_aggregation const&>(agg)._null_handling;
-  // The gathered column becomes the list child; later aggregations still see it through a view.
-  auto result = detail::group_collect(take_grouped_values(),
-                                      helper.group_offsets(stream),
-                                      helper.num_groups(stream),
-                                      null_handling,
-                                      stream,
-                                      mr);
+  auto const grouped = get_grouped_values();
+  auto result        = [&] {
+    // Null filtering creates a new child, so keep the original owner for later aggregations.
+    if (null_handling == null_policy::EXCLUDE && grouped.has_nulls()) {
+      return detail::group_collect(grouped,
+                                   helper.group_offsets(stream),
+                                   helper.num_groups(stream),
+                                   null_handling,
+                                   stream,
+                                   mr);
+    }
+    // Otherwise the gathered column becomes the list child, retaining the cached view's owner.
+    return detail::group_collect(take_grouped_values(),
+                                 helper.group_offsets(stream),
+                                 helper.num_groups(stream),
+                                 null_handling,
+                                 stream,
+                                 mr);
+  }();
   cache.add_result(values, agg, std::move(result));
 }
 
@@ -719,6 +747,10 @@ std::pair<std::unique_ptr<table>, std::vector<aggregation_result>> detail::hash:
   };
   if (any_agg(detail::needs_stable_groups)) {
     helper.grouped_order(stream, any_agg(detail::uses_group_labels));
+  } else if (any_agg([](auto kind) { return !detail::is_hash_aggregation(kind); })) {
+    // Specialized aggregations need grouped rows too. Establish their final group order before
+    // a preceding counts-only reduction can cache results using the same group indices.
+    helper.unordered_grouped_order(stream);
   }
 
   // Share primitive results and compound dependencies across all requests.
@@ -761,7 +793,7 @@ std::pair<std::unique_ptr<table>, std::vector<aggregation_result>> detail::hash:
 
   auto results = detail::extract_results(requests, cache, stream, mr.get_output_mr());
 
-  return std::pair(helper.unique_keys(stream, mr.get_output_mr()), std::move(results));
+  return std::pair(helper.unique_keys(stream, mr), std::move(results));
 }
 }  // namespace groupby
 }  // namespace cudf

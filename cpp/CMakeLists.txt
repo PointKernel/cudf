@@ -739,7 +739,7 @@ add_library(
   src/groupby/common/null_mask.cu
   src/groupby/common/utils.cpp
   src/groupby/groupby.cu
-  src/groupby/hash/compute_groupby.cu
+  src/groupby/hash/compute_groupby.cpp
   src/groupby/hash/compute_single_pass_aggs.cpp
   src/groupby/hash/compute_single_pass_aggs.cu
   src/groupby/hash/extract_single_pass_aggs.cpp
@@ -759,14 +759,17 @@ add_library(
   src/groupby/hash/group_quantiles.cu
   src/groupby/hash/group_rank_scan.cu
   src/groupby/hash/group_replace_nulls.cu
+  src/groupby/hash/group_struct_minmax_scan.cu
   src/groupby/hash/group_sum_scan.cu
   src/groupby/hash/group_topk.cu
-  src/groupby/hash/groupby.cu
+  src/groupby/hash/groupby.cpp
   src/groupby/hash/hash_compound_agg_finalizer.cu
   src/groupby/hash/host_udf_aggregation.cpp
   src/groupby/hash/output_utils.cu
   src/groupby/hash/scan.cpp
   src/groupby/hash/single_pass_argminmax.cu
+  src/groupby/hash/single_pass_argminmax_nested.cu
+  src/groupby/hash/single_pass_fused_minmax_sum.cu
   src/groupby/hash/single_pass_minmax.cu
   src/groupby/hash/single_pass_product.cu
   src/groupby/hash/single_pass_sum_overflow.cu
@@ -1097,7 +1100,6 @@ add_library(
   src/strings/attributes.cu
   src/strings/capitalize.cu
   src/strings/case.cu
-  src/strings/char_types/char_cases.cu
   src/strings/char_types/char_types.cu
   src/strings/combine/concatenate.cu
   src/strings/combine/join.cu

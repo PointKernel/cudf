@@ -244,32 +244,48 @@ stable_rows stable_grouped_rows(size_type num_rows,
 
   rmm::device_uvector<size_type> ordered_labels(num_rows, stream, temp_mr);
   rmm::device_uvector<size_type> alternate_rows(num_rows, stream, output_mr);
-  auto group_ids     = cub::DoubleBuffer<size_type>{input_labels.data(), ordered_labels.data()};
-  auto rows          = cub::DoubleBuffer<size_type>{input_rows.data(), alternate_rows.data()};
   auto const end_bit = cuda::std::bit_width(
     static_cast<cuda::std::uint32_t>(num_grouped_rows == num_rows ? num_groups - 1 : num_groups));
-  std::size_t temp_bytes = 0;
-  CUDF_CUDA_TRY(cub::DeviceRadixSort::SortPairs(
-    nullptr, temp_bytes, group_ids, rows, num_rows, 0, end_bit, stream.get()));
-  cuda::device_buffer<std::byte> temp(stream, temp_mr, temp_bytes, cuda::no_init);
-  CUDF_CUDA_TRY(cub::DeviceRadixSort::SortPairs(
-    temp.data(), temp_bytes, group_ids, rows, num_rows, 0, end_bit, stream.get()));
+  auto const sorted = stable_sort_group_rows({input_labels.data(), input_rows.data()},
+                                             {ordered_labels.data(), alternate_rows.data()},
+                                             num_rows,
+                                             end_bit,
+                                             stream,
+                                             mr);
   auto grouped_rows =
-    rows.Current() == input_rows.data() ? std::move(input_rows) : std::move(alternate_rows);
+    sorted.rows == input_rows.data() ? std::move(input_rows) : std::move(alternate_rows);
   // Excluded rows sort into a sentinel tail. Retain exactly the included prefix's storage.
   grouped_rows.resize(num_grouped_rows, stream);
   grouped_rows.shrink_to_fit(stream);
   if (!keep_labels) {
     return {std::move(grouped_rows), rmm::device_uvector<size_type>{0, stream, output_mr}};
   }
-  auto grouped_labels = group_ids.Current() == input_labels.data() ? std::move(input_labels)
-                                                                   : std::move(ordered_labels);
+  auto grouped_labels =
+    sorted.labels == input_labels.data() ? std::move(input_labels) : std::move(ordered_labels);
   grouped_labels.resize(num_grouped_rows, stream);
   grouped_labels.shrink_to_fit(stream);
   return {std::move(grouped_rows), std::move(grouped_labels)};
 }
 
 }  // namespace
+
+group_row_buffers stable_sort_group_rows(group_row_buffers input,
+                                         group_row_buffers alternate,
+                                         size_type num_rows,
+                                         int end_bit,
+                                         cuda::stream_ref stream,
+                                         cudf::memory_resources mr)
+{
+  auto labels            = cub::DoubleBuffer<size_type>{input.labels, alternate.labels};
+  auto rows              = cub::DoubleBuffer<size_type>{input.rows, alternate.rows};
+  std::size_t temp_bytes = 0;
+  CUDF_CUDA_TRY(cub::DeviceRadixSort::SortPairs(
+    nullptr, temp_bytes, labels, rows, num_rows, 0, end_bit, stream.get()));
+  cuda::device_buffer<std::byte> temp(stream, mr.get_temporary_mr(), temp_bytes, cuda::no_init);
+  CUDF_CUDA_TRY(cub::DeviceRadixSort::SortPairs(
+    temp.data(), temp_bytes, labels, rows, num_rows, 0, end_bit, stream.get()));
+  return {labels.Current(), rows.Current()};
+}
 
 /**
  * @brief Groups the input rows by key with a HashCSR build.
@@ -413,21 +429,18 @@ grouped_keys group_keys(size_type num_rows,
     release(group_slots);
     overflow.reset();
 
-    key_rows.resize(num_rows, stream);
+    // Singleton group offsets already identify each representative input row.
+    key_rows.resize(need_grouped_rows ? 0 : num_rows, stream);
     rmm::device_uvector<size_type> group_offsets(
       static_cast<std::size_t>(num_rows) + 1, stream, output_mr);
     rmm::device_uvector<size_type> grouped_rows(
       need_grouped_rows ? num_rows : 0, stream, output_mr);
     auto const singleton_outputs = cuda::tabulate_output_iterator{
-      [key_rows      = key_rows.data(),
+      [rows          = need_grouped_rows ? grouped_rows.data() : key_rows.data(),
        group_offsets = group_offsets.data(),
-       grouped_rows  = grouped_rows.data(),
        num_rows] __device__(cuda::std::ptrdiff_t index, size_type value) -> void {
         group_offsets[index] = value;
-        if (index < num_rows) {
-          key_rows[index] = value;
-          if (grouped_rows != nullptr) { grouped_rows[index] = value; }
-        }
+        if (index < num_rows) { rows[index] = value; }
       }};
     thrust::sequence(
       policy, singleton_outputs, singleton_outputs + group_offsets.size(), size_type{0});

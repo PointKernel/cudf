@@ -5,7 +5,6 @@
 
 #pragma once
 
-#include <cudf/detail/algorithms/copy_if.cuh>
 #include <cudf/detail/row_operator/equality.cuh>
 #include <cudf/table/table_view.hpp>
 #include <cudf/types.hpp>
@@ -14,13 +13,18 @@
 #include <rmm/device_uvector.hpp>
 #include <rmm/exec_policy.hpp>
 
-#include <cuda/functional>
 #include <cuda/iterator>
-#include <cuda/std/iterator>
 #include <cuda/stream>
 #include <thrust/transform.h>
 
 namespace cudf::groupby::detail {
+
+/// Compacts materialized group-boundary flags through one shared device-algorithm launcher.
+size_type compact_group_offsets(bool* flags,
+                                size_type size,
+                                size_type* offsets,
+                                cuda::stream_ref stream,
+                                cudf::memory_resources mr);
 
 size_type compute_nested_group_offsets(table_view const& keys,
                                        size_type const* sorted_order,
@@ -51,9 +55,8 @@ size_type compute_group_offsets(table_view const& keys,
                     [d_key_equal, sorted_order] __device__(size_type row) {
                       return row == 0 || !d_key_equal(sorted_order[row], sorted_order[row - 1]);
                     });
-  auto const result_end = cudf::detail::copy_if(
-    itr, itr + size, result.begin(), group_offsets.begin(), cuda::std::identity{}, stream);
-  return cuda::std::distance(group_offsets.begin(), result_end);
+  return compact_group_offsets(
+    result.data(), size, group_offsets.data(), stream, cudf::memory_resources{temp_mr, temp_mr});
 }
 
 }  // namespace cudf::groupby::detail

@@ -3,8 +3,6 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-#include <tests/groupby/groupby_test_util.hpp>
-
 #include <cudf_test/base_fixture.hpp>
 #include <cudf_test/column_wrapper.hpp>
 #include <cudf_test/testing_main.hpp>
@@ -22,7 +20,6 @@ struct groupby_stream_test : public cudf::test::BaseFixture {
   cudf::test::fixed_width_column_wrapper<V> vals{0, 1, 2, 3, 4, 5, 6, 7, 8, 9};
 
   void test_groupby(std::unique_ptr<cudf::groupby_aggregation>&& agg,
-                    include_nth_aggregation include_nth = include_nth_aggregation::NO,
                     cudf::null_policy include_null_keys = cudf::null_policy::INCLUDE,
                     cudf::sorted keys_are_sorted        = cudf::sorted::NO)
   {
@@ -30,10 +27,6 @@ struct groupby_stream_test : public cudf::test::BaseFixture {
       auto requests = std::vector<cudf::groupby::aggregation_request>{};
       requests.push_back(cudf::groupby::aggregation_request{});
       requests.front().values = vals;
-      if (include_nth == include_nth_aggregation::YES) {
-        requests.front().aggregations.push_back(
-          cudf::make_nth_element_aggregation<cudf::groupby_aggregation>(0));
-      }
       requests.front().aggregations.push_back(std::move(agg));
       return requests;
     }();
@@ -54,8 +47,12 @@ TYPED_TEST(groupby_stream_test, test_count)
   };
 
   this->test_groupby(make_count_agg());
-  this->test_groupby(make_count_agg(), include_nth_aggregation::YES);
   this->test_groupby(make_count_agg(cudf::null_policy::INCLUDE));
+}
+
+TYPED_TEST(groupby_stream_test, test_nth_element)
+{
+  this->test_groupby(cudf::make_nth_element_aggregation<cudf::groupby_aggregation>(0));
 }
 
 struct GroupbyTest : public cudf::test::BaseFixture {};

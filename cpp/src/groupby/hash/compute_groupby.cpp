@@ -4,6 +4,7 @@
  */
 
 #include "compute_groupby.hpp"
+
 #include "compute_single_pass_aggs.hpp"
 #include "extract_single_pass_aggs.hpp"
 #include "hash_compound_agg_finalizer.hpp"
@@ -114,7 +115,7 @@ void compute_aggregations(std::span<aggregation_request const> requests,
           values, agg_kinds, is_agg_intermediate, helper.reduction_groups(stream), stream, mr);
       }
       auto const grouped =
-        grouped_rows{helper.unordered_grouped_order(stream),
+        grouped_rows{device_span<size_type const>{},
                      helper.group_offsets(stream),
                      cuda::device_buffer<size_type>{stream, temp_mr},
                      cuda::device_buffer<size_type>{stream, temp_mr},
