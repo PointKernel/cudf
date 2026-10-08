@@ -415,29 +415,9 @@ struct groupby_count_reuse_test : groupby_key_shape_test {
     // presorted nested keys contain leading nulls, empty lists, and a trailing singleton.
     cudf::test::fixed_width_column_wrapper<int32_t> flat_keys{{99, 2, 0, 2, 1, 0, 2, 4, 1, 2, 99},
                                                               nulls_at({2, 5})};
-    lists_column nested_keys{{lists_column{99},
-                              lists_column{1},
-                              lists_column{0},
-                              lists_column{1},
-                              lists_column{},
-                              lists_column{0},
-                              lists_column{1},
-                              lists_column{2},
-                              lists_column{},
-                              lists_column{1},
-                              lists_column{99}},
+    lists_column nested_keys{{{99}, {1}, {0}, {1}, {}, {0}, {1}, {2}, {}, {1}, {99}},
                              nulls_at({2, 5})};
-    lists_column sorted_keys{{lists_column{99},
-                              lists_column{0},
-                              lists_column{0},
-                              lists_column{},
-                              lists_column{},
-                              lists_column{1},
-                              lists_column{1},
-                              lists_column{1, 2},
-                              lists_column{1, 2},
-                              lists_column{2},
-                              lists_column{99}},
+    lists_column sorted_keys{{{99}, {0}, {0}, {}, {}, {1}, {1}, {1, 2}, {1, 2}, {2}, {99}},
                              nulls_at({1, 2})};
     cudf::test::fixed_width_column_wrapper<int32_t> input_values{
       90, 100, 101, 10, 11, 20, 21, 30, 31, 40, 91};
