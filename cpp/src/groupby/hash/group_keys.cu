@@ -85,6 +85,18 @@ std::optional<std::size_t> small_key_domain_capacity(table_view const& keys,
   return std::max<std::size_t>(hash_csr_min_estimated_capacity, 4 * domain);
 }
 
+struct singleton_group_output {
+  size_type* rows;
+  size_type* offsets;
+  size_type num_rows;
+
+  __device__ void operator()(cuda::std::ptrdiff_t index, size_type value) const
+  {
+    offsets[index] = value;
+    if (index < num_rows) { rows[index] = value; }
+  }
+};
+
 struct is_occupied_fn {
   __device__ bool operator()(slot_type slot) const
   {
@@ -434,13 +446,8 @@ grouped_keys group_keys(size_type num_rows,
       static_cast<std::size_t>(num_rows) + 1, stream, output_mr);
     rmm::device_uvector<size_type> grouped_rows(
       need_grouped_rows ? num_rows : 0, stream, output_mr);
-    auto const singleton_outputs = cuda::tabulate_output_iterator{
-      [rows          = need_grouped_rows ? grouped_rows.data() : key_rows.data(),
-       group_offsets = group_offsets.data(),
-       num_rows] __device__(cuda::std::ptrdiff_t index, size_type value) -> void {
-        group_offsets[index] = value;
-        if (index < num_rows) { rows[index] = value; }
-      }};
+    auto const singleton_outputs = cuda::tabulate_output_iterator{singleton_group_output{
+      need_grouped_rows ? grouped_rows.data() : key_rows.data(), group_offsets.data(), num_rows}};
     thrust::sequence(
       policy, singleton_outputs, singleton_outputs + group_offsets.size(), size_type{0});
     return {num_groups,
