@@ -36,12 +36,6 @@ struct group_reduction_plan;
  * 3. Group rows: original row indices and scheduling metadata for direct reductions
  */
 struct groupby_helper {
-  using index_vector       = rmm::device_uvector<size_type>;
-  using bitmask_vector     = rmm::device_uvector<bitmask_type>;
-  using column_ptr         = std::unique_ptr<column>;
-  using index_vector_ptr   = std::unique_ptr<index_vector>;
-  using bitmask_vector_ptr = std::unique_ptr<bitmask_vector>;
-
   /**
    * @brief Construct a new helper object
    *
@@ -193,7 +187,7 @@ struct groupby_helper {
    * @return vector of offsets of the starting point of each group in the grouped
    * key table
    */
-  index_vector const& group_offsets(cuda::stream_ref stream);
+  rmm::device_uvector<size_type> const& group_offsets(cuda::stream_ref stream);
 
   /**
    * @brief Get the group labels corresponding to the grouped order of `keys`.
@@ -208,7 +202,7 @@ struct groupby_helper {
    *
    * @return vector of group labels for each row in the grouped key column
    */
-  index_vector const& group_labels(cuda::stream_ref stream);
+  rmm::device_uvector<size_type> const& group_labels(cuda::stream_ref stream);
 
  private:
   /**
@@ -223,7 +217,7 @@ struct groupby_helper {
    *
    * @return vector of group labels in the order of the ungrouped key table
    */
-  index_vector const& input_labels(cuda::stream_ref stream);
+  rmm::device_uvector<size_type> const& input_labels(cuda::stream_ref stream);
 
   /// Materialize grouping metadata, optionally retaining rows and their input order.
   void build_groups(cuda::stream_ref stream,
@@ -234,11 +228,12 @@ struct groupby_helper {
   /// Materialize a stable row permutation only when an ordered operation needs it.
   void make_stable(cuda::stream_ref stream, bool keep_labels = false);
 
-  index_vector_ptr _input_labels;  ///< Labels in input order; excluded rows get num_groups
-  table_view _keys;                ///< Input grouping keys
+  std::unique_ptr<rmm::device_uvector<size_type>>
+    _input_labels;   ///< Labels in input order; excluded rows get num_groups
+  table_view _keys;  ///< Input grouping keys
   std::unique_ptr<hash::grouped_keys> _groups;                    ///< HashCSR grouping metadata
   std::unique_ptr<hash::group_reduction_plan> _reduction_groups;  ///< Cached reduction scheduling
-  index_vector_ptr _group_labels;                                 ///< Labels in grouped order
+  std::unique_ptr<rmm::device_uvector<size_type>> _group_labels;  ///< Labels in grouped order
   sorted _keys_pre_sorted;         ///< Whether key groups are already contiguous
   null_policy _include_null_keys;  ///< Whether to retain null key rows
   bool _is_presorted;              ///< Whether grouped values can use the input directly

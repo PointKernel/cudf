@@ -93,12 +93,11 @@ rmm::device_uvector<size_type> included_rows(table_view const& keys,
 }
 
 void stabilize_rows(hash::grouped_keys& groups,
-                    groupby_helper::index_vector const* cached_labels,
+                    rmm::device_uvector<size_type> const* cached_labels,
                     size_type num_rows,
                     bool keep_labels,
                     cuda::stream_ref stream)
 {
-  using index_vector    = groupby_helper::index_vector;
   auto const size       = groups.num_grouped_rows;
   auto const num_groups = groups.num_groups;
   // HashCSR determines group membership. Stably sorting those group IDs in input-row order
@@ -106,9 +105,9 @@ void stabilize_rows(hash::grouped_keys& groups,
   auto const mr       = cudf::get_current_device_resource_ref();
   auto const policy   = rmm::exec_policy_nosync(stream, mr);
   auto const filtered = size != num_rows;
-  auto input_labels   = index_vector(num_rows, stream, mr);
-  auto ordered_labels = index_vector(num_rows, stream, mr);
-  auto ordered_rows   = index_vector(num_rows, stream, mr);
+  auto input_labels   = rmm::device_uvector<size_type>(num_rows, stream, mr);
+  auto ordered_labels = rmm::device_uvector<size_type>(num_rows, stream, mr);
+  auto ordered_rows   = rmm::device_uvector<size_type>(num_rows, stream, mr);
   if (filtered) {
     auto const initialize_rows = cuda::tabulate_output_iterator{
       [labels = input_labels.data(), rows = ordered_rows.data(), num_groups] __device__(
@@ -147,7 +146,7 @@ void stabilize_rows(hash::grouped_keys& groups,
 
   // The unfiltered CSR buffer is now free to serve as the alternate sorting buffer. With
   // exclusions, retain its exact-sized allocation for the sorted prefix instead.
-  auto alternate_rows = index_vector(filtered ? num_rows : 0, stream, mr);
+  auto alternate_rows = rmm::device_uvector<size_type>(filtered ? num_rows : 0, stream, mr);
   auto* alternate     = filtered ? alternate_rows.data() : groups.grouped_rows.data();
   // Only excluded rows use the sentinel group ID, which sorts after every included group.
   auto const end_bit =
@@ -222,7 +221,7 @@ void groupby_helper::build_groups(cuda::stream_ref stream,
   // after which adjacent equality identifies boundaries without sorting or hashing.
   auto rows       = included_rows(_keys, _include_null_keys, stream);
   auto const size = static_cast<size_type>(rows.size());
-  auto offsets    = index_vector(static_cast<std::size_t>(size) + 1, stream, mr);
+  auto offsets    = rmm::device_uvector<size_type>(static_cast<std::size_t>(size) + 1, stream, mr);
   auto const num_groups =
     size == 0 ? size_type{0}
     : cudf::detail::has_nested_columns(_keys)
@@ -231,7 +230,7 @@ void groupby_helper::build_groups(cuda::stream_ref stream,
   offsets.set_element_async(num_groups, size, stream);
   offsets.resize(static_cast<std::size_t>(num_groups) + 1, stream);
   // Without filtered rows, each group offset already identifies its representative input row.
-  auto key_rows = index_vector(_is_presorted ? 0 : num_groups, stream, mr);
+  auto key_rows = rmm::device_uvector<size_type>(_is_presorted ? 0 : num_groups, stream, mr);
   if (!_is_presorted) {
     thrust::gather(rmm::exec_policy_nosync(stream, mr),
                    offsets.begin(),
@@ -239,12 +238,13 @@ void groupby_helper::build_groups(cuda::stream_ref stream,
                    rows.begin(),
                    key_rows.begin());
   }
-  _groups = std::make_unique<hash::grouped_keys>(hash::grouped_keys{num_groups,
-                                                                    size,
-                                                                    std::move(key_rows),
-                                                                    std::move(offsets),
-                                                                    std::move(rows),
-                                                                    index_vector{0, stream, mr}});
+  _groups = std::make_unique<hash::grouped_keys>(
+    hash::grouped_keys{num_groups,
+                       size,
+                       std::move(key_rows),
+                       std::move(offsets),
+                       std::move(rows),
+                       rmm::device_uvector<size_type>{0, stream, mr}});
   _stable = true;
 }
 
@@ -295,23 +295,24 @@ hash::group_reduction_plan const& groupby_helper::reduction_groups(cuda::stream_
   return *_reduction_groups;
 }
 
-groupby_helper::index_vector const& groupby_helper::group_offsets(cuda::stream_ref stream)
+rmm::device_uvector<size_type> const& groupby_helper::group_offsets(cuda::stream_ref stream)
 {
   build_groups(stream, false, false, false);
   return _groups->group_offsets;
 }
 
-groupby_helper::index_vector const& groupby_helper::group_labels(cuda::stream_ref stream)
+rmm::device_uvector<size_type> const& groupby_helper::group_labels(cuda::stream_ref stream)
 {
   // Labels must use the final grouping order before any row consumer can observe them.
   build_groups(stream);
   if (_group_labels) { return *_group_labels; }
   if (num_keys(stream) != 0 && !_groups->group_labels.is_empty()) {
     // The stable build sorted the labels along with the rows.
-    _group_labels = std::make_unique<index_vector>(std::move(_groups->group_labels));
+    _group_labels =
+      std::make_unique<rmm::device_uvector<size_type>>(std::move(_groups->group_labels));
     return *_group_labels;
   }
-  auto labels = std::make_unique<index_vector>(num_keys(stream), stream);
+  auto labels = std::make_unique<rmm::device_uvector<size_type>>(num_keys(stream), stream);
   if (!labels->is_empty()) {
     auto const& offsets = group_offsets(stream);
     cudf::detail::label_segments(
@@ -321,13 +322,13 @@ groupby_helper::index_vector const& groupby_helper::group_labels(cuda::stream_re
   return *_group_labels;
 }
 
-groupby_helper::index_vector const& groupby_helper::input_labels(cuda::stream_ref stream)
+rmm::device_uvector<size_type> const& groupby_helper::input_labels(cuda::stream_ref stream)
 {
   if (_input_labels) { return *_input_labels; }
   auto const mr      = cudf::get_current_device_resource_ref();
   auto const policy  = rmm::exec_policy_nosync(stream, mr);
   auto const& labels = group_labels(stream);
-  auto input         = std::make_unique<index_vector>(_keys.num_rows(), stream, mr);
+  auto input = std::make_unique<rmm::device_uvector<size_type>>(_keys.num_rows(), stream, mr);
   // Excluded rows take the label past the last group so that they sort after every group.
   if (labels.size() != input->size()) {
     thrust::fill(policy, input->begin(), input->end(), num_groups(stream));
@@ -339,9 +340,9 @@ groupby_helper::index_vector const& groupby_helper::input_labels(cuda::stream_re
   return *_input_labels;
 }
 
-groupby_helper::column_ptr groupby_helper::sorted_values(column_view const& values,
-                                                         cuda::stream_ref stream,
-                                                         rmm::device_async_resource_ref mr)
+std::unique_ptr<column> groupby_helper::sorted_values(column_view const& values,
+                                                      cuda::stream_ref stream,
+                                                      rmm::device_async_resource_ref mr)
 {
   // Group labels avoid sorting the original key columns. Starting with input rows also preserves
   // input order among equal values without materializing the stable CSR row permutation first.
@@ -358,9 +359,9 @@ groupby_helper::column_ptr groupby_helper::sorted_values(column_view const& valu
   return std::move(result->release()[0]);
 }
 
-groupby_helper::column_ptr groupby_helper::grouped_values(column_view const& values,
-                                                          cuda::stream_ref stream,
-                                                          rmm::device_async_resource_ref mr)
+std::unique_ptr<column> groupby_helper::grouped_values(column_view const& values,
+                                                       cuda::stream_ref stream,
+                                                       rmm::device_async_resource_ref mr)
 {
   auto result = cudf::detail::gather(table_view{{values}},
                                      grouped_order(stream),
@@ -371,8 +372,9 @@ groupby_helper::column_ptr groupby_helper::grouped_values(column_view const& val
   return std::move(result->release()[0]);
 }
 
-groupby_helper::column_ptr groupby_helper::unordered_grouped_values(
-  column_view const& values, cuda::stream_ref stream, rmm::device_async_resource_ref mr)
+std::unique_ptr<column> groupby_helper::unordered_grouped_values(column_view const& values,
+                                                                 cuda::stream_ref stream,
+                                                                 rmm::device_async_resource_ref mr)
 {
   build_groups(stream);
   auto result = cudf::detail::gather(table_view{{values}},
