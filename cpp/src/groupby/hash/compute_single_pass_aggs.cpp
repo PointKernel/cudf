@@ -100,7 +100,7 @@ std::vector<std::unique_ptr<column>> compute_single_pass_aggs(
   table_view const& values,
   host_span<aggregation::Kind const> agg_kinds,
   std::span<int8_t const> is_agg_intermediate,
-  grouped_rows const& grouped,
+  group_reduction_plan const& grouped,
   cuda::stream_ref stream,
   cudf::memory_resources mr)
 {

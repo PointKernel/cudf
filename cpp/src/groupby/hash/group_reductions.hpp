@@ -22,7 +22,7 @@ namespace cudf {
 namespace groupby {
 namespace detail {
 namespace hash {
-struct grouped_rows;
+struct group_reduction_plan;
 }  // namespace hash
 /**
  * @brief Internal API to compute histogram for each group in @p values.
@@ -305,7 +305,7 @@ std::unique_ptr<column> group_merge_histogram(column_view const& values,
  */
 std::unique_ptr<column> group_covariance(column_view const& values_0,
                                          column_view const& values_1,
-                                         hash::grouped_rows const& grouped,
+                                         hash::group_reduction_plan const& grouped,
                                          cudf::device_span<size_type const> group_labels,
                                          size_type num_groups,
                                          column_view const& count,

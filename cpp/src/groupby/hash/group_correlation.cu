@@ -109,7 +109,7 @@ struct covariance_finalizer {
 
 std::unique_ptr<column> group_covariance(column_view const& values_0,
                                          column_view const& values_1,
-                                         hash::grouped_rows const& grouped,
+                                         hash::group_reduction_plan const& grouped,
                                          cudf::device_span<size_type const> group_labels,
                                          size_type num_groups,
                                          column_view const& count,

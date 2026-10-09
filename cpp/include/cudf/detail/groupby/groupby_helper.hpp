@@ -22,7 +22,7 @@ namespace cudf {
 namespace groupby::detail {
 namespace hash {
 struct grouped_keys;
-struct grouped_rows;
+struct group_reduction_plan;
 }  // namespace hash
 
 /**
@@ -180,7 +180,7 @@ struct groupby_helper {
    *
    * The returned reference is invalidated if a later request materializes stable row order.
    */
-  hash::grouped_rows const& reduction_groups(cuda::stream_ref stream);
+  hash::group_reduction_plan const& reduction_groups(cuda::stream_ref stream);
 
   /**
    * @brief Get each group's offset into the grouped order of `keys`.
@@ -236,9 +236,9 @@ struct groupby_helper {
 
   index_vector_ptr _input_labels;  ///< Labels in input order; excluded rows get num_groups
   table_view _keys;                ///< Input grouping keys
-  std::unique_ptr<hash::grouped_keys> _groups;            ///< HashCSR grouping metadata
-  std::unique_ptr<hash::grouped_rows> _reduction_groups;  ///< Cached reduction scheduling
-  index_vector_ptr _group_labels;                         ///< Labels in grouped order
+  std::unique_ptr<hash::grouped_keys> _groups;                    ///< HashCSR grouping metadata
+  std::unique_ptr<hash::group_reduction_plan> _reduction_groups;  ///< Cached reduction scheduling
+  index_vector_ptr _group_labels;                                 ///< Labels in grouped order
   sorted _keys_pre_sorted;         ///< Whether key groups are already contiguous
   null_policy _include_null_keys;  ///< Whether to retain null key rows
   bool _is_presorted;              ///< Whether grouped values can use the input directly

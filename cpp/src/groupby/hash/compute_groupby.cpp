@@ -115,12 +115,12 @@ void compute_aggregations(std::span<aggregation_request const> requests,
         values, agg_kinds, is_agg_intermediate, helper.reduction_groups(stream), stream, mr);
     } else {
       auto const grouped =
-        grouped_rows{device_span<size_type const>{},
-                     helper.group_offsets(stream),
-                     cuda::device_buffer<size_type>{stream, temp_mr},
-                     cuda::device_buffer<size_type>{stream, temp_mr},
-                     cuda::device_buffer<cuda::std::array<size_type, 2>>{stream, temp_mr},
-                     cuda::device_buffer<size_type>{stream, temp_mr}};
+        group_reduction_plan{device_span<size_type const>{},
+                             helper.group_offsets(stream),
+                             cuda::device_buffer<size_type>{stream, temp_mr},
+                             cuda::device_buffer<size_type>{stream, temp_mr},
+                             cuda::device_buffer<cuda::std::array<size_type, 2>>{stream, temp_mr},
+                             cuda::device_buffer<size_type>{stream, temp_mr}};
       results =
         compute_single_pass_aggs(values, agg_kinds, is_agg_intermediate, grouped, stream, mr);
     }

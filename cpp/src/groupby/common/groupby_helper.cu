@@ -283,13 +283,14 @@ device_span<size_type const> groupby_helper::unordered_grouped_order(cuda::strea
   return _groups->grouped_rows;
 }
 
-hash::grouped_rows const& groupby_helper::reduction_groups(cuda::stream_ref stream)
+hash::group_reduction_plan const& groupby_helper::reduction_groups(cuda::stream_ref stream)
 {
   if (!_reduction_groups) {
     build_groups(stream);
-    auto const mr     = cudf::get_current_device_resource_ref();
-    _reduction_groups = std::make_unique<hash::grouped_rows>(hash::make_grouped_rows(
-      _groups->grouped_rows, _groups->group_offsets, stream, cudf::memory_resources{mr, mr}));
+    auto const mr = cudf::get_current_device_resource_ref();
+    _reduction_groups =
+      std::make_unique<hash::group_reduction_plan>(hash::make_group_reduction_plan(
+        _groups->grouped_rows, _groups->group_offsets, stream, cudf::memory_resources{mr, mr}));
   }
   return *_reduction_groups;
 }
