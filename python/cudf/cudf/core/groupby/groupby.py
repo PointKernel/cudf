@@ -1007,12 +1007,8 @@ class GroupBy(Serializable, Reducible, Scannable):
         ):
             return offsets, key_columns, value_columns
 
-        # libcudf preserves input order within groups, but group order is
-        # arbitrary. Normalize only when sort=True or pandas compatibility
-        # requires it: order one representative per group, then permute
-        # whole group blocks. The cached libcudf helper keeps its raw layout
-        # consistent across calls. Native sort=False bypasses this cache,
-        # including when compatibility mode changes on the same GroupBy.
+        # Cache a permutation of whole groups for sorted or pandas-compatible
+        # output, preserving row order within each group.
         if self._group_ordering is None:
             group_starts = as_column(offsets[:-1])
             if self._sort:
