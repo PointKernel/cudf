@@ -3,6 +3,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+#include "groupby/common/utils.hpp"
+
 #include <cudf/aggregation.hpp>
 #include <cudf/column/column_device_view.cuh>
 #include <cudf/column/column_factories.hpp>
@@ -10,7 +12,6 @@
 #include <cudf/detail/algorithms/reduce.cuh>
 #include <cudf/detail/iterator.cuh>
 #include <cudf/detail/utilities/device_operators.cuh>
-#include <cudf/detail/valid_if.cuh>
 #include <cudf/utilities/span.hpp>
 #include <cudf/utilities/type_dispatcher.hpp>
 
@@ -74,7 +75,7 @@ struct bitwise_group_reduction_functor {
                    cuda::std::logical_or{});
 
       auto [null_mask, null_count] =
-        cudf::detail::valid_if(validity.begin(), validity.end(), cuda::std::identity{}, stream, mr);
+        make_mask_from_validity(validity.begin(), validity.end(), stream, mr);
       if (null_count > 0) { result->set_null_mask(std::move(null_mask), null_count); }
     }
     return result;
