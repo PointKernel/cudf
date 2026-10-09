@@ -18,8 +18,7 @@
 
 #include <memory>
 
-namespace cudf {
-namespace groupby::detail {
+namespace cudf::groupby::detail {
 namespace hash {
 struct grouped_keys;
 struct group_reduction_plan;
@@ -240,5 +239,4 @@ struct groupby_helper {
   bool _stable{false};             ///< Whether rows within each group are in input order
 };
 
-}  // namespace groupby::detail
-}  // namespace cudf
+}  // namespace cudf::groupby::detail

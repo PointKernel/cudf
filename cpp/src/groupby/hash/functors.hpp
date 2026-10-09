@@ -16,9 +16,7 @@
 #include <memory>
 #include <optional>
 
-namespace cudf {
-namespace groupby {
-namespace detail {
+namespace cudf::groupby::detail {
 /**
  * @brief Functor to dispatch aggregation with
  *
@@ -119,6 +117,4 @@ struct store_result_functor {
   std::unique_ptr<column>
     unordered_grouped_values;  ///< Memoised values with no row-order guarantee
 };
-}  // namespace detail
-}  // namespace groupby
-}  // namespace cudf
+}  // namespace cudf::groupby::detail
