@@ -221,7 +221,7 @@ std::pair<std::unique_ptr<table>, std::vector<aggregation_result>> groupby::aggr
 
   if (_keys.num_rows() == 0) { return {empty_like(_keys), empty_results(requests, stream, mr)}; }
 
-  return detail::hash::groupby(requests, helper(), stream, mr);
+  return detail::hash::groupby(requests, helper(mr), stream, mr);
 }
 
 // Compute scan requests
@@ -251,14 +251,15 @@ groupby::groups groupby::get_groups(table_view values,
                                     rmm::device_async_resource_ref mr)
 {
   CUDF_FUNC_RANGE();
-  auto grouped_keys = helper().grouped_keys(stream, mr);
+  auto& grouping    = helper(mr);
+  auto grouped_keys = grouping.grouped_keys(stream, mr);
 
-  auto const& group_offsets       = helper().group_offsets(stream);
+  auto const& group_offsets       = grouping.group_offsets(stream, mr);
   auto const group_offsets_vector = cudf::detail::make_std_vector(group_offsets, stream);
 
   if (not values.is_empty()) {
     auto grouped_values = cudf::detail::gather(values,
-                                               helper().grouped_order(stream),
+                                               grouping.grouped_order(false, stream, mr),
                                                cudf::out_of_bounds_policy::DONT_CHECK,
                                                cudf::negative_index_policy::NOT_ALLOWED,
                                                stream,
@@ -284,10 +285,11 @@ std::pair<std::unique_ptr<table>, std::unique_ptr<table>> groupby::replace_nulls
 
   if (values.is_empty()) { return std::pair(empty_like(_keys), empty_like(values)); }
 
-  auto const grouped_order = helper().grouped_order(stream, true);
+  auto& grouping           = helper(mr);
+  auto const grouped_order = grouping.grouped_order(true, stream, mr);
   auto const order         = device_span<size_type const>{grouped_order.begin<size_type>(),
                                                           static_cast<std::size_t>(grouped_order.size())};
-  auto const& group_labels = helper().group_labels(stream);
+  auto const& group_labels = grouping.group_labels(stream, mr);
   std::vector<std::unique_ptr<column>> results;
   results.reserve(values.num_columns());
   std::transform(
@@ -298,18 +300,19 @@ std::pair<std::unique_ptr<table>, std::unique_ptr<table>> groupby::replace_nulls
       return values.column(i).nullable()
                ? detail::group_replace_nulls(
                    values.column(i), order, group_labels, replace_policies[i], stream, mr)
-               : helper().grouped_values(values.column(i), stream, mr);
+               : grouping.grouped_values(values.column(i), stream, mr);
     });
 
-  return std::pair(std::move(helper().grouped_keys(stream, mr)),
+  return std::pair(std::move(grouping.grouped_keys(stream, mr)),
                    std::make_unique<table>(std::move(results)));
 }
 
 // Get the grouping helper object
-detail::groupby_helper& groupby::helper()
+detail::groupby_helper& groupby::helper(cudf::memory_resources mr)
 {
   if (_helper) return *_helper;
-  _helper = std::make_unique<detail::groupby_helper>(_keys, _include_null_keys, _keys_are_sorted);
+  _helper =
+    std::make_unique<detail::groupby_helper>(_keys, _include_null_keys, _keys_are_sorted, mr);
   return *_helper;
 };
 
@@ -332,21 +335,22 @@ std::pair<std::unique_ptr<table>, std::unique_ptr<table>> groupby::shift(
                           }),
                "values and fill_value should have the same type.",
                cudf::data_type_error);
-  helper().grouped_order(stream);
+  auto& grouping = helper(mr);
+  grouping.grouped_order(false, stream, mr);
   std::vector<std::unique_ptr<column>> results;
-  auto const& group_offsets = helper().group_offsets(stream);
+  auto const& group_offsets = grouping.group_offsets(stream, mr);
   std::transform(
     cuda::counting_iterator<cudf::size_type>{0},
     cuda::counting_iterator{values.num_columns()},
     std::back_inserter(results),
     [&](size_type i) {
       auto grouped_values =
-        helper().grouped_values(values.column(i), stream, cudf::get_current_device_resource_ref());
+        grouping.grouped_values(values.column(i), stream, cudf::get_current_device_resource_ref());
       return cudf::detail::segmented_shift(
         grouped_values->view(), group_offsets, offsets[i], fill_values[i].get(), stream, mr);
     });
 
-  return std::pair(helper().grouped_keys(stream, mr),
+  return std::pair(grouping.grouped_keys(stream, mr),
                    std::make_unique<cudf::table>(std::move(results)));
 }
 

@@ -31,7 +31,7 @@ struct store_result_functor {
                        groupby_helper& helper,
                        cudf::detail::result_cache& cache,
                        cuda::stream_ref stream,
-                       rmm::device_async_resource_ref mr)
+                       cudf::memory_resources mr)
     : helper(helper), cache(cache), values(values), stream(stream), mr(std::move(mr))
   {
   }
@@ -66,7 +66,7 @@ struct store_result_functor {
    */
   std::unique_ptr<column> take_grouped_values()
   {
-    if (is_presorted()) { return std::make_unique<column>(values, stream, mr); }
+    if (is_presorted()) { return std::make_unique<column>(values, stream, mr.get_output_mr()); }
     if (!grouped_values) { grouped_values = helper.grouped_values(values, stream, mr); }
     grouped_values_view = grouped_values->view();
     return std::move(grouped_values);
@@ -87,7 +87,10 @@ struct store_result_functor {
     // Keep this cache separate: order-sensitive aggregations must always obtain a stable view.
     return unordered_grouped_values
              ? unordered_grouped_values->view()
-             : (unordered_grouped_values = helper.unordered_grouped_values(values, stream, mr))
+             : (unordered_grouped_values = helper.unordered_grouped_values(
+                  values,
+                  stream,
+                  cudf::memory_resources{mr.get_temporary_mr(), mr.get_temporary_mr()}))
                  ->view();
   }
 
@@ -100,7 +103,11 @@ struct store_result_functor {
   column_view get_sorted_values()
   {
     return sorted_values ? sorted_values->view()
-                         : (sorted_values = helper.sorted_values(values, stream, mr))->view();
+                         : (sorted_values = helper.sorted_values(
+                              values,
+                              stream,
+                              cudf::memory_resources{mr.get_temporary_mr(), mr.get_temporary_mr()}))
+                             ->view();
   };
 
  protected:
@@ -108,8 +115,8 @@ struct store_result_functor {
   cudf::detail::result_cache& cache;  ///< cache of results to store into
   column_view const& values;          ///< Column of values to group and aggregate
 
-  cuda::stream_ref stream;            ///< CUDA stream on which to execute kernels
-  rmm::device_async_resource_ref mr;  ///< Memory resource to allocate space for results
+  cuda::stream_ref stream;    ///< CUDA stream on which to execute kernels
+  cudf::memory_resources mr;  ///< Resources for returned values and temporary storage
 
   std::unique_ptr<column> sorted_values;           ///< Memoised grouped and sorted values
   std::unique_ptr<column> grouped_values;          ///< Memoised grouped values

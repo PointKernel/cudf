@@ -394,9 +394,12 @@ class groupby {
    * @brief Get the grouping helper object
    *
    * The object is constructed on first invocation and subsequent invocations
-   * of this function return the memoized object.
+   * of this function return the memoized object. The first invocation retains the
+   * temporary resource for cached grouping data.
+   *
+   * @param mr Memory resources for the operation that initializes the helper
    */
-  detail::groupby_helper& helper();
+  detail::groupby_helper& helper(cudf::memory_resources mr);
 
   /**
    * @brief Compute scan requests over the cached groups.

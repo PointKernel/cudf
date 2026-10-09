@@ -25,8 +25,8 @@ void scan_struct_argminmax(column_view const& values,
                            cudf::memory_resources mr)
 {
   using generator       = cudf::reduction::detail::arg_minmax_binop_generator;
-  auto const comparator = is_min ? generator::create<aggregation::MIN>(values, stream)
-                                 : generator::create<aggregation::MAX>(values, stream);
+  auto const comparator = is_min ? generator::create<aggregation::MIN>(values, stream, mr)
+                                 : generator::create<aggregation::MAX>(values, stream, mr);
   thrust::inclusive_scan_by_key(rmm::exec_policy_nosync(stream, mr.get_temporary_mr()),
                                 group_labels.begin(),
                                 group_labels.end(),

@@ -36,8 +36,8 @@ namespace {
 // resource or nullability of a later requested result, or allocate a result that the cache drops.
 auto extract_hash_groupby_aggs(std::span<aggregation_request const> requests,
                                cudf::detail::result_cache const& cache,
-                               cuda::stream_ref stream,
-                               bool expose_intermediates)
+                               bool expose_intermediates,
+                               cuda::stream_ref stream)
 {
   using aggregation_set =
     std::unordered_set<std::pair<column_view, std::reference_wrapper<aggregation const>>,
@@ -81,9 +81,9 @@ auto extract_hash_groupby_aggs(std::span<aggregation_request const> requests,
 void compute_aggregations(std::span<aggregation_request const> requests,
                           groupby_helper& helper,
                           cudf::detail::result_cache& cache,
+                          bool expose_intermediates,
                           cuda::stream_ref stream,
-                          cudf::memory_resources mr,
-                          bool expose_intermediates)
+                          cudf::memory_resources mr)
 {
   if (std::ranges::all_of(requests, [&](auto const& request) {
         return std::ranges::all_of(request.aggregations, [&](auto const& agg) {
@@ -97,7 +97,7 @@ void compute_aggregations(std::span<aggregation_request const> requests,
 
   // Compute only missing single-pass results, preserving the extracted batching and fusion order.
   auto const [values, agg_kinds, aggs, is_agg_intermediate, has_compound_aggs] =
-    extract_hash_groupby_aggs(requests, cache, stream, expose_intermediates);
+    extract_hash_groupby_aggs(requests, cache, expose_intermediates, stream);
 
   // Counts without null filtering come directly from the group offsets.
   bool needs_reduction = false;
@@ -112,11 +112,11 @@ void compute_aggregations(std::span<aggregation_request const> requests,
     std::vector<std::unique_ptr<column>> results;
     if (needs_reduction) {
       results = compute_single_pass_aggs(
-        values, agg_kinds, is_agg_intermediate, helper.reduction_groups(stream), stream, mr);
+        values, agg_kinds, is_agg_intermediate, helper.reduction_groups(stream, mr), stream, mr);
     } else {
       auto const grouped =
         group_reduction_plan{device_span<size_type const>{},
-                             helper.group_offsets(stream),
+                             helper.group_offsets(stream, mr),
                              cuda::device_buffer<size_type>{stream, temp_mr},
                              cuda::device_buffer<size_type>{stream, temp_mr},
                              cuda::device_buffer<cuda::std::array<size_type, 2>>{stream, temp_mr},

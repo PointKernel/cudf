@@ -55,11 +55,13 @@ void scan_result_functor::operator()<aggregation::SUM>(aggregation const& agg)
 {
   if (cache.has_result(values, agg)) return;
 
-  cache.add_result(
-    values,
-    agg,
-    detail::sum_scan(
-      get_grouped_values(), helper.num_groups(stream), helper.group_labels(stream), stream, mr));
+  cache.add_result(values,
+                   agg,
+                   detail::sum_scan(get_grouped_values(),
+                                    helper.num_groups(stream, mr),
+                                    helper.group_labels(stream, mr),
+                                    stream,
+                                    mr.get_output_mr()));
 }
 
 template <>
@@ -67,11 +69,13 @@ void scan_result_functor::operator()<aggregation::PRODUCT>(aggregation const& ag
 {
   if (cache.has_result(values, agg)) return;
 
-  cache.add_result(
-    values,
-    agg,
-    detail::product_scan(
-      get_grouped_values(), helper.num_groups(stream), helper.group_labels(stream), stream, mr));
+  cache.add_result(values,
+                   agg,
+                   detail::product_scan(get_grouped_values(),
+                                        helper.num_groups(stream, mr),
+                                        helper.group_labels(stream, mr),
+                                        stream,
+                                        mr.get_output_mr()));
 }
 
 template <>
@@ -79,11 +83,13 @@ void scan_result_functor::operator()<aggregation::MIN>(aggregation const& agg)
 {
   if (cache.has_result(values, agg)) return;
 
-  cache.add_result(
-    values,
-    agg,
-    detail::min_scan(
-      get_grouped_values(), helper.num_groups(stream), helper.group_labels(stream), stream, mr));
+  cache.add_result(values,
+                   agg,
+                   detail::min_scan(get_grouped_values(),
+                                    helper.num_groups(stream, mr),
+                                    helper.group_labels(stream, mr),
+                                    stream,
+                                    mr.get_output_mr()));
 }
 
 template <>
@@ -91,11 +97,13 @@ void scan_result_functor::operator()<aggregation::MAX>(aggregation const& agg)
 {
   if (cache.has_result(values, agg)) return;
 
-  cache.add_result(
-    values,
-    agg,
-    detail::max_scan(
-      get_grouped_values(), helper.num_groups(stream), helper.group_labels(stream), stream, mr));
+  cache.add_result(values,
+                   agg,
+                   detail::max_scan(get_grouped_values(),
+                                    helper.num_groups(stream, mr),
+                                    helper.group_labels(stream, mr),
+                                    stream,
+                                    mr.get_output_mr()));
 }
 
 template <>
@@ -106,7 +114,8 @@ void scan_result_functor::operator()<aggregation::COUNT_ALL>(aggregation const& 
   cache.add_result(
     values,
     agg,
-    detail::count_scan(values, null_policy::INCLUDE, helper.group_labels(stream), stream, mr));
+    detail::count_scan(
+      values, null_policy::INCLUDE, helper.group_labels(stream, mr), stream, mr.get_output_mr()));
 }
 
 template <>
@@ -114,11 +123,13 @@ void scan_result_functor::operator()<aggregation::COUNT_VALID>(aggregation const
 {
   if (cache.has_result(values, agg)) return;
 
-  cache.add_result(
-    values,
-    agg,
-    detail::count_scan(
-      get_grouped_values(), null_policy::EXCLUDE, helper.group_labels(stream), stream, mr));
+  cache.add_result(values,
+                   agg,
+                   detail::count_scan(get_grouped_values(),
+                                      null_policy::EXCLUDE,
+                                      helper.group_labels(stream, mr),
+                                      stream,
+                                      mr.get_output_mr()));
 }
 
 template <>
@@ -129,16 +140,15 @@ void scan_result_functor::operator()<aggregation::RANK>(aggregation const& agg)
   CUDF_EXPECTS(!cudf::structs::detail::is_or_has_nested_lists(values),
                "Unsupported list type in grouped rank scan.");
   auto const& rank_agg         = dynamic_cast<cudf::detail::rank_aggregation const&>(agg);
-  auto const& group_labels     = helper.group_labels(stream);
+  auto const& group_labels     = helper.group_labels(stream, mr);
   auto const group_labels_view = column_view(cudf::device_span<size_type const>(group_labels));
   auto const gather_map        = [&]() {
     if (is_presorted()) {  // assumes both keys and values are sorted, Spark does this.
       return cudf::detail::sequence(
         group_labels.size(),
-        *cudf::make_fixed_width_scalar(
-          size_type{0}, stream, cudf::get_current_device_resource_ref()),
+        *cudf::make_fixed_width_scalar(size_type{0}, stream, mr.get_temporary_mr()),
         stream,
-        cudf::get_current_device_resource_ref());
+        mr.get_temporary_mr());
     } else {
       auto sort_order = (rank_agg._method == rank_method::FIRST ? cudf::detail::stable_sorted_order
                                                                        : cudf::detail::sorted_order);
@@ -146,7 +156,7 @@ void scan_result_functor::operator()<aggregation::RANK>(aggregation const& agg)
                                {order::ASCENDING, rank_agg._column_order},
                                {null_order::AFTER, rank_agg._null_precedence},
                         stream,
-                        cudf::get_current_device_resource_ref());
+                        mr.get_temporary_mr());
     }
   }();
 
@@ -162,10 +172,10 @@ void scan_result_functor::operator()<aggregation::RANK>(aggregation const& agg)
   }();
   auto result = rank_scan(get_grouped_values(),
                           *gather_map,
-                          helper.group_labels(stream),
-                          helper.group_offsets(stream),
+                          helper.group_labels(stream, mr),
+                          helper.group_offsets(stream, mr),
                           stream,
-                          cudf::get_current_device_resource_ref());
+                          mr.get_temporary_mr());
   if (rank_agg._percentage != rank_percentage::NONE) {
     auto const null_handling = values.nullable() && rank_agg._null_handling == null_policy::EXCLUDE
                                  ? null_policy::EXCLUDE
@@ -175,19 +185,25 @@ void scan_result_functor::operator()<aggregation::RANK>(aggregation const& agg)
     request.aggregations.push_back(make_count_aggregation<groupby_aggregation>(null_handling));
     cudf::detail::result_cache counts(1);
     hash::compute_aggregations(
-      std::span{&request, 1}, helper, counts, stream, cudf::get_current_device_resource_ref());
+      std::span{&request, 1},
+      helper,
+      counts,
+      false,
+      stream,
+      cudf::memory_resources{mr.get_temporary_mr(), mr.get_temporary_mr()});
     auto count = counts.release_result(values, *request.aggregations.front());
     result     = detail::group_rank_to_percentage(rank_agg._method,
                                               rank_agg._percentage,
                                               *result,
                                               *count,
-                                              helper.group_labels(stream),
-                                              helper.group_offsets(stream),
+                                              helper.group_labels(stream, mr),
+                                              helper.group_offsets(stream, mr),
                                               stream,
-                                              mr);
+                                              mr.get_output_mr());
   }
   result = std::move(
-    cudf::detail::scatter(table_view{{*result}}, *gather_map, table_view{{*result}}, stream, mr)
+    cudf::detail::scatter(
+      table_view{{*result}}, *gather_map, table_view{{*result}}, stream, mr.get_output_mr())
       ->release()[0]);
   if (rank_agg._null_handling == null_policy::EXCLUDE) {
     auto const values = get_grouped_values();
@@ -203,13 +219,14 @@ std::pair<std::unique_ptr<table>, std::vector<aggregation_result>> groupby::scan
   cuda::stream_ref stream,
   rmm::device_async_resource_ref mr)
 {
-  helper().grouped_order(stream, true);
+  auto& grouping = helper(mr);
+  grouping.grouped_order(true, stream, mr);
 
   // Reuse repeated scan results across requests.
   cudf::detail::result_cache cache(requests.size());
 
   for (auto const& request : requests) {
-    auto store_functor = detail::scan_result_functor(request.values, helper(), cache, stream, mr);
+    auto store_functor = detail::scan_result_functor(request.values, grouping, cache, stream, mr);
     for (auto const& aggregation : request.aggregations) {
       // TODO (dm): single pass compute all supported reductions
       cudf::detail::aggregation_dispatcher(aggregation->kind, store_functor, *aggregation);
@@ -218,7 +235,7 @@ std::pair<std::unique_ptr<table>, std::vector<aggregation_result>> groupby::scan
 
   auto results = detail::extract_results(requests, cache, stream, mr);
 
-  return std::pair(helper().grouped_keys(stream, mr), std::move(results));
+  return std::pair(grouping.grouped_keys(stream, mr), std::move(results));
 }
 }  // namespace groupby
 }  // namespace cudf

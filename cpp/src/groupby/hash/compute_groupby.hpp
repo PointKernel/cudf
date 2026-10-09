@@ -25,16 +25,16 @@ namespace hash {
  * @param requests The set of columns to aggregate and the aggregations to perform
  * @param helper Cached grouping shared by all aggregation requests
  * @param cache Dense aggregation results
- * @param stream CUDA stream used for device memory operations and kernel launches
- * @param mr Device memory resources used for aggregation results and temporary storage
  * @param expose_intermediates Preserve result masks and output resource ownership for dependencies
  * that a host UDF may request dynamically
+ * @param stream CUDA stream used for device memory operations and kernel launches
+ * @param mr Device memory resources used for aggregation results and temporary storage
  */
 void compute_aggregations(std::span<aggregation_request const> requests,
                           groupby_helper& helper,
                           cudf::detail::result_cache& cache,
+                          bool expose_intermediates,
                           cuda::stream_ref stream,
-                          cudf::memory_resources mr,
-                          bool expose_intermediates = false);
+                          cudf::memory_resources mr);
 }  // namespace hash
 }  // namespace cudf::groupby::detail

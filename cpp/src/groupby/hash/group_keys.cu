@@ -237,7 +237,8 @@ stable_rows stable_grouped_rows(size_type num_rows,
                   group_slots.begin(),
                   slot_counts.begin());
   release(group_slots);
-  rmm::device_uvector<size_type> input_labels(num_rows, stream, temp_mr);
+  auto const labels_mr = keep_labels ? output_mr : temp_mr;
+  rmm::device_uvector<size_type> input_labels(num_rows, stream, labels_mr);
   rmm::device_uvector<size_type> input_rows(num_rows, stream, output_mr);
   auto const initialize_rows = cuda::tabulate_output_iterator{
     [positions = positions.data(),
@@ -253,7 +254,7 @@ stable_rows stable_grouped_rows(size_type num_rows,
   release(positions);
   release(slot_counts);
 
-  rmm::device_uvector<size_type> ordered_labels(num_rows, stream, temp_mr);
+  rmm::device_uvector<size_type> ordered_labels(num_rows, stream, labels_mr);
   rmm::device_uvector<size_type> alternate_rows(num_rows, stream, output_mr);
   auto const end_bit = cuda::std::bit_width(
     static_cast<cuda::std::uint32_t>(num_grouped_rows == num_rows ? num_groups - 1 : num_groups));
@@ -313,10 +314,10 @@ grouped_keys group_keys(size_type num_rows,
                         bool need_group_offsets,
                         bool need_grouped_rows,
                         std::optional<std::size_t> domain_capacity,
-                        cuda::stream_ref stream,
-                        cudf::memory_resources mr,
                         bool stable_rows,
-                        bool keep_labels)
+                        bool keep_labels,
+                        cuda::stream_ref stream,
+                        cudf::memory_resources mr)
 {
   CUDF_EXPECTS(need_group_offsets || !need_grouped_rows, "Grouped rows require group offsets");
   auto const temp_mr   = mr.get_temporary_mr();
@@ -531,16 +532,17 @@ grouped_keys group_keys(table_view const& keys,
                         null_policy include_null_keys,
                         bool need_group_offsets,
                         bool need_grouped_rows,
-                        cuda::stream_ref stream,
-                        cudf::memory_resources mr,
                         bool stable_rows,
-                        bool keep_labels)
+                        bool keep_labels,
+                        cuda::stream_ref stream,
+                        cudf::memory_resources mr)
 {
   auto const num_rows             = keys.num_rows();
   auto const skip_rows_with_nulls = include_null_keys == null_policy::EXCLUDE;
   auto [row_bitmask_data, row_bitmask] =
     skip_rows_with_nulls
-      ? compute_row_bitmask(keys, stream)
+      ? compute_row_bitmask(
+          keys, stream, cudf::memory_resources{mr.get_temporary_mr(), mr.get_temporary_mr()})
       : std::pair<cuda::device_buffer<std::byte>, bitmask_type const*>{
           cudf::create_null_mask(0, cudf::mask_state::UNALLOCATED, stream, mr.get_temporary_mr()),
           nullptr};
@@ -562,10 +564,10 @@ grouped_keys group_keys(table_view const& keys,
                       need_group_offsets,
                       need_grouped_rows,
                       domain_capacity,
-                      stream,
-                      mr,
                       stable_rows,
-                      keep_labels);
+                      keep_labels,
+                      stream,
+                      mr);
   }
   return group_keys(num_rows,
                     row_bitmask,
@@ -574,10 +576,10 @@ grouped_keys group_keys(table_view const& keys,
                     need_group_offsets,
                     need_grouped_rows,
                     domain_capacity,
-                    stream,
-                    mr,
                     stable_rows,
-                    keep_labels);
+                    keep_labels,
+                    stream,
+                    mr);
 }
 
 }  // namespace cudf::groupby::detail::hash

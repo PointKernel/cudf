@@ -55,9 +55,9 @@ grouped_keys group_keys(table_view const& keys,
                         null_policy include_null_keys,
                         bool need_group_offsets,
                         bool need_grouped_rows,
+                        bool stable_rows,
+                        bool keep_labels,
                         cuda::stream_ref stream,
-                        cudf::memory_resources mr,
-                        bool stable_rows = false,
-                        bool keep_labels = false);
+                        cudf::memory_resources mr);
 
 }  // namespace cudf::groupby::detail::hash

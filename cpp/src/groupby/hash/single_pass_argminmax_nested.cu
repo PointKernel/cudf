@@ -59,8 +59,9 @@ std::unique_ptr<column> compute_nested_argminmax(reduction_context const& ctx,
                                       ctx.values.offset(),
                                           {ctx.values.child_begin(), ctx.values.child_end()}};
       using generator       = cudf::reduction::detail::arg_minmax_binop_generator;
-      auto const comparator = is_argmin ? generator::create<aggregation::ARGMIN>(values, stream)
-                                        : generator::create<aggregation::ARGMAX>(values, stream);
+      auto const comparator = is_argmin
+                                ? generator::create<aggregation::ARGMIN>(values, stream, mr)
+                                : generator::create<aggregation::ARGMAX>(values, stream, mr);
       auto const sentinel =
         is_argmin ? cudf::detail::ARGMIN_SENTINEL : cudf::detail::ARGMAX_SENTINEL;
       auto const indices = cuda::transform_iterator{

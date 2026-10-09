@@ -183,30 +183,30 @@ std::unique_ptr<column> group_nth_element(column_view const& values,
  * @param null_handling Exclude nulls while counting if null_policy::EXCLUDE,
  *        include nulls if null_policy::INCLUDE.
  * @param stream CUDA stream used for device memory operations and kernel launches.
- * @param mr Device memory resource used to allocate the returned column's device memory.
+ * @param mr Memory resources used for temporary allocations and the returned column.
  */
 std::unique_ptr<column> group_collect(column_view const& values,
                                       cudf::device_span<size_type const> group_offsets,
                                       size_type num_groups,
                                       null_policy null_handling,
                                       cuda::stream_ref stream,
-                                      rmm::device_async_resource_ref mr);
+                                      cudf::memory_resources mr);
 
 /**
  * @brief Internal API to collect grouped values that the caller no longer needs into lists.
  *
  * Unless nulls have to be purged, @p values becomes the child of the returned lists column
- * instead of being copied, so it must already live on @p mr.
+ * instead of being copied, so it must already use the output resource in @p mr.
  *
  * @copydetails group_collect(column_view const&, cudf::device_span<size_type const>, size_type,
- * null_policy, cuda::stream_ref, rmm::device_async_resource_ref)
+ * null_policy, cuda::stream_ref, cudf::memory_resources)
  */
 std::unique_ptr<column> group_collect(std::unique_ptr<column> values,
                                       cudf::device_span<size_type const> group_offsets,
                                       size_type num_groups,
                                       null_policy null_handling,
                                       cuda::stream_ref stream,
-                                      rmm::device_async_resource_ref mr);
+                                      cudf::memory_resources mr);
 
 /**
  * @brief Internal API to merge grouped lists into one list.
