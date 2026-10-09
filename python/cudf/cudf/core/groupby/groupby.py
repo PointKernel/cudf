@@ -19,7 +19,7 @@ import pyarrow as pa
 import pylibcudf as plc
 
 from cudf.api.types import is_list_like, is_scalar
-from cudf.core._internals import aggregation, sorting
+from cudf.core._internals import aggregation, copying, sorting
 from cudf.core.abc import Serializable
 from cudf.core.column import access_columns
 from cudf.core.column.column import (
@@ -1028,20 +1028,11 @@ class GroupBy(Serializable, Reducible, Scannable):
                 # Every row of a group moves by the same amount, so repeat the
                 # per-group shift over the group sizes and add it to the new
                 # positions.
-                shifts = as_column(
+                shifts = Index(
                     old_offsets[:-1][group_order] - new_offsets[:-1]
                 )
-                counts = as_column(sizes)
-                with access_columns(
-                    shifts, counts, mode="read", scope="internal"
-                ):
-                    repeated = ColumnBase.from_pylibcudf(
-                        plc.filling.repeat(
-                            plc.Table([shifts.plc_column]), counts.plc_column
-                        ).columns()[0]
-                    )
                 row_order = cp.arange(offsets[-1], dtype=SIZE_TYPE_DTYPE)
-                row_order += repeated.values
+                row_order += shifts.repeat(sizes).values
                 self._group_ordering = (
                     new_offsets.tolist(),
                     as_column(row_order),
@@ -1049,8 +1040,19 @@ class GroupBy(Serializable, Reducible, Scannable):
 
         offsets, row_order = self._group_ordering
         if row_order is not None:
-            key_columns = [col.take(row_order) for col in key_columns]
-            value_columns = [col.take(row_order) for col in value_columns]
+            columns = key_columns + value_columns
+            reordered = [
+                ColumnBase.create(col, original.dtype)
+                for col, original in zip(
+                    copying.gather(columns, row_order),  # type: ignore[arg-type]
+                    columns,
+                    strict=True,
+                )
+            ]
+            key_columns, value_columns = (
+                reordered[: len(key_columns)],
+                reordered[len(key_columns) :],
+            )
         return offsets, key_columns, value_columns
 
     def _aggregate(
