@@ -22,6 +22,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <functional>
+#include <memory>
 #include <unordered_set>
 #include <utility>
 #include <vector>
@@ -84,10 +85,10 @@ void compute_aggregations(std::span<aggregation_request const> requests,
                           cudf::memory_resources mr,
                           bool expose_intermediates)
 {
-  if (std::all_of(requests.begin(), requests.end(), [&](auto const& request) {
-        return std::all_of(request.aggregations.begin(),
-                           request.aggregations.end(),
-                           [&](auto const& agg) { return cache.has_result(request.values, *agg); });
+  if (std::ranges::all_of(requests, [&](auto const& request) {
+        return std::ranges::all_of(request.aggregations, [&](auto const& agg) {
+          return cache.has_result(request.values, *agg);
+        });
       })) {
     return;
   }
@@ -99,21 +100,20 @@ void compute_aggregations(std::span<aggregation_request const> requests,
     extract_hash_groupby_aggs(requests, cache, stream, expose_intermediates);
 
   // Counts without null filtering come directly from the group offsets.
-  auto const needs_reduction = [&] {
-    for (size_type i = 0; i < values.num_columns(); ++i) {
-      if (agg_kinds[i] != aggregation::COUNT_ALL &&
-          (agg_kinds[i] != aggregation::COUNT_VALID || values.column(i).has_nulls())) {
-        return true;
-      }
+  bool needs_reduction = false;
+  for (size_type i = 0; i < values.num_columns(); ++i) {
+    if (agg_kinds[i] != aggregation::COUNT_ALL &&
+        (agg_kinds[i] != aggregation::COUNT_VALID || values.column(i).has_nulls())) {
+      needs_reduction = true;
+      break;
     }
-    return false;
-  }();
+  }
   if (values.num_columns() != 0) {
-    auto results = [&] {
-      if (needs_reduction) {
-        return compute_single_pass_aggs(
-          values, agg_kinds, is_agg_intermediate, helper.reduction_groups(stream), stream, mr);
-      }
+    std::vector<std::unique_ptr<column>> results;
+    if (needs_reduction) {
+      results = compute_single_pass_aggs(
+        values, agg_kinds, is_agg_intermediate, helper.reduction_groups(stream), stream, mr);
+    } else {
       auto const grouped =
         grouped_rows{device_span<size_type const>{},
                      helper.group_offsets(stream),
@@ -121,8 +121,9 @@ void compute_aggregations(std::span<aggregation_request const> requests,
                      cuda::device_buffer<size_type>{stream, temp_mr},
                      cuda::device_buffer<cuda::std::array<size_type, 2>>{stream, temp_mr},
                      cuda::device_buffer<size_type>{stream, temp_mr}};
-      return compute_single_pass_aggs(values, agg_kinds, is_agg_intermediate, grouped, stream, mr);
-    }();
+      results =
+        compute_single_pass_aggs(values, agg_kinds, is_agg_intermediate, grouped, stream, mr);
+    }
     for (std::size_t i = 0; i < results.size(); ++i) {
       cache.add_result(values.column(i), *aggs[i], std::move(results[i]));
     }

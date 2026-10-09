@@ -739,10 +739,9 @@ std::pair<std::unique_ptr<table>, std::vector<aggregation_result>> detail::hash:
   // Build ordered rows directly when any request needs them, before metadata or unordered
   // requests can materialize an intermediate permutation. Existing cached groups are reused.
   auto const any_agg = [&](auto predicate) {
-    return std::any_of(requests.begin(), requests.end(), [&](auto const& request) {
-      return std::any_of(request.aggregations.begin(),
-                         request.aggregations.end(),
-                         [&](auto const& agg) { return predicate(agg->kind); });
+    return std::ranges::any_of(requests, [&](auto const& request) {
+      return std::ranges::any_of(request.aggregations,
+                                 [&](auto const& agg) { return predicate(agg->kind); });
     });
   };
   if (any_agg(detail::needs_stable_groups)) {
@@ -759,11 +758,7 @@ std::pair<std::unique_ptr<table>, std::vector<aggregation_result>> detail::hash:
   // A host UDF can request any dependency from the shared cache. Preserve its public result
   // semantics and output resource ownership even when it is initially only an intermediate.
   auto const expose_intermediates =
-    std::any_of(requests.begin(), requests.end(), [](auto const& request) {
-      return std::any_of(request.aggregations.begin(),
-                         request.aggregations.end(),
-                         [](auto const& agg) { return agg->kind == aggregation::HOST_UDF; });
-    });
+    any_agg([](auto kind) { return kind == aggregation::HOST_UDF; });
 
   // Batch reducible requests together even when other requests need specialized algorithms.
   std::vector<aggregation_request> reductions;
