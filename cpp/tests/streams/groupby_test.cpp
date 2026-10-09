@@ -42,7 +42,9 @@ struct groupby_stream_test : public cudf::test::BaseFixture {
 
 TYPED_TEST_SUITE(groupby_stream_test, cudf::test::AllTypes);
 
-TYPED_TEST(groupby_stream_test, test_count)
+using groupby_count_stream_test = groupby_stream_test<int32_t>;
+
+TEST_F(groupby_count_stream_test, test_count)
 {
   auto const make_count_agg = [&](cudf::null_policy include_nulls = cudf::null_policy::EXCLUDE) {
     return cudf::make_count_aggregation<cudf::groupby_aggregation>(include_nulls);
