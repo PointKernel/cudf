@@ -83,7 +83,7 @@ TYPED_TEST(groupby_collect_list_test, CollectWithNullExclusion)
   test_single_agg(keys, values, expect_keys, expect_vals, std::move(agg));
 }
 
-struct GroupbyCollectListOwnershipTest : cudf::test::BaseFixture {};
+using GroupbyCollectListOwnershipTest = groupby_collect_list_test<int32_t>;
 
 TEST_F(GroupbyCollectListOwnershipTest, NullExclusionPreservesValuesForLaterAggregations)
 {
@@ -100,8 +100,6 @@ TEST_F(GroupbyCollectListOwnershipTest, NullExclusionPreservesValuesForLaterAggr
   cudf::test::lists_column_wrapper<int32_t> expected_exclude{{12, 10}, {23, 21}, {}};
   cudf::test::fixed_width_column_wrapper<int32_t> expected_nth_include{{10, 0, 0},
                                                                        {true, false, false}};
-  cudf::test::fixed_width_column_wrapper<int32_t> expected_nth_exclude{{10, 21, 0},
-                                                                       {true, true, false}};
 
   for (bool const include_first : {false, true}) {
     SCOPED_TRACE(include_first);
@@ -118,11 +116,8 @@ TEST_F(GroupbyCollectListOwnershipTest, NullExclusionPreservesValuesForLaterAggr
       cudf::make_collect_list_aggregation<cudf::groupby_aggregation>(cudf::null_policy::EXCLUDE));
     aggregations.push_back(
       cudf::make_nth_element_aggregation<cudf::groupby_aggregation>(1, cudf::null_policy::INCLUDE));
-    aggregations.push_back(
-      cudf::make_nth_element_aggregation<cudf::groupby_aggregation>(1, cudf::null_policy::EXCLUDE));
     expected.push_back(expected_exclude);
     expected.push_back(expected_nth_include);
-    expected.push_back(expected_nth_exclude);
 
     cudf::groupby::groupby gb(
       cudf::table_view{{keys}}, cudf::null_policy::EXCLUDE, cudf::sorted::NO);

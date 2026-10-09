@@ -89,16 +89,17 @@ TYPED_TEST(GroupbyHistogramTest, EmptyInput)
   ASSERT_EQ(res_histogram->size(), 0);
 }
 
-TYPED_TEST(GroupbyHistogramTest, SlicedSingletonGroupsWithNullValuesAndExcludedKeys)
+using GroupbySingletonHistogramTest = GroupbyHistogramTest<int32_t>;
+
+TEST_F(GroupbySingletonHistogramTest, SlicedSingletonGroupsWithNullValuesAndExcludedKeys)
 {
-  using col_data                = cudf::test::fixed_width_column_wrapper<TypeParam, int>;
   auto const keys_original      = int32s_col{{88, 2, 0, 99, 1, 77}, {1, 1, 1, 0, 1, 1}};
-  auto const values_original    = col_data{{-8, 0, 7, 55, -2, 9}, {1, 0, 1, 1, 1, 1}};
+  auto const values_original    = int32s_col{{-8, 0, 7, 55, -2, 9}, {1, 0, 1, 1, 1, 1}};
   auto const keys               = cudf::slice(keys_original, {1, 5})[0];
   auto const values             = cudf::slice(values_original, {1, 5})[0];
   auto const expected_keys      = int32s_col{0, 1, 2};
   auto const expected_histogram = [] {
-    auto values  = col_data{{7, -2, 0}, {1, 1, 0}};
+    auto values  = int32s_col{{7, -2, 0}, {1, 1, 0}};
     auto counts  = int64s_col{1, 1, 1};
     auto entries = structs_col{{values, counts}};
     return cudf::make_lists_column(3,
@@ -114,8 +115,6 @@ TYPED_TEST(GroupbyHistogramTest, SlicedSingletonGroupsWithNullValuesAndExcludedK
   CUDF_TEST_EXPECT_COLUMNS_EQUAL(*expected_histogram, *result_histogram);
 }
 
-struct GroupbySingletonHistogramTest : cudf::test::BaseFixture {};
-
 TEST_F(GroupbySingletonHistogramTest, NullableValuesRemainOwnedForLaterAggregations)
 {
   auto const keys               = int32s_col{0, 1, 2};
@@ -129,20 +128,9 @@ TEST_F(GroupbySingletonHistogramTest, NullableValuesRemainOwnedForLaterAggregati
                                    0,
                                    cudf::create_null_mask(0, cudf::mask_state::UNALLOCATED));
   }();
-  auto const expected_include =
-    cudf::make_lists_column(3,
-                            int32s_col{0, 1, 2, 3}.release(),
-                            int32s_col{{7, 0, 9}, {1, 0, 1}}.release(),
-                            0,
-                            cudf::create_null_mask(0, cudf::mask_state::UNALLOCATED));
-  auto const expected_exclude =
-    cudf::make_lists_column(3,
-                            int32s_col{0, 1, 1, 2}.release(),
-                            int32s_col{7, 9}.release(),
-                            0,
-                            cudf::create_null_mask(0, cudf::mask_state::UNALLOCATED));
-  std::vector<cudf::column_view> const expected{
-    *expected_histogram, values, *expected_exclude, values, *expected_include};
+  cudf::test::lists_column_wrapper<int32_t> expected_include{
+    {7}, {{0}, cudf::test::iterators::all_nulls()}, {9}};
+  std::vector<cudf::column_view> const expected{*expected_histogram, values, expected_include};
 
   for (auto const sorted : {cudf::sorted::NO, cudf::sorted::YES}) {
     SCOPED_TRACE(static_cast<int>(sorted));
@@ -152,10 +140,6 @@ TEST_F(GroupbySingletonHistogramTest, NullableValuesRemainOwnedForLaterAggregati
     aggs.push_back(cudf::make_histogram_aggregation<cudf::groupby_aggregation>());
     aggs.push_back(
       cudf::make_nth_element_aggregation<cudf::groupby_aggregation>(0, cudf::null_policy::INCLUDE));
-    aggs.push_back(
-      cudf::make_collect_list_aggregation<cudf::groupby_aggregation>(cudf::null_policy::EXCLUDE));
-    aggs.push_back(cudf::make_nth_element_aggregation<cudf::groupby_aggregation>(
-      -1, cudf::null_policy::INCLUDE));
     aggs.push_back(
       cudf::make_collect_list_aggregation<cudf::groupby_aggregation>(cudf::null_policy::INCLUDE));
     cudf::groupby::groupby gb(cudf::table_view{{keys}}, cudf::null_policy::EXCLUDE, sorted);

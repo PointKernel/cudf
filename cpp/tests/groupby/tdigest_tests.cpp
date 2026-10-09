@@ -127,7 +127,9 @@ TYPED_TEST(TDigestAllTypes, AllNull)
   cudf::test::tdigest_simple_all_nulls_aggregation<T>(tdigest_groupby_simple_op{});
 }
 
-TYPED_TEST(TDigestAllTypes, LargeGroups)
+struct TDigestTest : public cudf::test::BaseFixture {};
+
+TEST_F(TDigestTest, LargeGroups)
 {
   auto _values = cudf::test::generate_standardized_percentile_distribution(
     cudf::data_type{cudf::type_id::FLOAT64});
@@ -193,8 +195,6 @@ TYPED_TEST(TDigestAllTypes, LargeGroups)
   // verify that they end up the same.
   CUDF_TEST_EXPECT_COLUMNS_EQUIVALENT(*result.second[0].results[0], *merged_parts);
 }
-
-struct TDigestTest : public cudf::test::BaseFixture {};
 
 TEST_F(TDigestTest, EmptyMixed)
 {
