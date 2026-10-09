@@ -3,6 +3,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+#include "group_reductions.hpp"
+
 #include <cudf/column/column_factories.hpp>
 #include <cudf/column/column_view.hpp>
 #include <cudf/detail/aggregation/aggregation.hpp>
@@ -14,7 +16,6 @@
 
 #include <cuda/iterator>
 #include <cuda/stream>
-#include <thrust/copy.h>
 #include <thrust/count.h>
 #include <thrust/execution_policy.h>
 #include <thrust/transform.h>
@@ -76,36 +77,6 @@ std::pair<std::unique_ptr<column>, std::unique_ptr<column>> purge_null_entries(
   return std::pair(std::move(null_purged_values), std::move(null_purged_offsets));
 }
 
-namespace {
-/// Copies the group offsets into the offsets child of the lists column.
-std::unique_ptr<column> make_offsets_column(cudf::device_span<size_type const> group_offsets,
-                                            size_type num_groups,
-                                            cuda::stream_ref stream,
-                                            rmm::device_async_resource_ref mr)
-{
-  auto offsets_column = make_numeric_column(
-    data_type(type_id::INT32), num_groups + 1, mask_state::UNALLOCATED, stream, mr);
-  thrust::copy(rmm::exec_policy_nosync(stream, cudf::get_current_device_resource_ref()),
-               group_offsets.begin(),
-               group_offsets.end(),
-               offsets_column->mutable_view().template begin<int32_t>());
-  return offsets_column;
-}
-
-std::unique_ptr<column> make_collect_result(std::unique_ptr<column> child_column,
-                                            std::unique_ptr<column> offsets_column,
-                                            size_type num_groups,
-                                            cuda::stream_ref stream,
-                                            rmm::device_async_resource_ref mr)
-{
-  return make_lists_column(num_groups,
-                           std::move(offsets_column),
-                           std::move(child_column),
-                           0,
-                           cudf::create_null_mask(0, cudf::mask_state::UNALLOCATED, stream, mr));
-}
-}  // namespace
-
 std::unique_ptr<column> group_collect(column_view const& values,
                                       cudf::device_span<size_type const> group_offsets,
                                       size_type num_groups,
@@ -113,20 +84,23 @@ std::unique_ptr<column> group_collect(column_view const& values,
                                       cuda::stream_ref stream,
                                       rmm::device_async_resource_ref mr)
 {
-  auto offsets_column = make_offsets_column(group_offsets, num_groups, stream, mr);
   // If column of grouped values contains null elements, and null_policy == EXCLUDE,
   // those elements must be filtered out, and offsets recomputed.
   if (null_handling == null_policy::EXCLUDE && values.has_nulls()) {
     auto [child_column, purged_offsets] = cudf::groupby::detail::purge_null_entries(
-      values, offsets_column->view(), num_groups, stream, mr);
-    return make_collect_result(
-      std::move(child_column), std::move(purged_offsets), num_groups, stream, mr);
+      values, column_view{group_offsets}, num_groups, stream, mr);
+    return make_lists_column(num_groups,
+                             std::move(purged_offsets),
+                             std::move(child_column),
+                             0,
+                             cudf::create_null_mask(0, cudf::mask_state::UNALLOCATED, stream, mr));
   }
-  return make_collect_result(std::make_unique<cudf::column>(values, stream, mr),
-                             std::move(offsets_column),
-                             num_groups,
-                             stream,
-                             mr);
+  return group_collect(std::make_unique<cudf::column>(values, stream, mr),
+                       group_offsets,
+                       num_groups,
+                       null_handling,
+                       stream,
+                       mr);
 }
 
 std::unique_ptr<column> group_collect(std::unique_ptr<column> values,
@@ -140,8 +114,12 @@ std::unique_ptr<column> group_collect(std::unique_ptr<column> values,
     return group_collect(values->view(), group_offsets, num_groups, null_handling, stream, mr);
   }
   // The caller is done with the grouped values, so they become the list child without a copy.
-  auto offsets_column = make_offsets_column(group_offsets, num_groups, stream, mr);
-  return make_collect_result(std::move(values), std::move(offsets_column), num_groups, stream, mr);
+  auto offsets_column = std::make_unique<column>(column_view{group_offsets}, stream, mr);
+  return make_lists_column(num_groups,
+                           std::move(offsets_column),
+                           std::move(values),
+                           0,
+                           cudf::create_null_mask(0, cudf::mask_state::UNALLOCATED, stream, mr));
 }
 
 }  // namespace detail
