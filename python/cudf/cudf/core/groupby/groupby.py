@@ -954,18 +954,17 @@ class GroupBy(Serializable, Reducible, Scannable):
         return self._groupby_manager
 
     def _groups(
-        self, values: Iterable[ColumnBase], *, order_groups: bool = True
+        self, values: Iterable[ColumnBase], *, order_groups: bool | None = None
     ) -> tuple[list[int], list[ColumnBase], list[ColumnBase]]:
+        if order_groups is None:
+            order_groups = self._sort or get_option("mode.pandas_compatible")
         # Materialize iterator to avoid consuming it during access context setup
         values_list = list(values)
         # First-appearance ordering needs the input position of every grouped
         # row. Gather a range column along with the values instead of grouping
         # a second time.
         need_positions = (
-            order_groups
-            and not self._sort
-            and get_option("mode.pandas_compatible")
-            and self._group_ordering is None
+            order_groups and not self._sort and self._group_ordering is None
         )
         if need_positions:
             values_list.append(self._range_column_from_obj)
@@ -1000,15 +999,10 @@ class GroupBy(Serializable, Reducible, Scannable):
             else []
         )
         positions = value_columns.pop() if need_positions else None
-        if (
-            not order_groups
-            or len(offsets) <= 2
-            or not (self._sort or get_option("mode.pandas_compatible"))
-        ):
+        if not order_groups or len(offsets) <= 2:
             return offsets, key_columns, value_columns
 
-        # Cache a permutation of whole groups for sorted or pandas-compatible
-        # output, preserving row order within each group.
+        # Cache the requested group order, preserving row order within each group.
         if self._group_ordering is None:
             group_starts = as_column(offsets[:-1])
             if self._sort:
@@ -1761,7 +1755,7 @@ class GroupBy(Serializable, Reducible, Scannable):
         # aggregation scheme in libcudf. This is probably "fast
         # enough" for most reasonable input sizes.
         _, offsets, _, group_values = self._grouped(
-            order_groups=not preserve_order
+            order_groups=False if preserve_order else None
         )
         group_offsets = np.asarray(offsets, dtype=SIZE_TYPE_DTYPE)
         size_per_group = np.diff(group_offsets)
@@ -2324,7 +2318,7 @@ class GroupBy(Serializable, Reducible, Scannable):
         return cls(obj, grouping, **kwargs)
 
     def _grouped(
-        self, *, include_groups: bool = True, order_groups: bool = True
+        self, *, include_groups: bool = True, order_groups: bool | None = None
     ):
         from cudf.core.dataframe import DataFrame
 
@@ -2635,7 +2629,7 @@ class GroupBy(Serializable, Reducible, Scannable):
                 # group order, so gather back through the inverse of the
                 # grouping permutation.
                 _, _, (positions,) = self._groups(
-                    [self._range_column_from_obj]
+                    [self._range_column_from_obj], order_groups=True
                 )
                 result = result.take(positions.argsort().values)
         return result
@@ -2780,7 +2774,7 @@ class GroupBy(Serializable, Reducible, Scannable):
         if not callable(func):
             raise TypeError(f"type {type(func)} is not callable")
         group_names, offsets, group_keys, grouped_values = self._grouped(
-            include_groups=include_groups
+            include_groups=include_groups, order_groups=True
         )
 
         if engine == "auto":
