@@ -12,9 +12,6 @@
 
 #include <cuda/stream>
 
-#include <cstddef>
-#include <optional>
-
 namespace cudf::groupby::detail::hash {
 
 /// Non-owning label and row buffers used by the stable group-order sort.
@@ -47,28 +44,6 @@ struct grouped_keys {
   rmm::device_uvector<size_type> group_labels;   ///< Group of each grouped row when the stable
                                                  ///< build kept its sort keys, otherwise empty
 };
-
-/**
- * @brief Groups input rows with HashCSR using preprocessed row operators.
- *
- * Group offsets are built only when requested, and grouped rows additionally require the offsets.
- * When grouped rows are requested, `stable_rows` retains their original order within each group,
- * and `keep_labels` additionally returns the group of every grouped row when the stable order was
- * produced by sorting group labels. `domain_capacity` bounds the table capacity for keys drawn
- * from a small finite domain.
- */
-template <typename Equal, typename Hash>
-grouped_keys group_keys(size_type num_rows,
-                        bitmask_type const* row_bitmask,
-                        Equal const& d_row_equal,
-                        Hash const& d_row_hash,
-                        bool need_group_offsets,
-                        bool need_grouped_rows,
-                        std::optional<std::size_t> domain_capacity,
-                        cuda::stream_ref stream,
-                        cudf::memory_resources mr,
-                        bool stable_rows = false,
-                        bool keep_labels = false);
 
 /**
  * @brief Groups input keys with HashCSR, optionally materializing group offsets and grouped rows.

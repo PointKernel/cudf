@@ -544,9 +544,10 @@ grouped_keys group_keys(table_view const& keys,
       : std::pair<cuda::device_buffer<std::byte>, bitmask_type const*>{
           cudf::create_null_mask(0, cudf::mask_state::UNALLOCATED, stream, mr.get_temporary_mr()),
           nullptr};
-  auto const domain_capacity = num_rows < hash_csr_min_rows_to_estimate
-                                 ? std::nullopt
-                                 : small_key_domain_capacity(keys, skip_rows_with_nulls);
+  std::optional<std::size_t> domain_capacity;
+  if (num_rows >= hash_csr_min_rows_to_estimate) {
+    domain_capacity = small_key_domain_capacity(keys, skip_rows_with_nulls);
+  }
   auto preprocessed_keys =
     cudf::detail::row::hash::preprocessed_table::create(keys, stream, mr.get_temporary_mr());
   auto const comparator = cudf::detail::row::equality::self_comparator{preprocessed_keys};
@@ -578,30 +579,5 @@ grouped_keys group_keys(table_view const& keys,
                     stable_rows,
                     keep_labels);
 }
-
-template grouped_keys group_keys<row_comparator_t, row_hash_t>(size_type,
-                                                               bitmask_type const*,
-                                                               row_comparator_t const&,
-                                                               row_hash_t const&,
-                                                               bool,
-                                                               bool,
-                                                               std::optional<std::size_t>,
-                                                               cuda::stream_ref,
-                                                               cudf::memory_resources,
-                                                               bool,
-                                                               bool);
-
-template grouped_keys group_keys<nullable_row_comparator_t, row_hash_t>(
-  size_type,
-  bitmask_type const*,
-  nullable_row_comparator_t const&,
-  row_hash_t const&,
-  bool,
-  bool,
-  std::optional<std::size_t>,
-  cuda::stream_ref,
-  cudf::memory_resources,
-  bool,
-  bool);
 
 }  // namespace cudf::groupby::detail::hash
