@@ -82,6 +82,13 @@ struct aggregation_result {
 
 /**
  * @brief Groups values by keys and computes aggregations on those groups.
+ *
+ * Aggregations, scans, and other grouped operations share grouping metadata. Keys not declared
+ * presorted are grouped by hashing; keys declared presorted are grouped by comparing adjacent rows.
+ *
+ * Order-sensitive operations, such as NTH_ELEMENT and COLLECT_LIST, preserve input row order
+ * within each group. Aggregations that require values in sorted order, such as QUANTILE and
+ * MEDIAN, sort values within each group as needed.
  */
 class groupby {
  public:
@@ -96,8 +103,10 @@ class groupby {
    * @brief Construct a groupby object with the specified `keys`
    *
    * If the `keys` are already sorted, better performance may be achieved by
-   * passing `keys_are_sorted == true`: equal keys are then expected to be
+   * passing `keys_are_sorted == sorted::YES`: equal keys are then expected to be
    * adjacent and are grouped by comparing neighboring rows instead of hashing.
+   * Input sortedness is not detected or checked. Operations still build grouping metadata
+   * and filter rows with null keys when `null_handling == null_policy::EXCLUDE`.
    *
    * @note This object does *not* maintain the lifetime of `keys`. It is the
    * user's responsibility to ensure the `groupby` object does not outlive the
@@ -107,13 +116,13 @@ class groupby {
    * @param null_handling Indicates whether rows in `keys` that contain
    * NULL values should be included
    * @param keys_are_sorted Indicates whether rows in `keys` are already sorted
-   * @param column_order If `keys_are_sorted == YES`, indicates whether each
+   * @param column_order If `keys_are_sorted == sorted::YES`, indicates whether each
    * column is ascending/descending. Grouping presorted keys only relies on equal
    * keys being adjacent, so this does not affect the result. Ignored if
-   * `keys_are_sorted == false`.
-   * @param null_precedence If `keys_are_sorted == YES`, indicates the ordering
+   * `keys_are_sorted == sorted::NO`.
+   * @param null_precedence If `keys_are_sorted == sorted::YES`, indicates the ordering
    * of null values in each column. Like `column_order`, this does not affect the
-   * result. Ignored if `keys_are_sorted == false`.
+   * result. Ignored if `keys_are_sorted == sorted::NO`.
    */
   explicit groupby(table_view const& keys,
                    null_policy null_handling                      = null_policy::EXCLUDE,
@@ -200,8 +209,8 @@ class groupby {
    * `keys` given to groupby object. Element `i` across all aggregation results
    * belongs to the group at row `i` in the group labels table.
    *
-   * The order of the rows in the group labels is arbitrary. Furthermore,
-   * successive `groupby::scan` calls may return results in different orders.
+   * Groups appear in arbitrary order, while rows within each group retain their input order.
+   * Successive `groupby::scan` calls may return groups in different orders.
    *
    * @throws cudf::logic_error If `requests[i].values.size() !=
    * keys.num_rows()`.
@@ -448,7 +457,7 @@ struct streaming_aggregation_request {
  * inside the hash set, which must fit in `cudf::size_type`.
  *
  * All column types (including variable-width types such as strings, lists, and structs)
- * are supported for key columns.  Only hash-based aggregation kinds are supported; use
+ * are supported for key columns. Streaming supports the aggregation kinds listed below; use
  * `is_streaming_groupby_supported()` to query a specific (value type, aggregation kind)
  * combination.
  *

@@ -106,7 +106,7 @@ struct groupby_helper {
                                                    rmm::device_async_resource_ref mr);
 
   /**
-   * @brief Get a table of unique keys
+   * @brief Get a table of distinct keys
    *
    * @param stream CUDA stream used for device operations
    * @param mr Memory resources for output and temporary allocations
