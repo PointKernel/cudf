@@ -744,9 +744,11 @@ std::pair<std::unique_ptr<table>, std::vector<aggregation_result>> detail::hash:
                                  [&](auto const& agg) { return predicate(agg->kind); });
     });
   };
+  auto const has_specialized =
+    any_agg([](auto kind) { return !detail::is_hash_aggregation(kind); });
   if (any_agg(detail::needs_stable_groups)) {
     helper.grouped_order(stream, any_agg(detail::uses_group_labels));
-  } else if (any_agg([](auto kind) { return !detail::is_hash_aggregation(kind); })) {
+  } else if (has_specialized) {
     // Specialized aggregations need grouped rows too. Establish their final group order before
     // a preceding counts-only reduction can cache results using the same group indices.
     helper.unordered_grouped_order(stream);
@@ -760,22 +762,27 @@ std::pair<std::unique_ptr<table>, std::vector<aggregation_result>> detail::hash:
   auto const expose_intermediates =
     any_agg([](auto kind) { return kind == aggregation::HOST_UDF; });
 
-  // Batch reducible requests together even when other requests need specialized algorithms.
-  std::vector<aggregation_request> reductions;
-  reductions.reserve(requests.size());
-  for (auto const& request : requests) {
-    aggregation_request direct;
-    direct.values = request.values;
-    for (auto const& agg : request.aggregations) {
-      if (detail::is_hash_aggregation(agg->kind)) {
-        direct.aggregations.emplace_back(
-          dynamic_cast<groupby_aggregation*>(agg->clone().release()));
+  if (!has_specialized) {
+    detail::hash::compute_aggregations(requests, helper, cache, stream, mr, expose_intermediates);
+  } else {
+    // Batch reducible requests together even when other requests need specialized algorithms.
+    std::vector<aggregation_request> reductions;
+    reductions.reserve(requests.size());
+    for (auto const& request : requests) {
+      aggregation_request direct;
+      direct.values = request.values;
+      for (auto const& agg : request.aggregations) {
+        if (detail::is_hash_aggregation(agg->kind)) {
+          direct.aggregations.emplace_back(
+            dynamic_cast<groupby_aggregation*>(agg->clone().release()));
+        }
       }
+      if (!direct.aggregations.empty()) { reductions.push_back(std::move(direct)); }
     }
-    if (!direct.aggregations.empty()) { reductions.push_back(std::move(direct)); }
-  }
-  if (!reductions.empty()) {
-    detail::hash::compute_aggregations(reductions, helper, cache, stream, mr, expose_intermediates);
+    if (!reductions.empty()) {
+      detail::hash::compute_aggregations(
+        reductions, helper, cache, stream, mr, expose_intermediates);
+    }
   }
 
   for (auto const& request : requests) {
