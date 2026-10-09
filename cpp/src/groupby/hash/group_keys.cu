@@ -11,7 +11,6 @@
 #include <cudf/detail/cuco_helpers.hpp>
 #include <cudf/detail/device_scalar.hpp>
 #include <cudf/detail/utilities/cuda_memcpy.hpp>
-#include <cudf/detail/utilities/integer_utils.hpp>
 #include <cudf/detail/utilities/vector_factories.hpp>
 #include <cudf/null_mask.hpp>
 #include <cudf/utilities/error.hpp>
@@ -21,6 +20,7 @@
 
 #include <cub/device/device_radix_sort.cuh>
 #include <cuda/buffer>
+#include <cuda/cmath>
 #include <cuda/iterator>
 #include <cuda/std/bit>
 #include <cuda/std/cstdint>
@@ -135,9 +135,7 @@ std::size_t estimate_capacity(size_type num_rows,
   // Sample with a prime stride of 67, or a larger odd stride to keep the sample table at most
   // half full. Odd strides avoid repeatedly sampling the same phase of power-of-two patterns.
   auto const stride =
-    std::max<size_type>(
-      67, cudf::util::div_rounding_up_safe<size_type>(num_rows, hash_csr_sample_capacity / 2)) |
-    1;
+    std::max<size_type>(67, cuda::ceil_div(num_rows, hash_csr_sample_capacity / 2)) | 1;
   auto const max_capacity =
     static_cast<std::size_t>(std::numeric_limits<cuda::std::uint32_t>::max());
   auto [sampled, distinct] = sample(stride);
