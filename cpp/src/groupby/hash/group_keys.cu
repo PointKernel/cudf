@@ -24,6 +24,7 @@
 #include <cuda/iterator>
 #include <cuda/std/bit>
 #include <cuda/std/cstdint>
+#include <cuda/std/functional>
 #include <cuda/std/iterator>
 #include <thrust/copy.h>
 #include <thrust/gather.h>
@@ -396,7 +397,7 @@ grouped_keys group_keys(size_type num_rows,
                           static_cast<cuda::std::uint32_t>(count_capacity)},
                         slot_counts.begin(),
                         group_slots.begin(),
-                        [] __device__(size_type count) -> bool { return count > 0; });
+                        cuda::std::identity{});
       group_slots.resize(cuda::std::distance(group_slots.begin(), group_slots_end), stream);
     }
 
