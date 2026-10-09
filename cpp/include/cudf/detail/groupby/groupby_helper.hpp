@@ -119,7 +119,7 @@ struct groupby_helper {
    * @param mr Memory resources for output and temporary allocations
    * @return a new table in which each row is a unique row in the grouped key table.
    */
-  std::unique_ptr<table> unique_keys(cuda::stream_ref stream, cudf::memory_resources mr);
+  std::unique_ptr<table> distinct_keys(cuda::stream_ref stream, cudf::memory_resources mr);
 
   /**
    * @brief Get a table of grouped keys

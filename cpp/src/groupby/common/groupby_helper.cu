@@ -384,8 +384,8 @@ groupby_helper::column_ptr groupby_helper::unordered_grouped_values(
   return std::move(result->release()[0]);
 }
 
-std::unique_ptr<table> groupby_helper::unique_keys(cuda::stream_ref stream,
-                                                   cudf::memory_resources mr)
+std::unique_ptr<table> groupby_helper::distinct_keys(cuda::stream_ref stream,
+                                                     cudf::memory_resources mr)
 {
   std::unique_ptr<hash::grouped_keys> key_groups;
   if (!_groups && _keys_pre_sorted == sorted::NO && _keys.num_rows() != 0) {
