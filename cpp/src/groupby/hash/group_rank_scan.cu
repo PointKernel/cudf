@@ -3,8 +3,6 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-#include "common_utils.cuh"
-
 #include <cudf/column/column.hpp>
 #include <cudf/column/column_factories.hpp>
 #include <cudf/detail/aggregation/aggregation.hpp>
@@ -29,6 +27,24 @@
 namespace cudf {
 namespace groupby {
 namespace detail {
+
+template <typename ComparatorT, typename Iterator>
+struct permuted_row_equality_comparator {
+  permuted_row_equality_comparator(ComparatorT const& comparator, Iterator const permutation)
+    : _comparator{comparator}, _permutation{permutation}
+  {
+  }
+
+  __device__ bool operator()(cudf::size_type lhs, cudf::size_type rhs) const
+  {
+    return _comparator(_permutation[lhs], _permutation[rhs]);
+  };
+
+ private:
+  ComparatorT const _comparator;
+  Iterator const _permutation;
+};
+
 namespace {
 
 template <bool forward, typename permuted_equal_t, typename value_resolver>
