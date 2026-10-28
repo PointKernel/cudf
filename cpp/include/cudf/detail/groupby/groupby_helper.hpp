@@ -133,7 +133,7 @@ struct groupby_helper {
   /**
    * @brief check if the groupby keys are presorted
    */
-  bool is_presorted() { return _keys_pre_sorted == sorted::YES; }
+  [[nodiscard]] bool is_presorted() const { return _keys_pre_sorted == sorted::YES; }
 
   /**
    * @brief Check whether the cached grouped rows already retain input order within each group
