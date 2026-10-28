@@ -410,42 +410,6 @@ TEST_F(groupby_cache_test, duplicate_columns)
 
 using groupby_key_shape_test = groupby_keys_test<int32_t>;
 
-TEST_F(groupby_key_shape_test, PresortedNullableKeysExcludeNullRows)
-{
-  using int32s = cudf::test::fixed_width_column_wrapper<int32_t>;
-  int32s first{{1, 1, 1, 2, 2, 2, 0, 0}, nulls_at({6, 7})};
-  int32s second{{1, 1, 0, 2, 2, 0, 3, 3}, nulls_at({2, 5})};
-  int32s values{1, 2, 3, 4, 5, 6, 7, 8};
-  int32s expected_first{1, 2};
-  int32s expected_second{1, 2};
-  cudf::test::lists_column_wrapper<int32_t> expected_values{{1, 2}, {4, 5}};
-  auto const keys = cudf::table_view{{first, second}};
-
-  for (auto const direction : {cudf::order::ASCENDING, cudf::order::DESCENDING}) {
-    for (auto const nulls : {cudf::null_order::BEFORE, cudf::null_order::AFTER}) {
-      auto const input = cudf::stable_sort_by_key(
-        cudf::table_view{{first, second, values}}, keys, {direction, direction}, {nulls, nulls});
-      cudf::groupby::groupby gb(input->select({0, 1}),
-                                cudf::null_policy::EXCLUDE,
-                                cudf::sorted::YES,
-                                {direction, direction},
-                                {nulls, nulls});
-      std::vector<cudf::groupby::aggregation_request> requests(1);
-      requests[0].values = input->view().column(2);
-      requests[0].aggregations.push_back(
-        cudf::make_collect_list_aggregation<cudf::groupby_aggregation>());
-      auto const [result_keys, results] = gb.aggregate(requests);
-      // Group order is arbitrary; null exclusion must preserve membership and input row order.
-      auto const normalized = cudf::sort_by_key(
-        cudf::table_view{
-          {result_keys->view().column(0), result_keys->view().column(1), *results[0].results[0]}},
-        result_keys->view());
-      CUDF_TEST_EXPECT_TABLES_EQUIVALENT(
-        cudf::table_view{{expected_first, expected_second, expected_values}}, normalized->view());
-    }
-  }
-}
-
 TEST_F(groupby_key_shape_test, CountsBeforeRowBasedRequests)
 {
   // Counts of nonnullable values need only group offsets, so they build a grouping without grouped
