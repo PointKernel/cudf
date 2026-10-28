@@ -65,7 +65,6 @@ bool needs_stable_groups(aggregation::Kind kind)
     case aggregation::MERGE_HISTOGRAM:
     case aggregation::COLLECT_SET:
     case aggregation::MERGE_SETS:
-    case aggregation::MERGE_TDIGEST:
     case aggregation::BITWISE_AGG:
     case aggregation::TOP_K:
     case aggregation::QUANTILE:
@@ -651,7 +650,7 @@ void aggregate_result_functor::operator()<aggregation::MERGE_TDIGEST>(aggregatio
     dynamic_cast<cudf::detail::merge_tdigest_aggregation const&>(agg).max_centroids;
   cache.add_result(values,
                    agg,
-                   cudf::tdigest::detail::group_merge_tdigest(get_unordered_grouped_values(),
+                   cudf::tdigest::detail::group_merge_tdigest(get_grouped_values(),
                                                               helper.group_offsets(stream),
                                                               helper.group_labels(stream),
                                                               helper.num_groups(stream),

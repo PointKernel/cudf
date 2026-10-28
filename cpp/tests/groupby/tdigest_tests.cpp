@@ -6,6 +6,7 @@
 #include <cudf_test/base_fixture.hpp>
 #include <cudf_test/column_wrapper.hpp>
 #include <cudf_test/iterator_utilities.hpp>
+#include <cudf_test/table_utilities.hpp>
 #include <cudf_test/tdigest_utilities.hpp>
 #include <cudf_test/type_lists.hpp>
 
@@ -447,6 +448,48 @@ struct TDigestMergeTest : public cudf::test::BaseFixture {};
 TEST_F(TDigestMergeTest, Simple)
 {
   cudf::test::tdigest_merge_simple(tdigest_groupby_simple_op{}, tdigest_groupby_simple_merge_op{});
+}
+
+TEST_F(TDigestMergeTest, EqualMeansPreserveInputOrder)
+{
+  using doubles = cudf::test::fixed_width_column_wrapper<double>;
+  auto const parts =
+    cudf::test::make_expected_tdigest_column({{doubles{0, 1, 2, 3}, doubles{1, 31, 2, 5}, 0, 3},
+                                              {doubles{0, 1, 2, 3}, doubles{17, 1, 23, 2}, 0, 3},
+                                              {doubles{0, 1, 2, 3}, doubles{3, 19, 1, 11}, 0, 3},
+                                              {doubles{0, 1, 2, 3}, doubles{29, 2, 7, 1}, 0, 3}});
+  constexpr cudf::size_type num_rows = 4096;
+  auto const index =
+    cudf::detail::make_counting_transform_iterator(0, [](auto i) { return i % 4; });
+  cudf::test::fixed_width_column_wrapper<int32_t> indices(index, index + num_rows);
+  auto const values = cudf::gather(cudf::table_view{{*parts}}, indices);
+  auto const key = cudf::detail::make_counting_transform_iterator(0, [](auto i) { return i % 3; });
+  cudf::test::fixed_width_column_wrapper<int32_t> keys(key, key + num_rows);
+  auto const ordered = cudf::stable_sort_by_key(cudf::table_view{{keys, values->view().column(0)}},
+                                                cudf::table_view{{keys}});
+  auto const merge   = [](cudf::table_view input, cudf::sorted sorted, bool sort_values_first) {
+    cudf::groupby::groupby gb(input.select({0}), cudf::null_policy::EXCLUDE, sorted);
+    std::vector<cudf::groupby::aggregation_request> requests(1);
+    requests[0].values = input.column(1);
+    if (sort_values_first) {
+      // NUNIQUE caches a value-sorted layout. MERGE_TDIGEST must still use input order
+      // for equal centroid means, whose different weights affect cluster boundaries.
+      requests[0].aggregations.push_back(
+        cudf::make_nunique_aggregation<cudf::groupby_aggregation>());
+    }
+    requests[0].aggregations.push_back(
+      cudf::make_merge_tdigest_aggregation<cudf::groupby_aggregation>(5));
+    auto const [result_keys, result] = gb.aggregate(requests);
+    return cudf::sort_by_key(cudf::table_view{{*result[0].results.back()}}, result_keys->view());
+  };
+  auto const expected = merge(ordered->view(), cudf::sorted::YES, false);
+  for (auto const sort_values_first : {false, true}) {
+    for (int repeat = 0; repeat < 3; ++repeat) {
+      auto const actual = merge(
+        cudf::table_view{{keys, values->view().column(0)}}, cudf::sorted::NO, sort_values_first);
+      CUDF_TEST_EXPECT_TABLES_EQUAL(expected->view(), actual->view());
+    }
+  }
 }
 
 TEST_F(TDigestMergeTest, Grouped)
