@@ -39,13 +39,9 @@ namespace groupby {
 groupby::groupby(table_view const& keys,
                  null_policy include_null_keys,
                  sorted keys_are_sorted,
-                 std::vector<order> const& column_order,
-                 std::vector<null_order> const& null_precedence)
-  : _keys{keys},
-    _include_null_keys{include_null_keys},
-    _keys_are_sorted{keys_are_sorted},
-    _column_order{column_order},
-    _null_precedence{null_precedence}
+                 std::vector<order> const&,
+                 std::vector<null_order> const&)
+  : _keys{keys}, _include_null_keys{include_null_keys}, _keys_are_sorted{keys_are_sorted}
 {
 }
 

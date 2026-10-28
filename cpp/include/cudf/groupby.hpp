@@ -96,9 +96,8 @@ class groupby {
    * @brief Construct a groupby object with the specified `keys`
    *
    * If the `keys` are already sorted, better performance may be achieved by
-   * passing `keys_are_sorted == true` and indicating the  ascending/descending
-   * order of each column and null order in  `column_order` and
-   * `null_precedence`, respectively.
+   * passing `keys_are_sorted == sorted::YES`. Adjacent equivalent rows form groups,
+   * regardless of the ascending/descending order or null precedence of the keys.
    *
    * @note This object does *not* maintain the lifetime of `keys`. It is the
    * user's responsibility to ensure the `groupby` object does not outlive the
@@ -108,12 +107,8 @@ class groupby {
    * @param null_handling Indicates whether rows in `keys` that contain
    * NULL values should be included
    * @param keys_are_sorted Indicates whether rows in `keys` are already sorted
-   * @param column_order If `keys_are_sorted == YES`, indicates whether each
-   * column is ascending/descending. If empty, assumes all  columns are
-   * ascending. Ignored if `keys_are_sorted == false`.
-   * @param null_precedence If `keys_are_sorted == YES`, indicates the ordering
-   * of null values in each column. Else, ignored. If empty, assumes all columns
-   * use `null_order::AFTER`. Ignored if `keys_are_sorted == false`.
+   * @param column_order Unused; retained for compatibility
+   * @param null_precedence Unused; retained for compatibility
    */
   explicit groupby(table_view const& keys,
                    null_policy null_handling                      = null_policy::EXCLUDE,
@@ -374,11 +369,6 @@ class groupby {
   null_policy _include_null_keys{null_policy::EXCLUDE};  ///< Include rows in keys
                                                          ///< with NULLs
   sorted _keys_are_sorted{sorted::NO};                   ///< Whether or not the keys are sorted
-  std::vector<order> _column_order{};                    ///< If keys are sorted, indicates
-                                                         ///< the order of each column
-  std::vector<null_order> _null_precedence{};            ///< If keys are sorted,
-                                                         ///< indicates null order
-                                                         ///< of each column
   std::unique_ptr<detail::groupby_helper> _helper;       ///< Cached grouping metadata
 
   /**
