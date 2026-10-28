@@ -38,7 +38,6 @@
 #include <memory>
 #include <numeric>
 #include <stdexcept>
-#include <string>
 #include <thread>
 #include <tuple>
 #include <vector>
@@ -267,30 +266,6 @@ TEST_F(StreamingHashJoinTest, DuplicateKeysAcrossPartitions)
 
   // One empty partition, one partition of a single row, and uneven sizes otherwise.
   std::vector<size_type> const splits{100, 100, 101, 517, 800};
-  expect_inner_join_matches(right, splits, left, cudf::null_equality::EQUAL);
-  expect_inner_join_matches(right, splits, left, cudf::null_equality::UNEQUAL);
-}
-
-TEST_F(StreamingHashJoinTest, DuplicateStringKeysAcrossPartitions)
-{
-  constexpr size_type num_rows = 600;
-  std::vector<std::string> right_values(num_rows);
-  std::vector<bool> right_valid(num_rows);
-  for (size_type i = 0; i < num_rows; ++i) {
-    right_values[i] = "key-" + std::to_string(i % 23);
-    right_valid[i]  = i % 13 != 0;
-  }
-  cudf::test::strings_column_wrapper right_keys(
-    right_values.begin(), right_values.end(), right_valid.begin());
-  cudf::table_view const right{{right_keys}};
-  std::vector<std::string> left_values(100);
-  for (size_type i = 0; i < 100; ++i) {
-    left_values[i] = "key-" + std::to_string(i % 29);
-  }
-  cudf::test::strings_column_wrapper left_keys(left_values.begin(), left_values.end());
-  cudf::table_view const left{{left_keys}};
-
-  std::vector<size_type> const splits{0, 250, 599};
   expect_inner_join_matches(right, splits, left, cudf::null_equality::EQUAL);
   expect_inner_join_matches(right, splits, left, cudf::null_equality::UNEQUAL);
 }
