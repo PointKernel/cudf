@@ -109,7 +109,7 @@ cuda::device_buffer<cudf::size_type> compute_unique_counts(uint32_t const* value
 {
   auto d_results = cuda::device_buffer<cudf::size_type>(
     stream, cudf::get_current_device_resource_ref(), rows, cuda::no_init);
-  auto const num_blocks = cudf::util::div_rounding_up_safe(
+  auto const num_blocks = cudf::detail::div_rounding_up_safe(
     static_cast<cudf::thread_index_type>(rows) * cudf::detail::warp_size, block_size);
   sorted_unique_fn<<<num_blocks, block_size, 0, stream.get()>>>(
     values, offsets, rows, d_results.data());
@@ -185,7 +185,7 @@ cuda::device_buffer<cudf::size_type> compute_intersect_counts(uint32_t const* va
 {
   auto d_results = cuda::device_buffer<cudf::size_type>(
     stream, cudf::get_current_device_resource_ref(), rows, cuda::no_init);
-  auto const num_blocks = cudf::util::div_rounding_up_safe(
+  auto const num_blocks = cudf::detail::div_rounding_up_safe(
     static_cast<cudf::thread_index_type>(rows) * cudf::detail::warp_size, block_size);
   sorted_intersect_fn<<<num_blocks, block_size, 0, stream.get()>>>(
     values1, offsets1, values2, offsets2, rows, d_results.data());
@@ -338,7 +338,7 @@ std::pair<cuda::device_buffer<uint32_t>, cuda::device_buffer<int64_t>> hash_subs
   // count substrings
   auto offsets = cuda::device_buffer<int64_t>(
     stream, cudf::get_current_device_resource_ref(), input.size() + 1, cuda::no_init);
-  auto const num_blocks = cudf::util::div_rounding_up_safe(
+  auto const num_blocks = cudf::detail::div_rounding_up_safe(
     static_cast<cudf::thread_index_type>(input.size()) * cudf::detail::warp_size, block_size);
   count_substrings_kernel<<<num_blocks, block_size, 0, stream.get()>>>(
     *d_strings, width, offsets.data());
@@ -367,7 +367,7 @@ std::pair<cuda::device_buffer<uint32_t>, cuda::device_buffer<int64_t>> hash_subs
     // The CUB segmented sort can only handle max<int> total values
     // so this code calls it in sections.
     auto const section_size   = std::numeric_limits<int>::max() / 2L;
-    auto const sort_sections  = cudf::util::div_rounding_up_safe(total_hashes, section_size);
+    auto const sort_sections  = cudf::detail::div_rounding_up_safe(total_hashes, section_size);
     auto const offset_indices = [&] {
       // build a set of indices that point to offsets subsections
       auto sub_offsets = cuda::device_buffer<int64_t>(

@@ -58,7 +58,7 @@ std::size_t bitmask_allocation_size_words(size_type number_of_bits, std::size_t 
 {
   CUDF_EXPECTS(padding_boundary > 0, "Invalid padding boundary");
   auto necessary_words = num_bitmask_words(number_of_bits);
-  auto padded_words    = padding_boundary * cudf::util::div_rounding_up_safe<size_type>(
+  auto padded_words    = padding_boundary * cudf::detail::div_rounding_up_safe<size_type>(
                                            necessary_words, padding_boundary);
   return padded_words;
 }
@@ -66,8 +66,8 @@ std::size_t bitmask_allocation_size_words(size_type number_of_bits, std::size_t 
 // Computes number of *actual* bitmask_type elements needed
 size_type num_bitmask_words(size_type number_of_bits)
 {
-  return cudf::util::div_rounding_up_safe<size_type>(number_of_bits,
-                                                     detail::size_in_bits<bitmask_type>());
+  return cudf::detail::div_rounding_up_safe<size_type>(number_of_bits,
+                                                       detail::size_in_bits<bitmask_type>());
 }
 
 namespace detail {
@@ -224,7 +224,7 @@ void set_null_masks(cudf::host_span<bitmask_type*> bitmasks,
       // Handle overflow if any
       if (cuda::add_overflow<size_t>(cumulative_null_mask_words, num_words).overflow) {
         average_nullmask_words +=
-          cudf::util::div_rounding_up_safe<size_t>(cumulative_null_mask_words, num_bitmasks);
+          cudf::detail::div_rounding_up_safe<size_t>(cumulative_null_mask_words, num_bitmasks);
         cumulative_null_mask_words = 0;
       }
       // Add to cumulative null mask words
@@ -234,7 +234,7 @@ void set_null_masks(cudf::host_span<bitmask_type*> bitmasks,
 
   // Add the last cumulative null mask words to average
   average_nullmask_words +=
-    cudf::util::div_rounding_up_safe<size_t>(cumulative_null_mask_words, num_bitmasks);
+    cudf::detail::div_rounding_up_safe<size_t>(cumulative_null_mask_words, num_bitmasks);
 
   // Create device vectors from host spans
   auto const mr           = cudf::get_current_device_resource_ref();
