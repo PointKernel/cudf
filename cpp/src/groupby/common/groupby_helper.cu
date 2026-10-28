@@ -293,15 +293,18 @@ device_span<size_type const> groupby_helper::input_labels(cuda::stream_ref strea
 
 std::unique_ptr<column> groupby_helper::sorted_values(column_view const& values,
                                                       cuda::stream_ref stream,
-                                                      rmm::device_async_resource_ref mr)
+                                                      cudf::memory_resources mr)
 {
   // Group labels avoid sorting the original key columns. Starting with input rows also preserves
   // input order among equal values without materializing the stable CSR row permutation first.
   auto const labels = column_view(device_span<size_type const>{input_labels(stream)});
-  auto order        = cudf::detail::stable_sorted_order(
-    table_view{{labels, values}}, {}, std::vector<null_order>(2, null_order::AFTER), stream, mr);
-  auto rows   = cudf::detail::slice(order->view(), 0, num_keys(stream), stream);
-  auto result = cudf::detail::gather(table_view{{values}},
+  auto order        = cudf::detail::stable_sorted_order(table_view{{labels, values}},
+                                                        {},
+                                                 std::vector<null_order>(2, null_order::AFTER),
+                                                 stream,
+                                                 mr.get_temporary_mr());
+  auto rows         = cudf::detail::slice(order->view(), 0, num_keys(stream), stream);
+  auto result       = cudf::detail::gather(table_view{{values}},
                                      rows,
                                      out_of_bounds_policy::DONT_CHECK,
                                      negative_index_policy::NOT_ALLOWED,

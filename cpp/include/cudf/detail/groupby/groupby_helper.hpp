@@ -78,7 +78,7 @@ struct groupby_helper {
    */
   std::unique_ptr<column> sorted_values(column_view const& values,
                                         cuda::stream_ref stream,
-                                        rmm::device_async_resource_ref mr);
+                                        cudf::memory_resources mr);
 
   /**
    * @brief Groups a column of values according to `keys`

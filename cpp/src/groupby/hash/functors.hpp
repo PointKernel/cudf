@@ -118,8 +118,7 @@ struct store_result_functor {
   {
     return sorted_values
              ? sorted_values->view()
-             : (sorted_values = helper.sorted_values(values, stream, mr.get_temporary_mr()))
-                 ->view();
+             : (sorted_values = helper.sorted_values(values, stream, mr.as_temporary()))->view();
   };
 
  protected:
