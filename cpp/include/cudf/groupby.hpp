@@ -98,6 +98,9 @@ class groupby {
    * If the `keys` are already sorted, better performance may be achieved by
    * passing `keys_are_sorted == sorted::YES`. Adjacent equivalent rows form groups,
    * regardless of the ascending/descending order or null precedence of the keys.
+   * If null keys are excluded and `keys` contains nulls, grouping uses hashing to
+   * filter those rows even when `keys_are_sorted == sorted::YES`. The returned
+   * groups may therefore appear in a different order from the input keys.
    *
    * @note This object does *not* maintain the lifetime of `keys`. It is the
    * user's responsibility to ensure the `groupby` object does not outlive the
