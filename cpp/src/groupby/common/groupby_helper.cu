@@ -225,11 +225,11 @@ size_type groupby_helper::num_keys(cuda::stream_ref stream)
   return _num_keys;
 }
 
-column_view groupby_helper::grouped_order(bool keep_labels, cuda::stream_ref stream)
+device_span<size_type const> groupby_helper::grouped_order(bool keep_labels,
+                                                           cuda::stream_ref stream)
 {
   make_stable(keep_labels, stream);
-  return column_view(device_span<size_type const>{_groups->grouped_rows->data(),
-                                                  static_cast<std::size_t>(_num_keys)});
+  return {_groups->grouped_rows->data(), static_cast<std::size_t>(_num_keys)};
 }
 
 device_span<size_type const> groupby_helper::unordered_grouped_order(cuda::stream_ref stream)

@@ -161,9 +161,9 @@ struct groupby_helper {
    * the stored order on subsequent calls. Pass `keep_labels` when `group_labels`
    * will be requested too, so the labels sorted alongside the rows are kept.
    *
-   * @return the grouped row indices for `keys`.
+   * @return span of grouped row indices for `keys`.
    */
-  column_view grouped_order(bool keep_labels, cuda::stream_ref stream);
+  device_span<size_type const> grouped_order(bool keep_labels, cuda::stream_ref stream);
 
   /**
    * @brief Get grouped row indices without requiring input order within each group.
