@@ -12,15 +12,15 @@ std::pair<std::unique_ptr<rmm::device_uvector<size_type>>,
           std::unique_ptr<rmm::device_uvector<size_type>>>
 hash_join<Hasher>::partitioned_full_join(cudf::join_partition_context const& context,
                                          cuda::stream_ref stream,
-                                         rmm::device_async_resource_ref mr) const
+                                         cudf::memory_resources resources) const
 {
-  return this->partitioned_join_retrieve(join_kind::FULL_JOIN, context, stream, mr);
+  return this->partitioned_join_retrieve(join_kind::FULL_JOIN, context, stream, resources);
 }
 
 template std::pair<std::unique_ptr<rmm::device_uvector<size_type>>,
                    std::unique_ptr<rmm::device_uvector<size_type>>>
 hash_join<hash_join_hasher>::partitioned_full_join(cudf::join_partition_context const& context,
                                                    cuda::stream_ref stream,
-                                                   rmm::device_async_resource_ref mr) const;
+                                                   cudf::memory_resources resources) const;
 
 }  // namespace cudf::detail

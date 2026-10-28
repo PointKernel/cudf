@@ -44,6 +44,10 @@
 #include <utility>
 #include <vector>
 
+// Retain the legacy context tests throughout the deprecation cycle.
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+
 namespace {
 template <typename T>
 using column_wrapper                = cudf::test::fixed_width_column_wrapper<T>;
@@ -3866,3 +3870,5 @@ TEST_F(JoinTest, HashJoinPartitionedSlicedMultiBlock)
 }
 
 CUDF_TEST_PROGRAM_MAIN()
+
+#pragma GCC diagnostic pop

@@ -15,7 +15,9 @@
 
 #include <cuda/stream>
 
+#include <concepts>
 #include <memory>
+#include <type_traits>
 
 /**
  * @file
@@ -200,7 +202,80 @@ class sort_merge_join {
     cuda::stream_ref stream           = cudf::get_default_stream(),
     rmm::device_async_resource_ref mr = cudf::get_current_device_resource_ref()) const;
 
+  /**
+   * @tparam Resources Explicit cudf::memory_resources bundle
+   * @brief Retrieve a partition with explicit output and temporary resources.
+   * @param context Match context and left-row bounds
+   * @param stream CUDA stream used for device operations
+   * @param resources Resources for returned indices and temporary allocations
+   * @return Left and right gather maps
+   */
+  template <typename Resources>
+    requires std::same_as<std::remove_cvref_t<Resources>, cudf::memory_resources>
+  [[nodiscard]] std::pair<std::unique_ptr<rmm::device_uvector<size_type>>,
+                          std::unique_ptr<rmm::device_uvector<size_type>>>
+  partitioned_inner_join(join_partition_context const& context,
+                         cuda::stream_ref stream,
+                         Resources&& resources) const
+  {
+    return partitioned_join(context, stream, resources);
+  }
+
+  /**
+   * @tparam Resources Explicit cudf::memory_resources bundle
+   * @brief Compute reusable matches for an inner join without allocating gather maps.
+   *
+   * The result exposes counts and output size for memory planning. It must be retrieved using
+   * this join object and the corresponding join kind. Both input tables and this join object
+   * must outlive the result and all operations using it. See join_match_context.
+   *
+   * @param left Left join-key table
+   * @param stream CUDA stream used for device operations; synchronized before returning
+   * @param resources Resources for retained output state and temporary allocations
+   * @return Owning match context
+   */
+  template <typename Resources>
+    requires std::same_as<std::remove_cvref_t<Resources>, cudf::memory_resources>
+  [[nodiscard]] std::unique_ptr<join_match_context> inner_join_match_context(
+    table_view const& left, cuda::stream_ref stream, Resources&& resources) const
+  {
+    return make_match_context(left, stream, resources);
+  }
+
+  /**
+   * @brief Retrieve an inner join for a half-open range of original left rows.
+   *
+   * Borrows the match context, which can be reused for other partitions. Returned left indices
+   * refer to the complete left table. Partitioning does not split an individual row's matches.
+   *
+   * @throws std::invalid_argument If the result belongs to another join object or kind, is
+   * moved from, or the row bounds are invalid
+   * @param matches Result from inner_join_match_context
+   * @param left_start_idx First left row, inclusive
+   * @param left_end_idx Last left row, exclusive
+   * @param stream CUDA stream used for device operations
+   * @param resources Resources for returned indices and temporary allocations
+   * @return Left and right gather maps
+   */
+  [[nodiscard]] std::pair<std::unique_ptr<rmm::device_uvector<size_type>>,
+                          std::unique_ptr<rmm::device_uvector<size_type>>>
+  partitioned_inner_join(
+    join_match_context const& matches,
+    size_type left_start_idx,
+    size_type left_end_idx,
+    cuda::stream_ref stream          = cudf::get_default_stream(),
+    cudf::memory_resources resources = cudf::get_current_device_resource_ref()) const;
+
  private:
+  std::unique_ptr<join_match_context> make_match_context(table_view const& left,
+                                                         cuda::stream_ref stream,
+                                                         cudf::memory_resources resources) const;
+  std::pair<std::unique_ptr<rmm::device_uvector<size_type>>,
+            std::unique_ptr<rmm::device_uvector<size_type>>>
+  partitioned_join(join_partition_context const& context,
+                   cuda::stream_ref stream,
+                   cudf::memory_resources resources) const;
+
   using impl_type = cudf::detail::sort_merge_join;  ///< Implementation type
   std::unique_ptr<impl_type const> _impl;           ///< Pointer to implementation
 };

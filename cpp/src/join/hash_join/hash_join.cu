@@ -321,4 +321,64 @@ hash_join::partitioned_full_join(cudf::join_partition_context const& context,
   return _impl->partitioned_full_join(context, stream, mr);
 }
 
+std::pair<std::unique_ptr<rmm::device_uvector<size_type>>,
+          std::unique_ptr<rmm::device_uvector<size_type>>>
+hash_join::partitioned_inner_join(join_match_context const& matches,
+                                  size_type left_start_idx,
+                                  size_type left_end_idx,
+                                  cuda::stream_ref stream,
+                                  cudf::memory_resources resources) const
+{
+  return _impl->partitioned_join_retrieve(
+    join_kind::INNER_JOIN, matches, left_start_idx, left_end_idx, stream, resources);
+}
+
+std::pair<std::unique_ptr<rmm::device_uvector<size_type>>,
+          std::unique_ptr<rmm::device_uvector<size_type>>>
+hash_join::partitioned_left_join(join_match_context const& matches,
+                                 size_type left_start_idx,
+                                 size_type left_end_idx,
+                                 cuda::stream_ref stream,
+                                 cudf::memory_resources resources) const
+{
+  return _impl->partitioned_join_retrieve(
+    join_kind::LEFT_JOIN, matches, left_start_idx, left_end_idx, stream, resources);
+}
+
+std::pair<std::unique_ptr<rmm::device_uvector<size_type>>,
+          std::unique_ptr<rmm::device_uvector<size_type>>>
+hash_join::partitioned_full_join(join_match_context const& matches,
+                                 size_type left_start_idx,
+                                 size_type left_end_idx,
+                                 cuda::stream_ref stream,
+                                 cudf::memory_resources resources) const
+{
+  return _impl->partitioned_join_retrieve(
+    join_kind::FULL_JOIN, matches, left_start_idx, left_end_idx, stream, resources);
+}
+
+join_match_context hash_join::make_match_context(join_kind kind,
+                                                 table_view const& left,
+                                                 cuda::stream_ref stream,
+                                                 cudf::memory_resources resources) const
+{
+  return _impl->make_match_context(kind, left, stream, resources);
+}
+std::pair<std::unique_ptr<rmm::device_uvector<size_type>>,
+          std::unique_ptr<rmm::device_uvector<size_type>>>
+hash_join::partitioned_join(join_kind kind,
+                            join_partition_context const& context,
+                            cuda::stream_ref stream,
+                            cudf::memory_resources resources) const
+{
+  CUDF_EXPECTS(context.left_table_context != nullptr,
+               "join_partition_context is missing left_table_context",
+               std::invalid_argument);
+  return _impl->partitioned_join_retrieve(kind,
+                                          *context.left_table_context,
+                                          context.left_start_idx,
+                                          context.left_end_idx,
+                                          stream,
+                                          resources);
+}
 }  // namespace cudf
