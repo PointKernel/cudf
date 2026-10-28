@@ -732,12 +732,12 @@ CUDF_KERNEL void __launch_bounds__(block_size)
   } temp_storage;
 
   orcenc_state_s* const s = &state_g;
-  uint32_t col_id         = blockIdx.x / chunks.size().second;
-  uint32_t group_id       = blockIdx.x % chunks.size().second;
+  uint32_t col_id         = blockIdx.x / chunks.extent(1);
+  uint32_t group_id       = blockIdx.x % chunks.extent(1);
   int t                   = threadIdx.x;
   if (t == 0) {
-    s->chunk                = chunks[col_id][group_id];
-    s->stream               = streams[col_id][group_id];
+    s->chunk                = chunks(col_id, group_id);
+    s->stream               = streams(col_id, group_id);
     s->cur_row              = 0;
     s->present_rows         = 0;
     s->present_out          = 0;
@@ -758,7 +758,7 @@ CUDF_KERNEL void __launch_bounds__(block_size)
   auto const pushdown_mask = [&]() -> cudf::bitmask_type const* {
     auto const parent_index = s->chunk.column->parent_index;
     if (!parent_index.has_value()) return nullptr;
-    return chunks[parent_index.value()][0].column->pushdown_mask;
+    return chunks(parent_index.value(), 0).column->pushdown_mask;
   }();
 
   encode_null_mask<block_size>(s, pushdown_mask, temp_storage.scan_u32, t);
@@ -1000,9 +1000,9 @@ CUDF_KERNEL void __launch_bounds__(block_size)
     // Update actual compressed length
     // (not needed for decimal data, whose exact size is known before encode)
     if (!(t == CI_DATA && s->chunk.type_kind == DECIMAL))
-      streams[col_id][group_id].lengths[t] = s->strm_pos[t];
+      streams(col_id, group_id).lengths[t] = s->strm_pos[t];
     if (!s->stream.data_ptrs[t]) {
-      streams[col_id][group_id].data_ptrs[t] =
+      streams(col_id, group_id).data_ptrs[t] =
         static_cast<uint8_t*>(const_cast<void*>(column.head())) +
         (column.offset() + s->chunk.start_row) * s->chunk.dtype_len;
     }
@@ -1036,9 +1036,9 @@ CUDF_KERNEL void __launch_bounds__(block_size)
   if (t == 0) s->u.dict_stripe = &stripes[stripe_id];
 
   __syncthreads();
-  auto const strm_ptr = &streams[s->u.dict_stripe->column_idx][s->u.dict_stripe->start_rowgroup];
+  auto const strm_ptr = &streams(s->u.dict_stripe->column_idx, s->u.dict_stripe->start_rowgroup);
   if (t == 0) {
-    s->chunk         = chunks[s->u.dict_stripe->column_idx][s->u.dict_stripe->start_rowgroup];
+    s->chunk         = chunks(s->u.dict_stripe->column_idx, s->u.dict_stripe->start_rowgroup);
     s->stream        = *strm_ptr;
     s->strm_pos[cid] = 0;
     s->numlengths    = 0;
@@ -1112,26 +1112,26 @@ CUDF_KERNEL void __launch_bounds__(compact_streams_block_size)
                              device_span<uint8_t*> dsts,
                              device_span<size_t> sizes)
 {
-  auto const stripe_id = (blockIdx.x / strm_desc.size().second) * blockDim.x + threadIdx.x;
-  auto const stream_id = blockIdx.x % strm_desc.size().second;
-  if (stripe_id >= strm_desc.size().first) { return; }
+  auto const stripe_id = (blockIdx.x / strm_desc.extent(1)) * blockDim.x + threadIdx.x;
+  auto const stream_id = blockIdx.x % strm_desc.extent(1);
+  if (stripe_id >= strm_desc.extent(0)) { return; }
 
-  auto const out_id = stream_id * strm_desc.size().first + stripe_id;
-  stripe_stream ss  = strm_desc[stripe_id][stream_id];
+  auto const out_id = stream_id * strm_desc.extent(0) + stripe_id;
+  stripe_stream ss  = strm_desc(stripe_id, stream_id);
 
   if (ss.data_ptr == nullptr) { return; }
 
   auto const cid = ss.stream_type;
   auto dst_ptr   = ss.data_ptr;
   for (auto group = ss.first_chunk_id; group < ss.first_chunk_id + ss.num_chunks; ++group) {
-    auto const out_id = stream_id * streams.size().second + group;
-    srcs[out_id]      = streams[ss.column_id][group].data_ptrs[cid];
+    auto const out_id = stream_id * streams.extent(1) + group;
+    srcs[out_id]      = streams(ss.column_id, group).data_ptrs[cid];
     dsts[out_id]      = dst_ptr;
 
     // Also update the stream here, data will be copied in a separate kernel
-    streams[ss.column_id][group].data_ptrs[cid] = dst_ptr;
+    streams(ss.column_id, group).data_ptrs[cid] = dst_ptr;
 
-    auto const len = streams[ss.column_id][group].lengths[cid];
+    auto const len = streams(ss.column_id, group).lengths[cid];
     // len is the size (in bytes) of the current stream.
     sizes[out_id] = len;
     dst_ptr += len;
@@ -1169,15 +1169,15 @@ CUDF_KERNEL void __launch_bounds__(256)
   auto const padded_block_header_size = cuda::round_up(block_header_size, comp_block_align);
   auto const padded_comp_block_size   = cuda::round_up(max_comp_blk_size, comp_block_align);
 
-  auto const stripe_id = blockIdx.x / strm_desc.size().second;
-  auto const stream_id = blockIdx.x % strm_desc.size().second;
+  auto const stripe_id = blockIdx.x / strm_desc.extent(1);
+  auto const stream_id = blockIdx.x % strm_desc.extent(1);
   uint32_t t           = threadIdx.x;
   uint32_t num_blocks;
   uint8_t *src, *dst;
 
   if (t == 0) {
-    ss            = strm_desc[stripe_id][stream_id];
-    uncomp_base_g = streams[ss.column_id][ss.first_chunk_id].data_ptrs[ss.stream_type];
+    ss            = strm_desc(stripe_id, stream_id);
+    uncomp_base_g = streams(ss.column_id, ss.first_chunk_id).data_ptrs[ss.stream_type];
   }
   __syncthreads();
   src        = uncomp_base_g;
@@ -1220,14 +1220,14 @@ CUDF_KERNEL void __launch_bounds__(1024)
   __shared__ uint8_t const* comp_src_g;
   __shared__ uint32_t comp_len_g;
 
-  auto const stripe_id = blockIdx.x / strm_desc.size().second;
-  auto const stream_id = blockIdx.x % strm_desc.size().second;
+  auto const stripe_id = blockIdx.x / strm_desc.extent(1);
+  auto const stream_id = blockIdx.x % strm_desc.extent(1);
   uint32_t t           = threadIdx.x;
   uint32_t num_blocks, b, blk_size;
   uint8_t const* src;
   uint8_t* dst;
 
-  if (t == 0) ss = strm_desc[stripe_id][stream_id];
+  if (t == 0) ss = strm_desc(stripe_id, stream_id);
   __syncthreads();
 
   num_blocks = (ss.stream_size > 0) ? (ss.stream_size - 1) / comp_blk_size + 1 : 0;
@@ -1276,7 +1276,7 @@ CUDF_KERNEL void __launch_bounds__(1024)
   } while (++b < num_blocks);
   // Update stripe stream with the compressed size
   if (t == 0) {
-    strm_desc[stripe_id][stream_id].stream_size =
+    strm_desc(stripe_id, stream_id).stream_size =
       static_cast<uint32_t>(dst - (compressed_bfr.data() + ss.bfr_offset));
   }
 }
@@ -1297,10 +1297,10 @@ CUDF_KERNEL void decimal_sizes_to_offsets_kernel(device_2dspan<rowgroup_rows con
   __shared__ typename block_scan::TempStorage scan_storage;
   int const t = threadIdx.x;
 
-  auto const col_id          = blockIdx.x / rg_bounds.size().first;
-  auto const rg_id           = blockIdx.x % rg_bounds.size().first;
+  auto const col_id          = blockIdx.x / rg_bounds.extent(0);
+  auto const rg_id           = blockIdx.x % rg_bounds.extent(0);
   auto const& col_elem_sizes = sizes[col_id];
-  auto const& row_group      = rg_bounds[rg_id][col_elem_sizes.col_idx];
+  auto const& row_group      = rg_bounds(rg_id, col_elem_sizes.col_idx);
   auto const elem_sizes      = col_elem_sizes.sizes.data() + row_group.begin;
 
   uint32_t initial_value = 0;
@@ -1320,7 +1320,7 @@ void encode_orc_column_data(device_2dspan<encoder_chunk const> chunks,
                             duration_s base_epoch,
                             cuda::stream_ref stream)
 {
-  auto const num_blocks = chunks.size().first * chunks.size().second;
+  auto const num_blocks = chunks.size();
   encode_column_data_kernel<encode_block_size>
     <<<num_blocks, encode_block_size, 0, stream.get()>>>(chunks, streams, base_epoch);
   CUDF_CUDA_TRY(cudaGetLastError());
@@ -1345,9 +1345,9 @@ void compact_orc_data_streams(device_2dspan<stripe_stream> strm_desc,
                               device_2dspan<encoder_chunk_streams> enc_streams,
                               cuda::stream_ref stream)
 {
-  auto const num_rowgroups = enc_streams.size().second;
-  auto const num_streams   = strm_desc.size().second;
-  auto const num_stripes   = strm_desc.size().first;
+  auto const num_rowgroups = enc_streams.extent(1);
+  auto const num_streams   = strm_desc.extent(1);
+  auto const num_stripes   = strm_desc.extent(0);
   auto const num_chunks    = num_rowgroups * num_streams;
   auto srcs                = cudf::detail::make_zeroed_device_buffer_async<uint8_t*>(
     num_chunks, stream, cudf::get_current_device_resource_ref());
@@ -1357,7 +1357,7 @@ void compact_orc_data_streams(device_2dspan<stripe_stream> strm_desc,
     num_chunks, stream, cudf::get_current_device_resource_ref());
 
   auto const num_blocks =
-    cuda::ceil_div(num_stripes, compact_streams_block_size) * strm_desc.size().second;
+    cuda::ceil_div(num_stripes, compact_streams_block_size) * strm_desc.extent(1);
   init_batched_memcpy_kernel<<<num_blocks, compact_streams_block_size, 0, stream.get()>>>(
     strm_desc, enc_streams, srcs, dsts, lengths);
   CUDF_CUDA_TRY(cudaGetLastError());
@@ -1385,7 +1385,7 @@ std::optional<writer_compression_statistics> compress_orc_data_streams(
   cuda::device_buffer<device_span<uint8_t>> comp_out(
     stream, cudf::get_current_device_resource_ref(), num_compressed_blocks, cuda::no_init);
 
-  size_t const num_blocks = strm_desc.size().first * strm_desc.size().second;
+  size_t const num_blocks = strm_desc.size();
   init_compression_blocks_kernel<<<num_blocks, 256, 0, stream.get()>>>(strm_desc,
                                                                        enc_streams,
                                                                        comp_in,
@@ -1415,7 +1415,7 @@ void decimal_sizes_to_offsets(device_2dspan<rowgroup_rows const> rg_bounds,
                               std::map<uint32_t, cuda::device_buffer<uint32_t>>& elem_sizes,
                               cuda::stream_ref stream)
 {
-  if (rg_bounds.count() == 0) return;
+  if (rg_bounds.empty()) return;
 
   // Convert map to a vector of views of the `elem_sizes` device buffers
   auto h_sizes =
@@ -1430,7 +1430,7 @@ void decimal_sizes_to_offsets(device_2dspan<rowgroup_rows const> rg_bounds,
 
   constexpr int block_size = 256;
   // number of rowgroups * number of decimal columns
-  auto const num_blocks = elem_sizes.size() * rg_bounds.size().first;
+  auto const num_blocks = elem_sizes.size() * rg_bounds.extent(0);
   decimal_sizes_to_offsets_kernel<block_size>
     <<<num_blocks, block_size, 0, stream.get()>>>(rg_bounds, d_sizes);
   stream.sync();

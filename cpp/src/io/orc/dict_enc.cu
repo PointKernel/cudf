@@ -34,11 +34,11 @@ CUDF_KERNEL void rowgroup_char_counts_kernel(device_2dspan<size_type> char_count
   // Index of the column in the `orc_columns` array
   auto const col_idx       = str_col_indexes[str_col_idx];
   auto const row_group_idx = (blockIdx.x / str_col_indexes.size()) * blockDim.x + threadIdx.x;
-  if (row_group_idx >= rowgroup_bounds.size().first) { return; }
+  if (row_group_idx >= rowgroup_bounds.extent(0)) { return; }
 
   auto const& str_col  = orc_columns[col_idx];
-  auto const start_row = rowgroup_bounds[row_group_idx][col_idx].begin + str_col.offset();
-  auto const num_rows  = rowgroup_bounds[row_group_idx][col_idx].size();
+  auto const start_row = rowgroup_bounds(row_group_idx, col_idx).begin + str_col.offset();
+  auto const num_rows  = rowgroup_bounds(row_group_idx, col_idx).size();
 
   size_type char_count = 0;
   if (num_rows > 0) {
@@ -46,7 +46,7 @@ CUDF_KERNEL void rowgroup_char_counts_kernel(device_2dspan<size_type> char_count
     auto const offsets_itr = cudf::detail::input_offsetalator(offsets.head(), offsets.type());
     char_count = static_cast<size_type>(offsets_itr[start_row + num_rows] - offsets_itr[start_row]);
   }
-  char_counts[str_col_idx][row_group_idx] = char_count;
+  char_counts(str_col_idx, row_group_idx) = char_count;
 }
 
 void rowgroup_char_counts(device_2dspan<size_type> counts,
@@ -55,9 +55,9 @@ void rowgroup_char_counts(device_2dspan<size_type> counts,
                           device_span<uint32_t const> str_col_indexes,
                           cuda::stream_ref stream)
 {
-  if (rowgroup_bounds.count() == 0) { return; }
+  if (rowgroup_bounds.empty()) { return; }
 
-  auto const num_rowgroups = rowgroup_bounds.size().first;
+  auto const num_rowgroups = rowgroup_bounds.extent(0);
   if (str_col_indexes.empty()) { return; }
 
   int block_size    = 0;  // suggested thread count to use
@@ -124,9 +124,9 @@ CUDF_KERNEL void __launch_bounds__(block_size)
                                        device_span<orc_column_device_view const> columns)
 {
   // blockIdx.x selects the dictionary, blockIdx.y splits its rows across blocks
-  auto const num_stripes = dictionaries.size().second;
+  auto const num_stripes = dictionaries.extent(1);
   auto const t           = threadIdx.x;
-  auto& dict             = dictionaries[blockIdx.x / num_stripes][blockIdx.x % num_stripes];
+  auto& dict             = dictionaries(blockIdx.x / num_stripes, blockIdx.x % num_stripes);
   auto const& col        = columns[dict.column_idx];
 
   // Make a view of the hash map
@@ -197,9 +197,9 @@ template <int block_size>
 CUDF_KERNEL void __launch_bounds__(block_size)
   collect_map_entries_kernel(device_2dspan<stripe_dictionary> dictionaries)
 {
-  auto const col_idx    = blockIdx.x / dictionaries.size().second;
-  auto const stripe_idx = blockIdx.x % dictionaries.size().second;
-  auto const& dict      = dictionaries[col_idx][stripe_idx];
+  auto const col_idx    = blockIdx.x / dictionaries.extent(1);
+  auto const stripe_idx = blockIdx.x % dictionaries.extent(1);
+  auto const& dict      = dictionaries(col_idx, stripe_idx);
 
   if (not dict.is_enabled) { return; }
 
@@ -229,8 +229,8 @@ CUDF_KERNEL void __launch_bounds__(block_size)
                                 device_span<orc_column_device_view const> columns)
 {
   // blockIdx.x selects the dictionary, blockIdx.y splits its rows across blocks
-  auto const num_stripes = dictionaries.size().second;
-  auto const& dict       = dictionaries[blockIdx.x / num_stripes][blockIdx.x % num_stripes];
+  auto const num_stripes = dictionaries.extent(1);
+  auto const& dict       = dictionaries(blockIdx.x / num_stripes, blockIdx.x % num_stripes);
   if (not dict.is_enabled) { return; }
 
   auto const& col = columns[dict.column_idx];
@@ -272,16 +272,16 @@ void populate_dictionary_hash_maps(device_2dspan<stripe_dictionary> dictionaries
                                    size_type max_dict_rows,
                                    cuda::stream_ref stream)
 {
-  if (dictionaries.count() == 0) { return; }
+  if (dictionaries.empty()) { return; }
   constexpr int block_size = 256;
 
   auto const blocks_per_dict = blocks_per_dictionary(
     populate_dictionary_hash_maps_kernel<block_size, cuda::thread_scope_device>,
     block_size,
-    dictionaries.count(),
+    dictionaries.size(),
     max_dict_rows);
 
-  dim3 const grid{static_cast<unsigned int>(dictionaries.count()),
+  dim3 const grid{static_cast<unsigned int>(dictionaries.size()),
                   static_cast<unsigned int>(blocks_per_dict)};
 
   if (blocks_per_dict == 1) {
@@ -296,10 +296,10 @@ void populate_dictionary_hash_maps(device_2dspan<stripe_dictionary> dictionaries
 
 void collect_map_entries(device_2dspan<stripe_dictionary> dictionaries, cuda::stream_ref stream)
 {
-  if (dictionaries.count() == 0) { return; }
+  if (dictionaries.empty()) { return; }
   constexpr int block_size = 1024;
   collect_map_entries_kernel<block_size>
-    <<<dictionaries.count(), block_size, 0, stream.get()>>>(dictionaries);
+    <<<dictionaries.size(), block_size, 0, stream.get()>>>(dictionaries);
   CUDF_CUDA_TRY(cudaGetLastError());
 }
 
@@ -308,13 +308,13 @@ void get_dictionary_indices(device_2dspan<stripe_dictionary> dictionaries,
                             size_type max_dict_rows,
                             cuda::stream_ref stream)
 {
-  if (dictionaries.count() == 0) { return; }
+  if (dictionaries.empty()) { return; }
   constexpr int block_size = 1024;
 
   auto const blocks_per_dict = blocks_per_dictionary(
-    get_dictionary_indices_kernel<block_size>, block_size, dictionaries.count(), max_dict_rows);
+    get_dictionary_indices_kernel<block_size>, block_size, dictionaries.size(), max_dict_rows);
 
-  dim3 const grid{static_cast<unsigned int>(dictionaries.count()),
+  dim3 const grid{static_cast<unsigned int>(dictionaries.size()),
                   static_cast<unsigned int>(blocks_per_dict)};
   get_dictionary_indices_kernel<block_size>
     <<<grid, block_size, 0, stream.get()>>>(dictionaries, columns);

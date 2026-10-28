@@ -43,7 +43,7 @@ struct extract_fn {
                              int32_t const prog_idx) const
   {
     auto const groups = d_prog.group_counts();
-    auto d_output     = d_indices[idx];
+    auto d_output     = cudf::detail::row_view(d_indices, idx);
 
     if (d_strings.is_valid(idx)) {
       auto const d_str = d_strings.element<string_view>(idx);
@@ -83,8 +83,9 @@ std::unique_ptr<table> extract(strings_column_view const& input,
   auto const groups = d_prog->group_counts();
   CUDF_EXPECTS(groups > 0, "Group indicators not found in regex pattern");
 
-  auto indices   = rmm::device_uvector<string_index_pair>(input.size() * groups, stream);
-  auto d_indices = cudf::detail::device_2dspan<string_index_pair>(indices, groups);
+  auto indices = rmm::device_uvector<string_index_pair>(input.size() * groups, stream);
+  auto d_indices =
+    cudf::detail::device_2dspan<string_index_pair>{indices.data(), input.size(), groups};
 
   auto const d_strings = column_device_view::create(input.parent(), stream);
 

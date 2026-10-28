@@ -20,6 +20,8 @@
 #include <cuda/buffer>
 #include <cuda/stream>
 
+#include <utility>
+
 namespace cudf::detail {
 
 /**
@@ -171,36 +173,19 @@ class hostdevice_2dvector {
   {
   }
 
-  operator device_2dspan<T>()
+  device_2dspan<T> device_view()
   {
-    return device_2dspan<T>(device_span<T>(_data.device_ptr(), _data.size()), _size.second);
+    return device_2dspan<T>{_data.device_ptr(), view_rows(), _size.second};
   }
-  operator device_2dspan<T const>() const
-  {
-    return device_2dspan<T const>(device_span<T const>(_data.device_ptr(), _data.size()),
-                                  _size.second);
-  }
-
-  device_2dspan<T> device_view() { return static_cast<device_2dspan<T>>(*this); }
   [[nodiscard]] device_2dspan<T const> device_view() const
   {
-    return static_cast<device_2dspan<T const>>(*this);
+    return device_2dspan<T const>{_data.device_ptr(), view_rows(), _size.second};
   }
 
-  operator host_2dspan<T>()
-  {
-    return host_2dspan<T>(host_span<T>(_data.host_ptr(), _data.size(), true), _size.second);
-  }
-  operator host_2dspan<T const>() const
-  {
-    return host_2dspan<T const>(host_span<T const>(_data.host_ptr(), _data.size(), true),
-                                _size.second);
-  }
-
-  host_2dspan<T> host_view() { return static_cast<host_2dspan<T>>(*this); }
+  host_2dspan<T> host_view() { return host_2dspan<T>{_data.host_ptr(), view_rows(), _size.second}; }
   [[nodiscard]] host_2dspan<T const> host_view() const
   {
-    return static_cast<host_2dspan<T const>>(*this);
+    return host_2dspan<T const>{_data.host_ptr(), view_rows(), _size.second};
   }
 
   host_span<T> operator[](size_t row)
@@ -241,8 +226,11 @@ class hostdevice_2dvector {
   void device_to_host(cuda::stream_ref stream) { _data.device_to_host(stream); }
 
  private:
+  // A view with no columns has no rows either, so per-row loops over a view see no work
+  [[nodiscard]] size_t view_rows() const noexcept { return _size.second == 0 ? 0 : _size.first; }
+
   hostdevice_vector<T> _data;
-  typename host_2dspan<T>::size_type _size;
+  std::pair<size_t, size_t> _size;
 };
 
 }  // namespace cudf::detail
