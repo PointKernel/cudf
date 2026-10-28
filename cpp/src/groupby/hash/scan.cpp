@@ -60,7 +60,7 @@ void scan_result_functor::operator()<aggregation::SUM>(aggregation const& agg)
                                     helper.num_groups(stream, mr),
                                     helper.group_labels(stream, mr),
                                     stream,
-                                    mr));
+                                    mr.get_output_mr()));
 }
 
 template <>
@@ -74,7 +74,7 @@ void scan_result_functor::operator()<aggregation::PRODUCT>(aggregation const& ag
                                         helper.num_groups(stream, mr),
                                         helper.group_labels(stream, mr),
                                         stream,
-                                        mr));
+                                        mr.get_output_mr()));
 }
 
 template <>
@@ -88,7 +88,7 @@ void scan_result_functor::operator()<aggregation::MIN>(aggregation const& agg)
                                     helper.num_groups(stream, mr),
                                     helper.group_labels(stream, mr),
                                     stream,
-                                    mr));
+                                    mr.get_output_mr()));
 }
 
 template <>
@@ -102,7 +102,7 @@ void scan_result_functor::operator()<aggregation::MAX>(aggregation const& agg)
                                     helper.num_groups(stream, mr),
                                     helper.group_labels(stream, mr),
                                     stream,
-                                    mr));
+                                    mr.get_output_mr()));
 }
 
 template <>
@@ -225,7 +225,7 @@ std::pair<std::unique_ptr<table>, std::vector<aggregation_result>> groupby::scan
     }
   }
 
-  auto results = detail::extract_results(requests, cache, stream, mr);
+  auto results = detail::extract_results(requests, cache, stream, mr.get_output_mr());
 
   return std::pair(helper().grouped_keys(stream, mr), std::move(results));
 }

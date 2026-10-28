@@ -329,7 +329,7 @@ std::unique_ptr<column> group_correlation(column_view const& covariance,
                                           column_view const& stddev_0,
                                           column_view const& stddev_1,
                                           cuda::stream_ref stream,
-                                          cudf::memory_resources mr);
+                                          rmm::device_async_resource_ref mr);
 
 /**
  * @brief Internal API to calculate bitwise operation on grouped values ignoring nulls.

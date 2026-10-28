@@ -45,14 +45,10 @@ struct preprocessed_group_info {
  * @param orderby Column with null mask.
  * @param offsets Offset array defining the (sorted) groups.
  * @param stream CUDA stream used for kernel launches
- * @param mr Memory resources for the returned counts and temporary storage
  * @return device_uvector containing the null count per group.
  */
 [[nodiscard]] rmm::device_uvector<cudf::size_type> nulls_per_group(
-  column_view const& orderby,
-  device_span<size_type const> offsets,
-  cuda::stream_ref stream,
-  cudf::memory_resources mr);
+  column_view const& orderby, device_span<size_type const> offsets, cuda::stream_ref stream);
 
 /**
  * @copydoc std::unique_ptr<column> rolling_window(

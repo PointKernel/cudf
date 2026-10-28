@@ -30,7 +30,7 @@ std::unique_ptr<column> sum_scan(column_view const& values,
                                  size_type num_groups,
                                  device_span<size_type const> group_labels,
                                  cuda::stream_ref stream,
-                                 cudf::memory_resources mr);
+                                 rmm::device_async_resource_ref mr);
 
 /**
  * @brief Internal API to calculate groupwise cumulative product
@@ -47,7 +47,7 @@ std::unique_ptr<column> product_scan(column_view const& values,
                                      size_type num_groups,
                                      device_span<size_type const> group_labels,
                                      cuda::stream_ref stream,
-                                     cudf::memory_resources mr);
+                                     rmm::device_async_resource_ref mr);
 
 /**
  * @brief Internal API to calculate groupwise cumulative minimum value
@@ -62,7 +62,7 @@ std::unique_ptr<column> min_scan(column_view const& values,
                                  size_type num_groups,
                                  device_span<size_type const> group_labels,
                                  cuda::stream_ref stream,
-                                 cudf::memory_resources mr);
+                                 rmm::device_async_resource_ref mr);
 
 /**
  * @brief Internal API to calculate groupwise cumulative maximum value
@@ -77,7 +77,7 @@ std::unique_ptr<column> max_scan(column_view const& values,
                                  size_type num_groups,
                                  device_span<size_type const> group_labels,
                                  cuda::stream_ref stream,
-                                 cudf::memory_resources mr);
+                                 rmm::device_async_resource_ref mr);
 
 /**
  * @brief Internal API to calculate cumulative number of values in each group

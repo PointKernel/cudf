@@ -204,8 +204,8 @@ void groupby_helper::build_groups(bool need_grouped_rows,
   auto const num_groups =
     size == 0 ? size_type{0}
     : cudf::detail::has_nested_columns(_keys)
-      ? compute_nested_group_offsets(_keys, rows.data(), size, offsets, stream, mr.as_temporary())
-      : compute_group_offsets<false>(_keys, rows.data(), size, offsets, stream, mr.as_temporary());
+      ? compute_nested_group_offsets(_keys, rows.data(), size, offsets, stream)
+      : compute_group_offsets<false>(_keys, rows.data(), size, offsets, stream);
   thrust::fill_n(policy, offsets.data() + num_groups, 1, size);
   // The first row of each group is its representative input row, which the group offset already
   // identifies.

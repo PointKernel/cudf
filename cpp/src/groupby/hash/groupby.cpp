@@ -87,10 +87,10 @@ bool needs_stable_groups(aggregation::Kind kind)
  */
 auto column_view_with_common_nulls(column_view const& column_0,
                                    column_view const& column_1,
-                                   cuda::stream_ref stream,
-                                   cudf::memory_resources mr)
+                                   cuda::stream_ref stream)
 {
-  auto [new_nullmask, null_count] = cudf::bitmask_and(table_view{{column_0, column_1}}, stream, mr);
+  auto [new_nullmask, null_count] = cudf::bitmask_and(
+    table_view{{column_0, column_1}}, stream, cudf::get_current_device_resource_ref());
   if (null_count == 0) { return std::make_tuple(std::move(new_nullmask), column_0, column_1); }
   auto column_view_with_new_nullmask = [](auto const& col, void* nullmask, auto null_count) {
     return column_view(col.type(),
@@ -469,7 +469,7 @@ void aggregate_result_functor::operator()<aggregation::COVARIANCE>(aggregation c
   // Covariance only for valid values in both columns.
   // in non-identical null mask cases, this prevents caching of the results - STD, MEAN, COUNT.
   auto [_, values_child0, values_child1] =
-    column_view_with_common_nulls(values.child(0), values.child(1), stream, mr.as_temporary());
+    column_view_with_common_nulls(values.child(0), values.child(1), stream);
 
   auto mean_agg = make_mean_aggregation();
   aggregate_result_functor(values_child0, helper, cache, expose_intermediates, stream, mr)
@@ -521,7 +521,7 @@ void aggregate_result_functor::operator()<aggregation::CORRELATION>(aggregation 
   // Correlation only for valid values in both columns.
   // in non-identical null mask cases, this prevents caching of the results - STD, MEAN, COUNT
   auto [_, values_child0, values_child1] =
-    column_view_with_common_nulls(values.child(0), values.child(1), stream, mr.as_temporary());
+    column_view_with_common_nulls(values.child(0), values.child(1), stream);
 
   auto std_agg = make_std_aggregation();
   aggregate_result_functor(values_child0, helper, cache, expose_intermediates, stream, mr)
@@ -563,7 +563,9 @@ void aggregate_result_functor::operator()<aggregation::CORRELATION>(aggregation 
   auto const stddev1    = cache.get_result(values_child1, *std_agg);
   auto const covariance = cache.get_result(values, *cov_agg);
   cache.add_result(
-    values, agg, detail::group_correlation(covariance, stddev0, stddev1, stream, mr));
+    values,
+    agg,
+    detail::group_correlation(covariance, stddev0, stddev1, stream, mr.get_output_mr()));
 }
 
 /**
@@ -799,7 +801,7 @@ std::pair<std::unique_ptr<table>, std::vector<aggregation_result>> detail::hash:
     }
   }
 
-  auto results = detail::extract_results(requests, cache, stream, mr);
+  auto results = detail::extract_results(requests, cache, stream, mr.get_output_mr());
 
   return std::pair(helper.distinct_keys(stream, mr), std::move(results));
 }

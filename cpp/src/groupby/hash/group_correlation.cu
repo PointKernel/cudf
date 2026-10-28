@@ -180,7 +180,7 @@ std::unique_ptr<column> group_correlation(column_view const& covariance,
                                           column_view const& stddev_0,
                                           column_view const& stddev_1,
                                           cuda::stream_ref stream,
-                                          cudf::memory_resources mr)
+                                          rmm::device_async_resource_ref mr)
 {
   using result_type = id_to_type<type_id::FLOAT64>;
   CUDF_EXPECTS(covariance.type().id() == type_id::FLOAT64, "Covariance result must be FLOAT64");
@@ -192,9 +192,9 @@ std::unique_ptr<column> group_correlation(column_view const& covariance,
                                     cudf::detail::copy_bitmask(covariance, stream, mr),
                                     covariance.null_count(),
                                     stream,
-                                    mr.get_output_mr());
+                                    mr);
   auto d_result    = result->mutable_view().begin<result_type>();
-  thrust::transform(rmm::exec_policy_nosync(stream, mr.get_temporary_mr()),
+  thrust::transform(rmm::exec_policy_nosync(stream, cudf::get_current_device_resource_ref()),
                     covariance.begin<result_type>(),
                     covariance.end<result_type>(),
                     stddev_iter,
