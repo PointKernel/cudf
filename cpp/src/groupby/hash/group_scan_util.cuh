@@ -128,8 +128,7 @@ struct group_scan_functor<K, T, std::enable_if_t<is_group_scan_supported<K, T>()
         make_null_replacement_iterator(*values_view, OpType::template identity<DeviceType>()),
         cudf::detail::cast_fn<ResultDeviceType>{});
       do_scan(input, result_view->begin<ResultDeviceType>(), OpType{});
-      result->set_null_mask(cudf::detail::copy_bitmask(values, stream, mr.get_output_mr()),
-                            values.null_count());
+      result->set_null_mask(cudf::detail::copy_bitmask(values, stream, mr), values.null_count());
     } else {
       auto input = cuda::transform_iterator(values_view->begin<DeviceType>(),
                                             cudf::detail::cast_fn<ResultDeviceType>{});
@@ -181,8 +180,7 @@ struct group_scan_functor<K,
     // turn the string_view vector into a strings column
     auto results = make_strings_column(results_vector, string_view{}, stream, mr.get_output_mr());
     if (values.has_nulls())
-      results->set_null_mask(cudf::detail::copy_bitmask(values, stream, mr.get_output_mr()),
-                             values.null_count());
+      results->set_null_mask(cudf::detail::copy_bitmask(values, stream, mr), values.null_count());
     return results;
   }
 };
@@ -235,7 +233,7 @@ struct group_scan_functor<K,
     return create_structs_hierarchy(values.size(),
                                     std::move(scanned_children),
                                     values.null_count(),
-                                    cudf::detail::copy_bitmask(values, stream, mr.get_output_mr()),
+                                    cudf::detail::copy_bitmask(values, stream, mr),
                                     stream,
                                     mr.get_output_mr());
   }

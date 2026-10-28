@@ -64,7 +64,7 @@ struct empty_column_constructor {
   column_view values;
   aggregation const& agg;
   cuda::stream_ref stream;
-  rmm::device_async_resource_ref mr;
+  cudf::memory_resources mr;
 
   template <typename ValuesType, aggregation::Kind k>
   std::unique_ptr<cudf::column> operator()() const
@@ -101,7 +101,7 @@ struct empty_column_constructor {
                                  0,
                                  cudf::create_null_mask(0, cudf::mask_state::UNALLOCATED),
                                  stream,
-                                 mr);
+                                 mr.get_output_mr());
     }
 
     if constexpr (k == aggregation::Kind::RANK) {
@@ -129,7 +129,7 @@ struct empty_column_constructor {
         dynamic_cast<cudf::detail::host_udf_aggregation const&>(agg).udf_ptr;
       auto const udf_ptr = dynamic_cast<groupby_host_udf const*>(udf_base_ptr.get());
       CUDF_EXPECTS(udf_ptr != nullptr, "Invalid HOST_UDF instance for groupby aggregation.");
-      return udf_ptr->get_empty_output(stream, mr);
+      return udf_ptr->get_empty_output(stream, mr.get_output_mr());
     }
 
     return make_empty_column(target_type(values.type(), k));
@@ -140,7 +140,7 @@ struct empty_column_constructor {
 template <typename RequestType>
 auto empty_results(std::span<RequestType const> requests,
                    cuda::stream_ref stream,
-                   rmm::device_async_resource_ref mr)
+                   cudf::memory_resources mr)
 {
   std::vector<aggregation_result> empty_results;
 
@@ -202,9 +202,7 @@ void verify_valid_requests(std::span<RequestType const> requests)
 
 // Compute aggregation requests
 std::pair<std::unique_ptr<table>, std::vector<aggregation_result>> groupby::aggregate(
-  std::span<aggregation_request const> requests,
-  cuda::stream_ref stream,
-  rmm::device_async_resource_ref mr)
+  std::span<aggregation_request const> requests, cuda::stream_ref stream, cudf::memory_resources mr)
 {
   CUDF_FUNC_RANGE();
   CUDF_EXPECTS(
@@ -222,9 +220,7 @@ std::pair<std::unique_ptr<table>, std::vector<aggregation_result>> groupby::aggr
 
 // Compute scan requests
 std::pair<std::unique_ptr<table>, std::vector<aggregation_result>> groupby::scan(
-  std::span<scan_request const> requests,
-  cuda::stream_ref stream,
-  rmm::device_async_resource_ref mr)
+  std::span<scan_request const> requests, cuda::stream_ref stream, cudf::memory_resources mr)
 {
   CUDF_FUNC_RANGE();
   CUDF_EXPECTS(
@@ -244,17 +240,17 @@ std::pair<std::unique_ptr<table>, std::vector<aggregation_result>> groupby::scan
 
 groupby::groups groupby::get_groups(table_view values,
                                     cuda::stream_ref stream,
-                                    rmm::device_async_resource_ref mr)
+                                    cudf::memory_resources mr)
 {
   CUDF_FUNC_RANGE();
   auto grouped_keys = helper().grouped_keys(stream, mr);
 
-  auto const& group_offsets       = helper().group_offsets(stream);
+  auto const& group_offsets       = helper().group_offsets(stream, mr);
   auto const group_offsets_vector = cudf::detail::make_std_vector(group_offsets, stream);
 
   if (not values.is_empty()) {
     auto grouped_values = cudf::detail::gather(values,
-                                               helper().grouped_order(false, stream),
+                                               helper().grouped_order(false, stream, mr),
                                                cudf::out_of_bounds_policy::DONT_CHECK,
                                                cudf::negative_index_policy::NOT_ALLOWED,
                                                stream,
@@ -270,7 +266,7 @@ std::pair<std::unique_ptr<table>, std::unique_ptr<table>> groupby::replace_nulls
   table_view const& values,
   std::span<cudf::replace_policy const> replace_policies,
   cuda::stream_ref stream,
-  rmm::device_async_resource_ref mr)
+  cudf::memory_resources mr)
 {
   CUDF_FUNC_RANGE();
   CUDF_EXPECTS(_keys.num_rows() == values.num_rows(),
@@ -280,8 +276,8 @@ std::pair<std::unique_ptr<table>, std::unique_ptr<table>> groupby::replace_nulls
 
   if (values.is_empty()) { return std::pair(empty_like(_keys), empty_like(values)); }
 
-  auto const grouped_order = helper().grouped_order(true, stream);
-  auto const& group_labels = helper().group_labels(stream);
+  auto const grouped_order = helper().grouped_order(true, stream, mr);
+  auto const& group_labels = helper().group_labels(stream, mr);
   std::vector<std::unique_ptr<column>> results;
   results.reserve(values.num_columns());
   std::transform(
@@ -312,7 +308,7 @@ std::pair<std::unique_ptr<table>, std::unique_ptr<table>> groupby::shift(
   std::span<size_type const> offsets,
   std::vector<std::reference_wrapper<scalar const>> const& fill_values,
   cuda::stream_ref stream,
-  rmm::device_async_resource_ref mr)
+  cudf::memory_resources mr)
 {
   CUDF_FUNC_RANGE();
   CUDF_EXPECTS(values.num_columns() == static_cast<size_type>(fill_values.size()),
@@ -327,19 +323,22 @@ std::pair<std::unique_ptr<table>, std::unique_ptr<table>> groupby::shift(
                "values and fill_value should have the same type.",
                cudf::data_type_error);
   // Build the grouped rows before reading offsets, which a counts-only grouping rebuild changes.
-  helper().grouped_order(false, stream);
+  helper().grouped_order(false, stream, mr);
   std::vector<std::unique_ptr<column>> results;
-  auto const& group_offsets = helper().group_offsets(stream);
-  std::transform(
-    cuda::counting_iterator<cudf::size_type>{0},
-    cuda::counting_iterator{values.num_columns()},
-    std::back_inserter(results),
-    [&](size_type i) {
-      auto grouped_values =
-        helper().grouped_values(values.column(i), stream, cudf::get_current_device_resource_ref());
-      return cudf::detail::segmented_shift(
-        grouped_values->view(), group_offsets, offsets[i], fill_values[i].get(), stream, mr);
-    });
+  auto const& group_offsets = helper().group_offsets(stream, mr);
+  std::transform(cuda::counting_iterator<cudf::size_type>{0},
+                 cuda::counting_iterator{values.num_columns()},
+                 std::back_inserter(results),
+                 [&](size_type i) {
+                   auto grouped_values =
+                     helper().grouped_values(values.column(i), stream, mr.as_temporary());
+                   return cudf::detail::segmented_shift(grouped_values->view(),
+                                                        group_offsets,
+                                                        offsets[i],
+                                                        fill_values[i].get(),
+                                                        stream,
+                                                        mr.get_output_mr());
+                 });
 
   return std::pair(helper().grouped_keys(stream, mr),
                    std::make_unique<cudf::table>(std::move(results)));

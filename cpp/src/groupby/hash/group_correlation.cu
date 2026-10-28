@@ -122,7 +122,7 @@ std::unique_ptr<column> group_covariance(column_view const& values_0,
                                          size_type min_periods,
                                          size_type ddof,
                                          cuda::stream_ref stream,
-                                         rmm::device_async_resource_ref mr)
+                                         cudf::memory_resources mr)
 {
   using result_type = id_to_type<type_id::FLOAT64>;
   static_assert(
@@ -146,13 +146,16 @@ std::unique_ptr<column> group_covariance(column_view const& values_0,
   auto mean0_ptr = mean_0.begin<result_type>();
   auto mean1_ptr = mean_1.begin<result_type>();
 
-  auto d_values_0 = column_device_view::create(values_0, stream);
-  auto d_values_1 = column_device_view::create(values_1, stream);
+  auto d_values_0 = column_device_view::create(values_0, stream, mr.get_temporary_mr());
+  auto d_values_1 = column_device_view::create(values_1, stream, mr.get_temporary_mr());
   covariance_transform<result_type> covariance_transform_op{
     *d_values_0, *d_values_1, mean0_ptr, mean1_ptr, grouped.rows.data(), group_labels.data()};
 
-  auto result = make_numeric_column(
-    data_type(type_to_id<result_type>()), num_groups, mask_state::UNALLOCATED, stream, mr);
+  auto result   = make_numeric_column(data_type(type_to_id<result_type>()),
+                                    num_groups,
+                                    mask_state::UNALLOCATED,
+                                    stream,
+                                    mr.get_output_mr());
   auto d_result = result->mutable_view().begin<result_type>();
 
   // One pass over the grouped rows sums the centered products of each group directly from the
@@ -177,7 +180,7 @@ std::unique_ptr<column> group_correlation(column_view const& covariance,
                                           column_view const& stddev_0,
                                           column_view const& stddev_1,
                                           cuda::stream_ref stream,
-                                          rmm::device_async_resource_ref mr)
+                                          cudf::memory_resources mr)
 {
   using result_type = id_to_type<type_id::FLOAT64>;
   CUDF_EXPECTS(covariance.type().id() == type_id::FLOAT64, "Covariance result must be FLOAT64");
@@ -189,9 +192,9 @@ std::unique_ptr<column> group_correlation(column_view const& covariance,
                                     cudf::detail::copy_bitmask(covariance, stream, mr),
                                     covariance.null_count(),
                                     stream,
-                                    mr);
+                                    mr.get_output_mr());
   auto d_result    = result->mutable_view().begin<result_type>();
-  thrust::transform(rmm::exec_policy_nosync(stream, cudf::get_current_device_resource_ref()),
+  thrust::transform(rmm::exec_policy_nosync(stream, mr.get_temporary_mr()),
                     covariance.begin<result_type>(),
                     covariance.end<result_type>(),
                     stddev_iter,

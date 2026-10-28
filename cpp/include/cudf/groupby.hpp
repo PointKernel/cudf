@@ -82,6 +82,10 @@ struct aggregation_result {
 
 /**
  * @brief Groups values by keys and computes aggregations on those groups.
+ *
+ * Grouping metadata is cached across calls using the temporary resource supplied when the
+ * metadata is first needed. That resource must remain valid until this object is destroyed.
+ * Returned tables and columns use the supplied output resource.
  */
 class groupby {
  public:
@@ -168,15 +172,15 @@ class groupby {
    * @param requests The set of columns to aggregate and the aggregations to
    * perform
    * @param stream CUDA stream used for device memory operations and kernel launches.
-   * @param mr Device memory resource used to allocate the returned table and columns' device memory
+   * @param mr Memory resources for returned data and temporary storage
    * @return Pair containing the table with each group's distinct key and
    * a vector of aggregation_results for each request in the same order as
    * specified in `requests`.
    */
   std::pair<std::unique_ptr<table>, std::vector<aggregation_result>> aggregate(
     std::span<aggregation_request const> requests,
-    cuda::stream_ref stream           = cudf::get_default_stream(),
-    rmm::device_async_resource_ref mr = cudf::get_current_device_resource_ref());
+    cuda::stream_ref stream   = cudf::get_default_stream(),
+    cudf::memory_resources mr = cudf::get_current_device_resource_ref());
   /**
    * @brief Performs grouped scans on the specified values.
    *
@@ -224,15 +228,15 @@ class groupby {
    *
    * @param requests The set of columns to scan and the scans to perform
    * @param stream CUDA stream used for device memory operations and kernel launches.
-   * @param mr Device memory resource used to allocate the returned table and columns' device memory
+   * @param mr Memory resources for returned data and temporary storage
    * @return Pair containing the table with each group's key and
    * a vector of aggregation_results for each request in the same order as
    * specified in `requests`.
    */
   std::pair<std::unique_ptr<table>, std::vector<aggregation_result>> scan(
     std::span<scan_request const> requests,
-    cuda::stream_ref stream           = cudf::get_default_stream(),
-    rmm::device_async_resource_ref mr = cudf::get_current_device_resource_ref());
+    cuda::stream_ref stream   = cudf::get_default_stream(),
+    cudf::memory_resources mr = cudf::get_current_device_resource_ref());
 
   /**
    * @brief Performs grouped shifts for specified values.
@@ -279,7 +283,7 @@ class groupby {
    * @param offsets The offsets by which to shift the input
    * @param fill_values Fill values for indeterminable outputs
    * @param stream CUDA stream used for device memory operations and kernel launches.
-   * @param mr Device memory resource used to allocate the returned table and columns' device memory
+   * @param mr Memory resources for returned data and temporary storage
    * @return Pair containing the tables with each group's key and the columns shifted
    *
    * @throws cudf::logic_error if @p fill_value[i] dtype does not match @p values[i] dtype for
@@ -289,8 +293,8 @@ class groupby {
     table_view const& values,
     std::span<size_type const> offsets,
     std::vector<std::reference_wrapper<scalar const>> const& fill_values,
-    cuda::stream_ref stream           = cudf::get_default_stream(),
-    rmm::device_async_resource_ref mr = cudf::get_current_device_resource_ref());
+    cuda::stream_ref stream   = cudf::get_default_stream(),
+    cudf::memory_resources mr = cudf::get_current_device_resource_ref());
 
   /**
    * @brief The grouped data corresponding to a groupby operation on a set of values.
@@ -317,13 +321,12 @@ class groupby {
    *
    * @param values Table representing values on which a groupby operation is to be performed
    * @param stream CUDA stream used for device memory operations and kernel launches.
-   * @param mr Device memory resource used to allocate the returned tables's device memory in the
-   * returned groups
+   * @param mr Memory resources for returned data and temporary storage
    * @return A `groups` object representing grouped keys and values
    */
-  groups get_groups(cudf::table_view values           = {},
-                    cuda::stream_ref stream           = cudf::get_default_stream(),
-                    rmm::device_async_resource_ref mr = cudf::get_current_device_resource_ref());
+  groups get_groups(cudf::table_view values   = {},
+                    cuda::stream_ref stream   = cudf::get_default_stream(),
+                    cudf::memory_resources mr = cudf::get_current_device_resource_ref());
 
   /**
    * @brief Performs grouped replace nulls on @p value
@@ -357,15 +360,15 @@ class groupby {
    * @param[in] replace_policies Specify the position of replacement values relative to null values,
    * one for each column
    * @param[in] stream CUDA stream used for device memory operations and kernel launches.
-   * @param[in] mr Device memory resource used to allocate device memory of the returned column
+   * @param[in] mr Memory resources for returned data and temporary storage
    *
    * @return Pair that contains a table with the grouped keys and the result column
    */
   std::pair<std::unique_ptr<table>, std::unique_ptr<table>> replace_nulls(
     table_view const& values,
     std::span<cudf::replace_policy const> replace_policies,
-    cuda::stream_ref stream           = cudf::get_default_stream(),
-    rmm::device_async_resource_ref mr = cudf::get_current_device_resource_ref());
+    cuda::stream_ref stream   = cudf::get_default_stream(),
+    cudf::memory_resources mr = cudf::get_current_device_resource_ref());
 
  private:
   table_view _keys;                                      ///< Keys that determine grouping
@@ -386,9 +389,7 @@ class groupby {
    * @brief Compute scan requests over the cached groups.
    */
   std::pair<std::unique_ptr<table>, std::vector<aggregation_result>> scan_grouped(
-    std::span<scan_request const> requests,
-    cuda::stream_ref stream,
-    rmm::device_async_resource_ref mr);
+    std::span<scan_request const> requests, cuda::stream_ref stream, cudf::memory_resources mr);
 };
 
 /**

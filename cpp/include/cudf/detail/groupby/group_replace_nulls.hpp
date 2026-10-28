@@ -29,14 +29,14 @@ namespace detail {
  * @param group_labels Group labels for @p grouped_order, corresponding to group keys.
  * @param replace_policy Specify the position of replacement values relative to null values.
  * @param stream CUDA stream used for device memory operations and kernel launches.
- * @param mr Device memory resource used to allocate device memory of the returned column.
+ * @param mr Memory resources for the returned column and temporary storage.
  */
 std::unique_ptr<column> group_replace_nulls(cudf::column_view const& value,
                                             device_span<size_type const> grouped_order,
                                             device_span<size_type const> group_labels,
                                             cudf::replace_policy replace_policy,
                                             cuda::stream_ref stream,
-                                            rmm::device_async_resource_ref mr);
+                                            cudf::memory_resources mr);
 
 }  // namespace detail
 }  // namespace groupby

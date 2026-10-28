@@ -166,7 +166,7 @@ std::unique_ptr<column> group_nth_element(column_view const& values,
                                           size_type n,
                                           null_policy null_handling,
                                           cuda::stream_ref stream,
-                                          rmm::device_async_resource_ref mr);
+                                          cudf::memory_resources mr);
 /**
  * @brief Internal API to collect grouped values into a lists column
  *
@@ -314,7 +314,7 @@ std::unique_ptr<column> group_covariance(column_view const& values_0,
                                          size_type min_periods,
                                          size_type ddof,
                                          cuda::stream_ref stream,
-                                         rmm::device_async_resource_ref mr);
+                                         cudf::memory_resources mr);
 
 /**
  * @brief Internal API to find correlation from covariance and standard deviation.
@@ -329,7 +329,7 @@ std::unique_ptr<column> group_correlation(column_view const& covariance,
                                           column_view const& stddev_0,
                                           column_view const& stddev_1,
                                           cuda::stream_ref stream,
-                                          rmm::device_async_resource_ref mr);
+                                          cudf::memory_resources mr);
 
 /**
  * @brief Internal API to calculate bitwise operation on grouped values ignoring nulls.

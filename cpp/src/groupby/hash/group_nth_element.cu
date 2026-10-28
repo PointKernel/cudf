@@ -35,27 +35,26 @@ std::unique_ptr<column> group_nth_element(column_view const& values,
                                           size_type n,
                                           null_policy null_handling,
                                           cuda::stream_ref stream,
-                                          rmm::device_async_resource_ref mr)
+                                          cudf::memory_resources mr)
 {
   CUDF_EXPECTS(static_cast<size_t>(values.size()) == group_labels.size(),
                "Size of values column should be same as that of group labels");
 
   if (num_groups == 0) { return empty_like(values); }
 
-  auto nth_index = cuda::device_buffer<size_type>(
-    stream, cudf::get_current_device_resource_ref(), num_groups, cuda::no_init);
+  auto nth_index =
+    cuda::device_buffer<size_type>(stream, mr.get_temporary_mr(), num_groups, cuda::no_init);
   // TODO: replace with async version
-  thrust::uninitialized_fill_n(
-    rmm::exec_policy_nosync(stream, cudf::get_current_device_resource_ref()),
-    nth_index.begin(),
-    num_groups,
-    values.size());
+  thrust::uninitialized_fill_n(rmm::exec_policy_nosync(stream, mr.get_temporary_mr()),
+                               nth_index.begin(),
+                               num_groups,
+                               values.size());
 
   // nulls_policy::INCLUDE (equivalent to pandas nth(dropna=None) but return nulls for n
   if (null_handling == null_policy::INCLUDE || !values.has_nulls()) {
     // Returns index of nth value.
     thrust::transform_if(
-      rmm::exec_policy_nosync(stream, cudf::get_current_device_resource_ref()),
+      rmm::exec_policy_nosync(stream, mr.get_temporary_mr()),
       group_sizes.begin<size_type>(),
       group_sizes.end<size_type>(),
       group_offsets.begin(),
@@ -71,7 +70,7 @@ std::unique_ptr<column> group_nth_element(column_view const& values,
     // The scan numbers the valid rows within each group, and its output visitor records the row
     // whose number is the requested one. `group_sizes` holds the valid count of each group, so a
     // negative `n` counts back from the last valid row.
-    auto values_view = column_device_view::create(values, stream);
+    auto values_view = column_device_view::create(values, stream, mr.get_temporary_mr());
     auto bitmask_iterator =
       cuda::transform_iterator(cudf::detail::make_validity_iterator(*values_view),
                                cuda::proclaim_return_type<size_type>(
@@ -86,12 +85,11 @@ std::unique_ptr<column> group_nth_element(column_view const& values,
         auto const nth   = n < 0 ? group_sizes[group] + n : n;
         if (bitmask_iterator[i] && intra == nth) { nth_index[group] = static_cast<size_type>(i); }
       }};
-    thrust::exclusive_scan_by_key(
-      rmm::exec_policy_nosync(stream, cudf::get_current_device_resource_ref()),
-      group_labels.begin(),
-      group_labels.end(),
-      bitmask_iterator,
-      record_nth);
+    thrust::exclusive_scan_by_key(rmm::exec_policy_nosync(stream, mr.get_temporary_mr()),
+                                  group_labels.begin(),
+                                  group_labels.end(),
+                                  bitmask_iterator,
+                                  record_nth);
   }
 
   auto output_table = cudf::detail::gather(table_view{{values}},

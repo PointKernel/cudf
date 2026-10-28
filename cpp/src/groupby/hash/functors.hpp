@@ -58,9 +58,8 @@ struct store_result_functor {
 
     // Positional aggregations and host UDFs need input order within every group,
     // even if an earlier aggregation requested a value-sorted view.
-    return grouped_values
-             ? grouped_values->view()
-             : (grouped_values = helper.grouped_values(values, stream, mr.get_output_mr()))->view();
+    return grouped_values ? grouped_values->view()
+                          : (grouped_values = helper.grouped_values(values, stream, mr))->view();
   }
 
   /**
@@ -75,9 +74,7 @@ struct store_result_functor {
   std::unique_ptr<column> release_grouped_values()
   {
     if (is_presorted()) { return std::make_unique<column>(values, stream, mr.get_output_mr()); }
-    if (!grouped_values) {
-      grouped_values = helper.grouped_values(values, stream, mr.get_output_mr());
-    }
+    if (!grouped_values) { grouped_values = helper.grouped_values(values, stream, mr); }
     grouped_values_view = grouped_values->view();
     return std::move(grouped_values);
   }
@@ -102,7 +99,7 @@ struct store_result_functor {
     // Keep this cache separate: order-sensitive aggregations must always obtain a stable view.
     return unordered_grouped_values ? unordered_grouped_values->view()
                                     : (unordered_grouped_values = helper.unordered_grouped_values(
-                                         values, stream, mr.get_temporary_mr()))
+                                         values, stream, mr.as_temporary()))
                                         ->view();
   }
 
