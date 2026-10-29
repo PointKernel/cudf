@@ -48,7 +48,8 @@ class grouped_keys {
   std::optional<cuda::device_buffer<size_type>> group_offsets;
   /// Input row indices in contiguous groups, present when requested.
   std::optional<cuda::device_buffer<size_type>> grouped_rows;
-  /// Group label of each grouped row, present when kept from sorting stable grouped rows.
+  /// Group label of each grouped row, present when kept from sorting stable grouped rows or
+  /// cached by a later request.
   std::optional<cuda::device_buffer<size_type>> group_labels;
 };
 

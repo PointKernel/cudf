@@ -51,31 +51,30 @@ namespace {
 /**
  * @brief Restores input order within each group of the grouped rows.
  *
- * Uses `group_labels` as the group of each grouped row when they are cached. Otherwise, when
- * `keep_labels` is set, caches the labels sorted along with the rows in `group_labels`.
+ * Uses `groups.group_labels` as the group of each grouped row when they are cached. Otherwise,
+ * when `keep_labels` is set, caches the labels sorted along with the rows there.
  */
 void stabilize_rows(hash::grouped_keys& groups,
-                    size_type size,
-                    std::unique_ptr<cuda::device_buffer<size_type>>& group_labels,
                     size_type num_rows,
                     bool keep_labels,
                     cuda::stream_ref stream,
                     cudf::memory_resources mr)
 {
   auto const num_groups = static_cast<size_type>(groups.key_indices.size());
+  auto const size       = static_cast<size_type>(groups.grouped_rows->size());
   // HashCSR determines group membership. Stably sorting those group IDs in input-row order
   // preserves the existing group offsets while restoring input order within each group.
   auto const policy       = rmm::exec_policy_nosync(stream, mr.get_temporary_mr());
   auto const filtered     = size != num_rows;
-  auto const store_labels = keep_labels && !group_labels;
+  auto const store_labels = keep_labels && !groups.group_labels;
   auto input_labels =
     cuda::device_buffer<size_type>(stream, mr.get_temporary_mr(), num_rows, cuda::no_init);
   auto ordered_labels =
     cuda::device_buffer<size_type>(stream, mr.get_temporary_mr(), num_rows, cuda::no_init);
   auto ordered_rows =
     cuda::device_buffer<size_type>(stream, mr.get_temporary_mr(), num_rows, cuda::no_init);
-  if (group_labels) {
-    thrust::copy_n(policy, group_labels->begin(), size, ordered_labels.begin());
+  if (groups.group_labels) {
+    thrust::copy_n(policy, groups.group_labels->begin(), size, ordered_labels.begin());
   } else {
     // A CSR position's group ID is the number of segment ends at or before that position.
     auto const offsets = groups.group_offsets->data();
@@ -135,7 +134,7 @@ void stabilize_rows(hash::grouped_keys& groups,
       labels = cuda::device_buffer<size_type>{
         stream, mr.get_temporary_mr(), labels.begin(), labels.begin() + size};
     }
-    group_labels = std::make_unique<cuda::device_buffer<size_type>>(std::move(labels));
+    groups.group_labels = std::move(labels);
   }
 }
 
@@ -181,14 +180,6 @@ void groupby_helper::build_groups(bool need_grouped_rows,
                                                                     keep_labels,
                                                                     stream,
                                                                     mr.as_temporary()));
-    if (_groups->grouped_rows) {
-      _num_keys = static_cast<size_type>(_groups->grouped_rows->size());
-    }
-    if (_groups->group_labels) {
-      // The stable build sorted the labels along with the rows.
-      _group_labels =
-        std::make_unique<cuda::device_buffer<size_type>>(std::move(*_groups->group_labels));
-    }
     _stable = stable_rows;
     return;
   }
@@ -214,7 +205,6 @@ void groupby_helper::build_groups(bool need_grouped_rows,
     std::move(rows),
     num_groups);
   _groups->key_indices = {_groups->group_offsets->data(), static_cast<std::size_t>(num_groups)};
-  _num_keys            = size;
   _stable              = true;
 }
 
@@ -226,9 +216,9 @@ void groupby_helper::make_stable(bool keep_labels,
   if (_stable) { return; }
   // Rows cached by an unordered operation keep their groups and are reordered within them.
   // Scheduling contains spans into the current row buffer and hints derived from its order.
-  if (static_cast<size_type>(_groups->key_indices.size()) < _num_keys) {
+  if (_groups->key_indices.size() < _groups->grouped_rows->size()) {
     _reduction_groups.reset();
-    stabilize_rows(*_groups, _num_keys, _group_labels, _keys.num_rows(), keep_labels, stream, mr);
+    stabilize_rows(*_groups, _keys.num_rows(), keep_labels, stream, mr);
   }
   _stable = true;
 }
@@ -236,7 +226,7 @@ void groupby_helper::make_stable(bool keep_labels,
 size_type groupby_helper::num_keys(cuda::stream_ref stream, cudf::memory_resources mr)
 {
   build_groups(true, false, false, stream, mr);
-  return _num_keys;
+  return static_cast<size_type>(_groups->grouped_rows->size());
 }
 
 device_span<size_type const> groupby_helper::grouped_order(bool keep_labels,
@@ -244,14 +234,14 @@ device_span<size_type const> groupby_helper::grouped_order(bool keep_labels,
                                                            cudf::memory_resources mr)
 {
   make_stable(keep_labels, stream, mr);
-  return {_groups->grouped_rows->data(), static_cast<std::size_t>(_num_keys)};
+  return *_groups->grouped_rows;
 }
 
 device_span<size_type const> groupby_helper::unordered_grouped_order(cuda::stream_ref stream,
                                                                      cudf::memory_resources mr)
 {
   build_groups(true, false, false, stream, mr);
-  return {_groups->grouped_rows->data(), static_cast<std::size_t>(_num_keys)};
+  return *_groups->grouped_rows;
 }
 
 hash::grouped_rows const& groupby_helper::reduction_groups(cuda::stream_ref stream,
@@ -278,17 +268,16 @@ device_span<size_type const> groupby_helper::group_labels(cuda::stream_ref strea
 {
   // Labels have one entry per grouped row, so build the rows first.
   build_groups(true, false, false, stream, mr);
-  if (!_group_labels) {
-    auto labels = std::make_unique<cuda::device_buffer<size_type>>(
-      stream, mr.get_temporary_mr(), _num_keys, cuda::no_init);
-    if (!labels->empty()) {
+  if (!_groups->group_labels) {
+    auto& labels = _groups->group_labels.emplace(
+      stream, mr.get_temporary_mr(), _groups->grouped_rows->size(), cuda::no_init);
+    if (!labels.empty()) {
       auto const offsets = group_offsets(stream, mr);
       cudf::detail::label_segments(
-        offsets.begin(), offsets.end(), labels->begin(), labels->end(), stream);
+        offsets.begin(), offsets.end(), labels.begin(), labels.end(), stream);
     }
-    _group_labels = std::move(labels);
   }
-  return {_group_labels->data(), static_cast<std::size_t>(_num_keys)};
+  return *_groups->group_labels;
 }
 
 device_span<size_type const> groupby_helper::input_labels(cuda::stream_ref stream,

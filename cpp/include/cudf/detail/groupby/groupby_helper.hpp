@@ -265,11 +265,9 @@ struct groupby_helper {
   std::unique_ptr<cuda::device_buffer<size_type>>
     _input_labels;   ///< Labels in input order; excluded rows get num_groups
   table_view _keys;  ///< Input grouping keys
-  std::unique_ptr<hash::grouped_keys> _groups;                    ///< HashCSR grouping metadata
-  std::unique_ptr<hash::grouped_rows> _reduction_groups;          ///< Cached reduction scheduling
-  std::unique_ptr<cuda::device_buffer<size_type>> _group_labels;  ///< Labels in grouped order
-  size_type _num_keys{};           ///< Number of grouped rows, set when they are built
-  sorted _keys_pre_sorted;         ///< Whether _keys are pre-sorted
+  std::unique_ptr<hash::grouped_keys> _groups;            ///< HashCSR grouping metadata
+  std::unique_ptr<hash::grouped_rows> _reduction_groups;  ///< Cached reduction scheduling
+  sorted _keys_pre_sorted;                                ///< Whether _keys are pre-sorted
   null_policy _include_null_keys;  ///< Whether to use rows with nulls in _keys for grouping
   bool _stable{false};             ///< Whether rows within each group are in input order
 };
