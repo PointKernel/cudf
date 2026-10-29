@@ -11,6 +11,7 @@
 #include <cudf/detail/null_mask.hpp>
 #include <cudf/detail/nvtx/ranges.hpp>
 #include <cudf/detail/sizes_to_offsets_iterator.cuh>
+#include <cudf/types.hpp>
 
 #include <cuda/iterator>
 #include <thrust/fill.h>
@@ -22,7 +23,7 @@ namespace {
 struct padded_match_counts {
   size_type const* counts;
   size_type rows;
-  __host__ __device__ size_type operator()(std::size_t i) const
+  CUDF_HOST_DEVICE size_type operator()(std::size_t i) const
   {
     return i < static_cast<std::size_t>(rows) ? counts[i] : size_type{0};
   }
