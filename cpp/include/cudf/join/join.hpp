@@ -103,6 +103,7 @@ struct join_match_context {
   /// @deprecated Since 26.12. Use left_table(); this field will be removed in 27.02.
   [[deprecated("Use left_table(); _left_table will be removed in 27.02.")]]
   table_view _left_table;
+
   /// @deprecated Since 26.12. Use match_counts(); this field will be removed in 27.02.
   [[deprecated("Use match_counts(); _match_counts will be removed in 27.02.")]]
   std::unique_ptr<rmm::device_uvector<size_type>> _match_counts;
@@ -117,15 +118,20 @@ struct join_match_context {
    */
   join_match_context(table_view const& left_table,
                      std::unique_ptr<rmm::device_uvector<size_type>> match_counts);
-  join_match_context(join_match_context const&)            = delete;
+
+  join_match_context(join_match_context const&) = delete;
+
   join_match_context& operator=(join_match_context const&) = delete;
+
   /// Transfer the match counts and cached state.
   join_match_context(join_match_context&&) noexcept;
+
   /**
    * @brief Transfer ownership of the match counts and cached state.
    * @return This context
    */
   join_match_context& operator=(join_match_context&&) noexcept;
+
   /// Release owned match state, including state in derived contexts.
   virtual ~join_match_context();
 
@@ -134,6 +140,7 @@ struct join_match_context {
    * @return The left table
    */
   [[nodiscard]] table_view left_table() const;
+
   /**
    * @brief Return read-only match counts in original left-row order.
    *
@@ -142,6 +149,7 @@ struct join_match_context {
    * @return Per-left-row match counts
    */
   [[nodiscard]] device_span<size_type const> match_counts() const;
+
   /**
    * @brief Return the cached output size without device work or synchronization.
    *
@@ -157,7 +165,9 @@ struct join_match_context {
   join_match_context(table_view const& left,
                      std::unique_ptr<rmm::device_uvector<size_type>> counts,
                      std::unique_ptr<detail::join_match_state> state);
+
   std::unique_ptr<detail::join_match_state> _state;
+
   template <typename Hasher>
   friend class detail::hash_join;
   friend class detail::sort_merge_join;
