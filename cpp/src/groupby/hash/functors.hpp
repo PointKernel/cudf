@@ -10,6 +10,7 @@
 #include <cudf/detail/groupby/groupby_helper.hpp>
 #include <cudf/types.hpp>
 #include <cudf/utilities/memory_resource.hpp>
+#include <cudf/utilities/traits.hpp>
 
 #include <cuda/stream>
 
@@ -45,6 +46,18 @@ struct store_result_functor {
   [[nodiscard]] bool is_presorted() const { return helper.is_presorted(); }
 
   /**
+   * @brief Check if the input values can be used as grouped values without a gather
+   *
+   * Presorted keys leave the values in grouped order. Nested values are still gathered because
+   * aggregations such as MERGE_M2 and MERGE_LISTS read their children without the offset of a
+   * sliced input.
+   */
+  [[nodiscard]] bool values_are_grouped() const
+  {
+    return is_presorted() && !cudf::is_nested(values.type());
+  }
+
+  /**
    * @brief Borrow grouped values in their original order within each group.
    *
    * Computes the grouped values from @p values on first invocation and returns
@@ -53,7 +66,7 @@ struct store_result_functor {
    */
   column_view get_grouped_values()
   {
-    if (is_presorted()) { return values; }
+    if (values_are_grouped()) { return values; }
     if (grouped_values_view) { return *grouped_values_view; }
 
     // Positional aggregations and host UDFs need input order within every group,
@@ -68,12 +81,14 @@ struct store_result_functor {
    * Moves the owned column to the caller and retains a non-owning view so later
    * aggregations can reuse the same storage without gathering the values again.
    * The caller must keep the unmodified column alive in the result cache while
-   * later aggregations use that view. For presorted keys, copies the borrowed
-   * input values instead.
+   * later aggregations use that view. When the input values are already grouped,
+   * copies them instead.
    */
   std::unique_ptr<column> release_grouped_values()
   {
-    if (is_presorted()) { return std::make_unique<column>(values, stream, mr.get_output_mr()); }
+    if (values_are_grouped()) {
+      return std::make_unique<column>(values, stream, mr.get_output_mr());
+    }
     if (!grouped_values) { grouped_values = helper.grouped_values(values, stream, mr); }
     grouped_values_view = grouped_values->view();
     return std::move(grouped_values);
@@ -89,7 +104,7 @@ struct store_result_functor {
    */
   column_view get_unordered_grouped_values()
   {
-    if (is_presorted()) { return values; }
+    if (values_are_grouped()) { return values; }
     if (grouped_values_view) { return *grouped_values_view; }
     if (grouped_values) { return grouped_values->view(); }
     if (sorted_values) { return sorted_values->view(); }

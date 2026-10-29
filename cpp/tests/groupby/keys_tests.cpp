@@ -531,6 +531,40 @@ TEST_F(groupby_key_shape_test, PresortedNestedKeyBoundaries)
   }
 }
 
+TEST_F(groupby_key_shape_test, PresortedSlicedNestedValues)
+{
+  // Presorted keys leave the values in grouped order, but sliced nested values are still
+  // gathered: MERGE_LISTS and MERGE_M2 read the children of their input without its offset.
+  cudf::test::fixed_width_column_wrapper<int32_t> keys{0, 1, 1, 2, 2};
+  cudf::test::lists_column_wrapper<int32_t> lists{{9, 9}, {4}, {5}, {6, 7}, {8}};
+  cudf::test::fixed_width_column_wrapper<int64_t> counts{9, 1, 1, 2, 2};
+  cudf::test::fixed_width_column_wrapper<double> means{9, 1, 3, 5, 7};
+  cudf::test::fixed_width_column_wrapper<double> m2s{9, 0, 0, 2, 2};
+  cudf::test::structs_column_wrapper partials{{counts, means, m2s}};
+
+  cudf::test::fixed_width_column_wrapper<int32_t> expected_keys{1, 2};
+  cudf::test::lists_column_wrapper<int32_t> expected_lists{{4, 5}, {6, 7, 8}};
+  cudf::test::fixed_width_column_wrapper<int64_t> expected_counts{2, 4};
+  cudf::test::fixed_width_column_wrapper<double> expected_means{2, 6};
+  cudf::test::fixed_width_column_wrapper<double> expected_m2s{2, 8};
+  cudf::test::structs_column_wrapper expected_partials{
+    {expected_counts, expected_means, expected_m2s}};
+
+  std::vector<cudf::groupby::aggregation_request> requests(2);
+  requests[0].values = cudf::slice(lists, {1, 5}).front();
+  requests[0].aggregations.push_back(
+    cudf::make_merge_lists_aggregation<cudf::groupby_aggregation>());
+  requests[1].values = cudf::slice(partials, {1, 5}).front();
+  requests[1].aggregations.push_back(cudf::make_merge_m2_aggregation<cudf::groupby_aggregation>());
+  cudf::groupby::groupby gb(cudf::table_view{{cudf::slice(keys, {1, 5}).front()}},
+                            cudf::null_policy::EXCLUDE,
+                            cudf::sorted::YES);
+  auto const [result_keys, results] = gb.aggregate(requests);
+  CUDF_TEST_EXPECT_COLUMNS_EQUAL(expected_keys, result_keys->get_column(0));
+  CUDF_TEST_EXPECT_COLUMNS_EQUIVALENT(expected_lists, *results[0].results[0]);
+  CUDF_TEST_EXPECT_COLUMNS_EQUIVALENT(expected_partials, *results[1].results[0]);
+}
+
 TEST_F(groupby_key_shape_test, StableGroupedRows)
 {
   using int32s      = cudf::test::fixed_width_column_wrapper<int32_t>;
