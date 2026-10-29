@@ -147,10 +147,17 @@ TEST_F(JoinMatchContextTest, EmptyInputs)
       cudf::sort_merge_join merge{right, cudf::sorted::NO, cudf::null_equality::EQUAL, stream};
       check_inner(hash, left, stream);
       check_inner(merge, left, stream);
-      auto matches = hash.left_join_match_context(left, stream);
+      auto matches  = hash.left_join_match_context(left, stream);
+      auto expected = to_host_pairs(hash.left_join(left, std::nullopt, stream), stream);
       EXPECT_EQ(
-        to_host_pairs(hash.left_join(left, std::nullopt, stream), stream),
+        expected,
         to_host_pairs(hash.partitioned_left_join(matches, 0, left.num_rows(), stream), stream));
+      if (left.num_rows() > 1) {
+        std::erase_if(expected, [](auto const& pair) { return pair.first < 1; });
+        EXPECT_EQ(
+          expected,
+          to_host_pairs(hash.partitioned_left_join(matches, 1, left.num_rows(), stream), stream));
+      }
     }
   }
 }

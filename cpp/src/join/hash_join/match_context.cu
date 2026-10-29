@@ -15,8 +15,8 @@
 
 #include <cuda/iterator>
 #include <thrust/fill.h>
+#include <thrust/for_each.h>
 #include <thrust/scan.h>
-#include <thrust/sequence.h>
 
 namespace cudf::detail {
 namespace {
@@ -137,14 +137,15 @@ hash_join<Hasher>::partitioned_join_retrieve(join_kind kind,
   if (_is_empty) {
     auto left_indices  = std::make_unique<rmm::device_uvector<size_type>>(rows, stream, output_mr);
     auto right_indices = std::make_unique<rmm::device_uvector<size_type>>(rows, stream, output_mr);
-    thrust::sequence(rmm::exec_policy_nosync(stream, temp_mr),
-                     left_indices->begin(),
-                     left_indices->end(),
-                     left_start_idx);
-    thrust::fill(rmm::exec_policy_nosync(stream, temp_mr),
-                 right_indices->begin(),
-                 right_indices->end(),
-                 cudf::JoinNoMatch);
+    thrust::for_each_n(rmm::exec_policy_nosync(stream, temp_mr),
+                       cuda::counting_iterator<size_type>{0},
+                       rows,
+                       [left  = left_indices->data(),
+                        right = right_indices->data(),
+                        left_start_idx] __device__(size_type i) -> void {
+                         left[i]  = left_start_idx + i;
+                         right[i] = cudf::JoinNoMatch;
+                       });
     return {std::move(left_indices), std::move(right_indices)};
   }
 
