@@ -115,28 +115,15 @@ class sort_merge_join {
             rmm::device_async_resource_ref mr = cudf::get_current_device_resource_ref()) const;
 
   /**
-   * @brief Returns context information about matches between the left and right tables.
+   * @brief Creates a join_match_context for an inner join.
    *
-   * This method computes, for each row in the left table, how many matching rows exist in
-   * the right table according to inner join semantics, and returns the number of matches through a
-   * match_context object.
+   * See join_match_context for lifetime and stream requirements.
    *
-   * This method is thread-safe and can be called concurrently from multiple threads.
-   *
-   * This is particularly useful for:
-   * - Determining the total size of a potential join result without materializing it
-   * - Planning partitioned join operations for large datasets
-   *
-   * The returned sort_merge_join_match_context can be used directly with partitioned_inner_join()
-   * to process large joins in manageable chunks.
-   *
-   * @param left The left table to join with the pre-processed right table
+   * @param left The left join-key table
    * @param stream CUDA stream used for device memory operations and kernel launches
-   * @param mr Device memory resource used to allocate the result device memory
+   * @param mr Device memory resource used to allocate retained match state
    *
-   * @return A unique_ptr to join_match_context
-   *         containing the left table view, match counts, and preprocessed left table state for
-   *         partitioned joins
+   * @return Match context for partitioned_inner_join()
    */
   std::unique_ptr<join_match_context> inner_join_match_context(
     table_view const& left,
@@ -144,56 +131,20 @@ class sort_merge_join {
     rmm::device_async_resource_ref mr = cudf::get_current_device_resource_ref()) const;
 
   /**
-   * @brief Performs an inner join between a partition of the left table and the right table.
+   * @brief Returns inner-join indices for a partition of the left table.
    *
-   * This method executes an inner join operation between a specific partition of the left table
-   * (defined by the join_partition_context) and the right table that was provided when constructing
-   * the sort_merge_join object. The join_partition_context must have been previously created by
-   * calling inner_join_match_context().
+   * Left indices refer to the original left table. The context can be reused for other
+   * partitions.
    *
-   * This method is thread-safe and can be called concurrently from multiple threads.
+   * @throw std::invalid_argument If match counts are missing or have the wrong size,
+   * the bounds are invalid, or the context was not created by this join object.
+   * Also thrown if `context.left_table_context` is null.
    *
-   * This partitioning approach enables processing large joins in smaller, memory-efficient chunks,
-   * while maintaining consistent results as if the entire join was performed at once. This is
-   * particularly useful for handling large datasets that would otherwise exceed available memory
-   * resources.
-   *
-   * The returned indices can be used to construct the join result for this partition. The
-   * left_indices are relative to the original complete left table (not just the partition), so they
-   * can be used directly with the original left table to extract matching rows.
-   *
-   * @param context The partition context containing match information and partition bounds
+   * @param context Match context and left-row bounds
    * @param stream CUDA stream used for device memory operations and kernel launches
-   * @param mr Device memory resource used to allocate the join indices' device memory
+   * @param mr Device memory resource used to allocate the returned indices
    *
-   * @return A pair of device vectors [`left_indices`, `right_indices`] containing the row indices
-   *         from both tables that satisfy the join condition for this partition. The left_indices
-   *         are relative to the complete left table, not just the partition.
-   *
-   * @code{.cpp}
-   * // Create join object with pre-processed right table
-   * sort_merge_join join_obj(right_table, sorted::NO);
-   *
-   * // Get match context for the entire left table
-   * auto match_ctx = join_obj.inner_join_match_context(left_table);
-   *
-   * // Create partition context
-   * cudf::join_partition_context part_ctx{std::move(match_ctx), 0, 0};
-   *
-   * // Define partition boundaries (e.g., process 1000 rows at a time)
-   * for (size_type start = 0; start < left_table.num_rows(); start += 1000) {
-   *   size_type end = std::min(start + 1000, left_table.num_rows());
-   *
-   *   // Set partition boundaries
-   *   part_ctx.left_start_idx = start;
-   *   part_ctx.left_end_idx = end;
-   *
-   *   // Get join indices for this partition
-   *   auto [left_indices, right_indices] = join_obj.partitioned_inner_join(part_ctx);
-   *
-   *   // Process the partition result...
-   * }
-   * @endcode
+   * @return A pair of device vectors [`left_indices`, `right_indices`]
    */
   std::pair<std::unique_ptr<rmm::device_uvector<size_type>>,
             std::unique_ptr<rmm::device_uvector<size_type>>>
@@ -203,12 +154,15 @@ class sort_merge_join {
     rmm::device_async_resource_ref mr = cudf::get_current_device_resource_ref()) const;
 
   /**
-   * @tparam Resources Explicit cudf::memory_resources bundle
-   * @brief Retrieve a partition with explicit output and temporary resources.
+   * @brief Returns inner-join indices for a partition of the left table.
+   *
+   * @tparam Resources cudf::memory_resources
+   *
    * @param context Match context and left-row bounds
-   * @param stream CUDA stream used for device operations
-   * @param resources Resources for returned indices and temporary allocations
-   * @return Left and right gather maps
+   * @param stream CUDA stream used for device memory operations and kernel launches
+   * @param resources Memory resources for output and temporary allocations
+   *
+   * @return A pair of device vectors [`left_indices`, `right_indices`]
    */
   template <typename Resources>
     requires std::same_as<std::remove_cvref_t<Resources>, cudf::memory_resources>
@@ -222,17 +176,15 @@ class sort_merge_join {
   }
 
   /**
-   * @tparam Resources Explicit cudf::memory_resources bundle
-   * @brief Compute reusable matches for an inner join without allocating gather maps.
+   * @brief Creates a join_match_context for an inner join.
    *
-   * The result exposes counts and output size for memory planning. It must be retrieved using
-   * this join object and the corresponding join kind. Both input tables and this join object
-   * must outlive the result and all operations using it. See join_match_context.
+   * @tparam Resources cudf::memory_resources
    *
-   * @param left Left join-key table
-   * @param stream CUDA stream used for device operations; synchronized before returning
-   * @param resources Resources for retained output state and temporary allocations
-   * @return Owning match context
+   * @param left The left join-key table
+   * @param stream CUDA stream used for device memory operations and kernel launches
+   * @param resources Memory resources for output and temporary allocations
+   *
+   * @return Match context for partitioned_inner_join()
    */
   template <typename Resources>
     requires std::same_as<std::remove_cvref_t<Resources>, cudf::memory_resources>
@@ -243,19 +195,21 @@ class sort_merge_join {
   }
 
   /**
-   * @brief Retrieve an inner join for a half-open range of original left rows.
+   * @brief Returns inner-join indices for a partition of the left table.
    *
-   * Borrows the match context, which can be reused for other partitions. Returned left indices
-   * refer to the complete left table. Partitioning does not split an individual row's matches.
+   * Left indices refer to the original left table. The context can be reused for other
+   * partitions.
    *
-   * @throws std::invalid_argument If the result belongs to another join object or kind, is
-   * moved from, or the row bounds are invalid
-   * @param matches Result from inner_join_match_context
+   * @throw std::invalid_argument If match counts are missing or have the wrong size,
+   * the bounds are invalid, or the context was not created by this join object.
+   *
+   * @param matches Match context for an inner join
    * @param left_start_idx First left row, inclusive
    * @param left_end_idx Last left row, exclusive
-   * @param stream CUDA stream used for device operations
-   * @param resources Resources for returned indices and temporary allocations
-   * @return Left and right gather maps
+   * @param stream CUDA stream used for device memory operations and kernel launches
+   * @param resources Memory resources for output and temporary allocations
+   *
+   * @return A pair of device vectors [`left_indices`, `right_indices`]
    */
   [[nodiscard]] std::pair<std::unique_ptr<rmm::device_uvector<size_type>>,
                           std::unique_ptr<rmm::device_uvector<size_type>>>

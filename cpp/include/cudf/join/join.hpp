@@ -87,17 +87,15 @@ enum class nullable_join : bool { YES = true, NO = false };
 CUDF_HOST_DEVICE constexpr size_type JoinNoMatch = cuda::std::numeric_limits<size_type>::min();
 
 /**
- * @brief Reusable match information for partitioned joins and output-memory planning.
+ * @brief Stores match counts and cached state for partitioned joins.
  *
- * The existing `*_join_match_context()` factories populate match counts and private cached
- * state. Hash joins retain matching groups so retrieval does not probe again. Factory calls
- * synchronize their stream to obtain the cached output size; concurrent retrieval on other
- * streams is supported. The context, creating join object, input data, and allocation resources
- * must remain alive and unchanged until all retrieval operations complete.
+ * Join factories synchronize their stream before returning. Their contexts support concurrent
+ * retrieval on other streams using the creating join object and the same join kind.
+ * Keep the context, join object, input data, and allocation resources alive until retrieval
+ * completes. Do not modify the input data or match counts while reusing the context.
  *
- * Use the read-only accessors rather than the deprecated public fields. Changing the input
- * views or match counts invalidates the cached state. Moving transfers ownership; a moved-from
- * context may only be destroyed or assigned to.
+ * Hash joins cache matching groups to avoid probing again; sort-merge joins retain left-table
+ * preprocessing. A moved-from context may only be destroyed or assigned to.
  */
 struct join_match_context {
   /// @deprecated Since 26.12. Use left_table(); this field will be removed in 27.02.
@@ -109,10 +107,10 @@ struct join_match_context {
   std::unique_ptr<rmm::device_uvector<size_type>> _match_counts;
 
   /**
-   * @brief Construct a context from externally computed match counts.
+   * @brief Constructs a context from externally computed match counts.
    *
-   * This constructor retains the existing uncached retrieval behavior. Only contexts returned
-   * by the join factories carry cached probe state and support output_size().
+   * Supports uncached hash-join retrieval. Does not support output_size().
+   *
    * @param left_table Original left table
    * @param match_counts Per-left-row match counts
    */
@@ -123,40 +121,47 @@ struct join_match_context {
 
   join_match_context& operator=(join_match_context const&) = delete;
 
-  /// Transfer the match counts and cached state.
+  /// Move constructor.
   join_match_context(join_match_context&&) noexcept;
 
   /**
-   * @brief Transfer ownership of the match counts and cached state.
+   * @brief Move assignment operator.
+   *
    * @return This context
    */
   join_match_context& operator=(join_match_context&&) noexcept;
 
-  /// Release owned match state, including state in derived contexts.
+  /// Destructor.
   virtual ~join_match_context();
 
   /**
-   * @brief Return the original left table view.
+   * @brief Returns the original left table view.
+   *
    * @return The left table
    */
   [[nodiscard]] table_view left_table() const;
 
   /**
-   * @brief Return read-only match counts in original left-row order.
+   * @brief Returns read-only match counts in original left-row order.
    *
    * Left/full join counts include one placeholder for an unmatched left row.
    * The span borrows storage from this context.
+   *
+   * @throw std::invalid_argument If match counts are missing
+   *
    * @return Per-left-row match counts
    */
   [[nodiscard]] device_span<size_type const> match_counts() const;
 
   /**
-   * @brief Return the cached output size without device work or synchronization.
+   * @brief Returns the cached output size without device work or synchronization.
    *
    * Gather maps require `2 * output_size() * sizeof(size_type)` bytes, excluding retained
-   * context state, scratch, and allocator overhead. For full joins, this is the left-side
-   * output size; finalization adds unmatched right rows.
-   * @throws std::invalid_argument If this context was not returned by a join factory
+   * context state, temporary storage, and allocator overhead. For full joins, this excludes
+   * unmatched right rows added by finalize_partitioned_full_join().
+   *
+   * @throw std::invalid_argument If this context was not returned by a join factory
+   *
    * @return Number of output pairs represented by these matches
    */
   [[nodiscard]] std::size_t output_size() const;

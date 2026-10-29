@@ -257,25 +257,18 @@ class hash_join {
     rmm::device_async_resource_ref mr = cudf::get_current_device_resource_ref()) const;
 
   /**
-   * @brief Returns context information about matches between the left and right tables.
+   * @brief Creates a join_match_context for an inner join.
    *
-   * This method computes, for each row in the left table, how many matching rows exist in
-   * the right table according to inner join semantics, and returns the number of matches through a
-   * join_match_context object.
+   * See join_match_context for lifetime and stream requirements.
    *
-   * This is particularly useful for:
-   * - Determining the total size of a potential join result without materializing it
-   * - Planning partitioned join operations for large datasets
+   * @throw std::invalid_argument If `left` has nulls but this join object was
+   * constructed without null checks.
    *
-   * @throw std::invalid_argument If the input left table has nulls while this hash_join object was
-   * not constructed with null check.
-   *
-   * @param left The left table to join with the pre-processed right table
+   * @param left The left join-key table
    * @param stream CUDA stream used for device memory operations and kernel launches
-   * @param mr Device memory resource used to allocate the result device memory
+   * @param mr Device memory resource used to allocate retained match state
    *
-   * @return A join_match_context object containing the left table view and a device vector
-   *         of match counts for each row in the left table
+   * @return Match context for partitioned_inner_join()
    */
   [[nodiscard]] cudf::join_match_context inner_join_match_context(
     cudf::table_view const& left,
@@ -283,24 +276,18 @@ class hash_join {
     rmm::device_async_resource_ref mr = cudf::get_current_device_resource_ref()) const;
 
   /**
-   * @brief Returns context information about matches between the left and right tables.
+   * @brief Creates a join_match_context for a left join.
    *
-   * This method computes, for each row in the left table, how many matching rows exist in
-   * the right table according to left join semantics, and returns the number of matches through a
-   * join_match_context object.
+   * See join_match_context for lifetime and stream requirements.
    *
-   * For left join, every row in the left table will have at least one match (either with a
-   * matching row from the right table or with a null placeholder).
+   * @throw std::invalid_argument If `left` has nulls but this join object was
+   * constructed without null checks.
    *
-   * @throw std::invalid_argument If the input left table has nulls while this hash_join object was
-   * not constructed with null check.
-   *
-   * @param left The left table to join with the pre-processed right table
+   * @param left The left join-key table
    * @param stream CUDA stream used for device memory operations and kernel launches
-   * @param mr Device memory resource used to allocate the result device memory
+   * @param mr Device memory resource used to allocate retained match state
    *
-   * @return A join_match_context object containing the left table view and a device vector
-   *         of match counts for each row in the left table
+   * @return Match context for partitioned_left_join()
    */
   [[nodiscard]] cudf::join_match_context left_join_match_context(
     cudf::table_view const& left,
@@ -308,24 +295,18 @@ class hash_join {
     rmm::device_async_resource_ref mr = cudf::get_current_device_resource_ref()) const;
 
   /**
-   * @brief Returns context information about matches between the left and right tables.
+   * @brief Creates a join_match_context for a full join.
    *
-   * This method computes, for each row in the left table, how many matching rows exist in
-   * the right table according to full join semantics, and returns the number of matches through a
-   * join_match_context object.
+   * See join_match_context for lifetime and stream requirements.
    *
-   * For full join, this includes matches for left table rows, and the result may need to be
-   * combined with unmatched rows from the right table to get the complete picture.
+   * @throw std::invalid_argument If `left` has nulls but this join object was
+   * constructed without null checks.
    *
-   * @throw std::invalid_argument If the input left table has nulls while this hash_join object was
-   * not constructed with null check.
-   *
-   * @param left The left table to join with the pre-processed right table
+   * @param left The left join-key table
    * @param stream CUDA stream used for device memory operations and kernel launches
-   * @param mr Device memory resource used to allocate the result device memory
+   * @param mr Device memory resource used to allocate retained match state
    *
-   * @return A join_match_context object containing the left table view and a device vector
-   *         of match counts for each row in the left table
+   * @return Match context for partitioned_full_join()
    */
   [[nodiscard]] cudf::join_match_context full_join_match_context(
     cudf::table_view const& left,
@@ -333,24 +314,20 @@ class hash_join {
     rmm::device_async_resource_ref mr = cudf::get_current_device_resource_ref()) const;
 
   /**
-   * @brief Performs an inner join on a partition of the probe table.
+   * @brief Returns inner-join indices for a partition of the left table.
    *
-   * This method executes an inner join between a specific partition of the probe table
-   * (defined by the join_partition_context) and the build table. The context must have been
-   * previously created by calling inner_join_match_context().
+   * Left indices refer to the original left table. The context can be reused for other
+   * partitions.
    *
-   * The returned left_indices are relative to the original complete probe table, not just the
-   * partition, so they can be used directly with the original probe table.
+   * @throw std::invalid_argument If match counts are missing or have the wrong size,
+   * the bounds are invalid, or a cached context belongs to another join object or kind.
+   * Also thrown if `context.left_table_context` is null.
    *
-   * @throw std::invalid_argument If `context.left_table_context` is null, if its
-   * `_match_counts` is null, or if `[left_start_idx, left_end_idx)` is outside the bounds
-   * of the left table.
-   *
-   * @param context The partition context containing match information and partition bounds
+   * @param context Match context and left-row bounds
    * @param stream CUDA stream used for device memory operations and kernel launches
-   * @param mr Device memory resource used to allocate the join indices' device memory
+   * @param mr Device memory resource used to allocate the returned indices
    *
-   * @return A pair of device vectors [`left_indices`, `right_indices`] for this partition
+   * @return A pair of device vectors [`left_indices`, `right_indices`]
    */
   [[nodiscard]] std::pair<std::unique_ptr<rmm::device_uvector<size_type>>,
                           std::unique_ptr<rmm::device_uvector<size_type>>>
@@ -360,23 +337,20 @@ class hash_join {
     rmm::device_async_resource_ref mr = cudf::get_current_device_resource_ref()) const;
 
   /**
-   * @brief Performs a left join on a partition of the probe table.
+   * @brief Returns left-join indices for a partition of the left table.
    *
-   * This method executes a left join between a specific partition of the probe table
-   * (defined by the join_partition_context) and the build table. The context must have been
-   * previously created by calling left_join_match_context().
+   * Left indices refer to the original left table. The context can be reused for other
+   * partitions.
    *
-   * The returned left_indices are relative to the original complete probe table.
+   * @throw std::invalid_argument If match counts are missing or have the wrong size,
+   * the bounds are invalid, or a cached context belongs to another join object or kind.
+   * Also thrown if `context.left_table_context` is null.
    *
-   * @throw std::invalid_argument If `context.left_table_context` is null, if its
-   * `_match_counts` is null, or if `[left_start_idx, left_end_idx)` is outside the bounds
-   * of the left table.
-   *
-   * @param context The partition context containing match information and partition bounds
+   * @param context Match context and left-row bounds
    * @param stream CUDA stream used for device memory operations and kernel launches
-   * @param mr Device memory resource used to allocate the join indices' device memory
+   * @param mr Device memory resource used to allocate the returned indices
    *
-   * @return A pair of device vectors [`left_indices`, `right_indices`] for this partition
+   * @return A pair of device vectors [`left_indices`, `right_indices`]
    */
   [[nodiscard]] std::pair<std::unique_ptr<rmm::device_uvector<size_type>>,
                           std::unique_ptr<rmm::device_uvector<size_type>>>
@@ -386,27 +360,21 @@ class hash_join {
     rmm::device_async_resource_ref mr = cudf::get_current_device_resource_ref()) const;
 
   /**
-   * @brief Performs a full join probe on a partition of the probe table.
+   * @brief Returns full-join indices for a partition of the left table.
    *
-   * This method executes the probe-side of a full join between a specific partition of the probe
-   * table (defined by the join_partition_context) and the build table. The context must have been
-   * previously created by calling full_join_match_context().
+   * Left indices refer to the original left table. The context can be reused for other
+   * partitions.
+   * Call finalize_partitioned_full_join() to append unmatched right rows.
    *
-   * @note This method does NOT include unmatched build rows (the complement).  After all
-   * partitions have been processed, pass the collected results to
-   * `finalize_partitioned_full_join()` to obtain the complete full join output.
+   * @throw std::invalid_argument If match counts are missing or have the wrong size,
+   * the bounds are invalid, or a cached context belongs to another join object or kind.
+   * Also thrown if `context.left_table_context` is null.
    *
-   * The returned left_indices are relative to the original complete probe table.
-   *
-   * @throw std::invalid_argument If `context.left_table_context` is null, if its
-   * `_match_counts` is null, or if `[left_start_idx, left_end_idx)` is outside the bounds
-   * of the left table.
-   *
-   * @param context The partition context containing match information and partition bounds
+   * @param context Match context and left-row bounds
    * @param stream CUDA stream used for device memory operations and kernel launches
-   * @param mr Device memory resource used to allocate the join indices' device memory
+   * @param mr Device memory resource used to allocate the returned indices
    *
-   * @return A pair of device vectors [`left_indices`, `right_indices`] for this partition
+   * @return A pair of device vectors [`left_indices`, `right_indices`]
    */
   [[nodiscard]] std::pair<std::unique_ptr<rmm::device_uvector<size_type>>,
                           std::unique_ptr<rmm::device_uvector<size_type>>>
@@ -445,12 +413,15 @@ class hash_join {
     rmm::device_async_resource_ref mr = cudf::get_current_device_resource_ref());
 
   /**
-   * @tparam Resources Explicit cudf::memory_resources bundle
-   * @brief Retrieve a partition with explicit output and temporary resources.
+   * @brief Returns inner-join indices for a partition of the left table.
+   *
+   * @tparam Resources cudf::memory_resources
+   *
    * @param context Match context and left-row bounds
-   * @param stream CUDA stream used for device operations
-   * @param resources Resources for returned indices and temporary allocations
-   * @return Left and right gather maps
+   * @param stream CUDA stream used for device memory operations and kernel launches
+   * @param resources Memory resources for output and temporary allocations
+   *
+   * @return A pair of device vectors [`left_indices`, `right_indices`]
    */
   template <typename Resources>
     requires std::same_as<std::remove_cvref_t<Resources>, cudf::memory_resources>
@@ -464,12 +435,15 @@ class hash_join {
   }
 
   /**
-   * @tparam Resources Explicit cudf::memory_resources bundle
-   * @brief Retrieve a partition with explicit output and temporary resources.
+   * @brief Returns left-join indices for a partition of the left table.
+   *
+   * @tparam Resources cudf::memory_resources
+   *
    * @param context Match context and left-row bounds
-   * @param stream CUDA stream used for device operations
-   * @param resources Resources for returned indices and temporary allocations
-   * @return Left and right gather maps
+   * @param stream CUDA stream used for device memory operations and kernel launches
+   * @param resources Memory resources for output and temporary allocations
+   *
+   * @return A pair of device vectors [`left_indices`, `right_indices`]
    */
   template <typename Resources>
     requires std::same_as<std::remove_cvref_t<Resources>, cudf::memory_resources>
@@ -483,12 +457,15 @@ class hash_join {
   }
 
   /**
-   * @tparam Resources Explicit cudf::memory_resources bundle
-   * @brief Retrieve a partition with explicit output and temporary resources.
+   * @brief Returns full-join indices for a partition of the left table.
+   *
+   * @tparam Resources cudf::memory_resources
+   *
    * @param context Match context and left-row bounds
-   * @param stream CUDA stream used for device operations
-   * @param resources Resources for returned indices and temporary allocations
-   * @return Left and right gather maps
+   * @param stream CUDA stream used for device memory operations and kernel launches
+   * @param resources Memory resources for output and temporary allocations
+   *
+   * @return A pair of device vectors [`left_indices`, `right_indices`]
    */
   template <typename Resources>
     requires std::same_as<std::remove_cvref_t<Resources>, cudf::memory_resources>
@@ -502,17 +479,15 @@ class hash_join {
   }
 
   /**
-   * @tparam Resources Explicit cudf::memory_resources bundle
-   * @brief Compute reusable matches for an inner join without allocating gather maps.
+   * @brief Creates a join_match_context for an inner join.
    *
-   * The result exposes counts and output size for memory planning. It must be retrieved using
-   * this join object and the corresponding join kind. Both input tables and this join object
-   * must outlive the result and all operations using it. See join_match_context.
+   * @tparam Resources cudf::memory_resources
    *
-   * @param left Left join-key table
-   * @param stream CUDA stream used for device operations; synchronized before returning
-   * @param resources Resources for retained output state and temporary allocations
-   * @return Owning match context
+   * @param left The left join-key table
+   * @param stream CUDA stream used for device memory operations and kernel launches
+   * @param resources Memory resources for output and temporary allocations
+   *
+   * @return Match context for partitioned_inner_join()
    */
   template <typename Resources>
     requires std::same_as<std::remove_cvref_t<Resources>, cudf::memory_resources>
@@ -524,19 +499,21 @@ class hash_join {
   }
 
   /**
-   * @brief Retrieve an inner join for a half-open range of original left rows.
+   * @brief Returns inner-join indices for a partition of the left table.
    *
-   * Borrows the match context, which can be reused for other partitions. Returned left indices
-   * refer to the complete left table. Partitioning does not split an individual row's matches.
+   * Left indices refer to the original left table. The context can be reused for other
+   * partitions.
    *
-   * @throws std::invalid_argument If the result belongs to another join object or kind, is
-   * moved from, or the row bounds are invalid
-   * @param matches Result from inner_join_match_context
+   * @throw std::invalid_argument If match counts are missing or have the wrong size,
+   * the bounds are invalid, or a cached context belongs to another join object or kind.
+   *
+   * @param matches Match context for an inner join
    * @param left_start_idx First left row, inclusive
    * @param left_end_idx Last left row, exclusive
-   * @param stream CUDA stream used for device operations
-   * @param resources Resources for returned indices and temporary allocations
-   * @return Left and right gather maps
+   * @param stream CUDA stream used for device memory operations and kernel launches
+   * @param resources Memory resources for output and temporary allocations
+   *
+   * @return A pair of device vectors [`left_indices`, `right_indices`]
    */
   [[nodiscard]] std::pair<std::unique_ptr<rmm::device_uvector<size_type>>,
                           std::unique_ptr<rmm::device_uvector<size_type>>>
@@ -548,17 +525,15 @@ class hash_join {
     cudf::memory_resources resources = cudf::get_current_device_resource_ref()) const;
 
   /**
-   * @tparam Resources Explicit cudf::memory_resources bundle
-   * @brief Compute reusable matches for a left join without allocating gather maps.
+   * @brief Creates a join_match_context for a left join.
    *
-   * The result exposes counts and output size for memory planning. It must be retrieved using
-   * this join object and the corresponding join kind. Both input tables and this join object
-   * must outlive the result and all operations using it. See join_match_context.
+   * @tparam Resources cudf::memory_resources
    *
-   * @param left Left join-key table
-   * @param stream CUDA stream used for device operations; synchronized before returning
-   * @param resources Resources for retained output state and temporary allocations
-   * @return Owning match context
+   * @param left The left join-key table
+   * @param stream CUDA stream used for device memory operations and kernel launches
+   * @param resources Memory resources for output and temporary allocations
+   *
+   * @return Match context for partitioned_left_join()
    */
   template <typename Resources>
     requires std::same_as<std::remove_cvref_t<Resources>, cudf::memory_resources>
@@ -570,19 +545,21 @@ class hash_join {
   }
 
   /**
-   * @brief Retrieve a left join for a half-open range of original left rows.
+   * @brief Returns left-join indices for a partition of the left table.
    *
-   * Borrows the match context, which can be reused for other partitions. Returned left indices
-   * refer to the complete left table. Partitioning does not split an individual row's matches.
+   * Left indices refer to the original left table. The context can be reused for other
+   * partitions.
    *
-   * @throws std::invalid_argument If the result belongs to another join object or kind, is
-   * moved from, or the row bounds are invalid
-   * @param matches Result from left_join_match_context
+   * @throw std::invalid_argument If match counts are missing or have the wrong size,
+   * the bounds are invalid, or a cached context belongs to another join object or kind.
+   *
+   * @param matches Match context for a left join
    * @param left_start_idx First left row, inclusive
    * @param left_end_idx Last left row, exclusive
-   * @param stream CUDA stream used for device operations
-   * @param resources Resources for returned indices and temporary allocations
-   * @return Left and right gather maps
+   * @param stream CUDA stream used for device memory operations and kernel launches
+   * @param resources Memory resources for output and temporary allocations
+   *
+   * @return A pair of device vectors [`left_indices`, `right_indices`]
    */
   [[nodiscard]] std::pair<std::unique_ptr<rmm::device_uvector<size_type>>,
                           std::unique_ptr<rmm::device_uvector<size_type>>>
@@ -594,17 +571,15 @@ class hash_join {
     cudf::memory_resources resources = cudf::get_current_device_resource_ref()) const;
 
   /**
-   * @tparam Resources Explicit cudf::memory_resources bundle
-   * @brief Compute reusable matches for a full join without allocating gather maps.
+   * @brief Creates a join_match_context for a full join.
    *
-   * The result exposes counts and output size for memory planning. It must be retrieved using
-   * this join object and the corresponding join kind. Both input tables and this join object
-   * must outlive the result and all operations using it. See join_match_context.
+   * @tparam Resources cudf::memory_resources
    *
-   * @param left Left join-key table
-   * @param stream CUDA stream used for device operations; synchronized before returning
-   * @param resources Resources for retained output state and temporary allocations
-   * @return Owning match context
+   * @param left The left join-key table
+   * @param stream CUDA stream used for device memory operations and kernel launches
+   * @param resources Memory resources for output and temporary allocations
+   *
+   * @return Match context for partitioned_full_join()
    */
   template <typename Resources>
     requires std::same_as<std::remove_cvref_t<Resources>, cudf::memory_resources>
@@ -616,20 +591,22 @@ class hash_join {
   }
 
   /**
-   * @brief Retrieve a full join for a half-open range of original left rows.
+   * @brief Returns full-join indices for a partition of the left table.
    *
-   * Borrows the match context, which can be reused for other partitions. Returned left indices
-   * refer to the complete left table. Partitioning does not split an individual row's matches.
-   * Unmatched right rows must subsequently be added by finalize_partitioned_full_join.
+   * Left indices refer to the original left table. The context can be reused for other
+   * partitions.
+   * Call finalize_partitioned_full_join() to append unmatched right rows.
    *
-   * @throws std::invalid_argument If the result belongs to another join object or kind, is
-   * moved from, or the row bounds are invalid
-   * @param matches Result from full_join_match_context
+   * @throw std::invalid_argument If match counts are missing or have the wrong size,
+   * the bounds are invalid, or a cached context belongs to another join object or kind.
+   *
+   * @param matches Match context for a full join
    * @param left_start_idx First left row, inclusive
    * @param left_end_idx Last left row, exclusive
-   * @param stream CUDA stream used for device operations
-   * @param resources Resources for returned indices and temporary allocations
-   * @return Left and right gather maps
+   * @param stream CUDA stream used for device memory operations and kernel launches
+   * @param resources Memory resources for output and temporary allocations
+   *
+   * @return A pair of device vectors [`left_indices`, `right_indices`]
    */
   [[nodiscard]] std::pair<std::unique_ptr<rmm::device_uvector<size_type>>,
                           std::unique_ptr<rmm::device_uvector<size_type>>>
