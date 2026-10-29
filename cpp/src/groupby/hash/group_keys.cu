@@ -22,10 +22,13 @@
 #include <cub/device/device_radix_sort.cuh>
 #include <cuda/buffer>
 #include <cuda/iterator>
+#include <cuda/memory_resource>
 #include <cuda/std/bit>
 #include <cuda/std/cstddef>
 #include <cuda/std/cstdint>
+#include <cuda/std/execution>
 #include <cuda/std/iterator>
+#include <cuda/stream>
 #include <thrust/copy.h>
 #include <thrust/gather.h>
 #include <thrust/scan.h>
@@ -524,14 +527,12 @@ pair_buffers sort_pairs(pair_buffers input,
                         cuda::stream_ref stream,
                         cudf::memory_resources mr)
 {
-  auto keys              = cub::DoubleBuffer<size_type>{input.keys, alternate.keys};
-  auto values            = cub::DoubleBuffer<size_type>{input.values, alternate.values};
-  std::size_t temp_bytes = 0;
-  CUDF_CUDA_TRY(cub::DeviceRadixSort::SortPairs(
-    nullptr, temp_bytes, keys, values, num_items, begin_bit, end_bit, stream.get()));
-  cuda::device_buffer<std::byte> temp(stream, mr.get_temporary_mr(), temp_bytes, cuda::no_init);
-  CUDF_CUDA_TRY(cub::DeviceRadixSort::SortPairs(
-    temp.data(), temp_bytes, keys, values, num_items, begin_bit, end_bit, stream.get()));
+  auto keys   = cub::DoubleBuffer<size_type>{input.keys, alternate.keys};
+  auto values = cub::DoubleBuffer<size_type>{input.values, alternate.values};
+  auto const mr_prop =
+    cuda::std::execution::prop{cuda::mr::get_memory_resource, mr.get_temporary_mr()};
+  auto const env = cuda::std::execution::env{stream, mr_prop};
+  CUDF_CUDA_TRY(cub::DeviceRadixSort::SortPairs(keys, values, num_items, begin_bit, end_bit, env));
   return {keys.Current(), values.Current()};
 }
 
