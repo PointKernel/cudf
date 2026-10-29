@@ -158,7 +158,7 @@ hash_join<Hasher>::partitioned_join_retrieve(join_kind kind,
   auto const input_end = input + static_cast<std::size_t>(rows) + 1;
   auto const size      = [&] {
     if (left_start_idx == 0 && left_end_idx == left_rows) {
-      // Preparation already synchronized to obtain this total. Only build the offsets here.
+      // Reuse the cached total to avoid a second host synchronization.
       thrust::exclusive_scan(rmm::exec_policy_nosync(stream, temp_mr),
                              input,
                              input_end,

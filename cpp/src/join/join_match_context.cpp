@@ -4,7 +4,7 @@
  */
 #include "join_match_state.hpp"
 
-// Retain the public fields until their deprecation period ends.
+// Access to the deprecated fields remains necessary inside the context implementation.
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wdeprecated-declarations"
 

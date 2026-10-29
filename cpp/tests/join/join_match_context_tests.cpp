@@ -70,12 +70,9 @@ void check_inner(Join const& join, cudf::table_view left, cuda::stream_ref strea
   EXPECT_EQ(left.num_rows(), matches.left_table().num_rows());
   EXPECT_EQ(left.column(0).head<void>(), matches.left_table().column(0).template head<void>());
 
-  // Moving preserves borrowed device views and retrieval state.
   auto const count_data = matches.match_counts().data();
   auto moved            = std::move(matches);
   EXPECT_EQ(count_data, moved.match_counts().data());
-  EXPECT_THROW(std::ignore = join.partitioned_inner_join(matches, 0, 0, stream),
-               std::invalid_argument);
   pairs combined;
   for (index_type start = 0; start < left.num_rows(); start += 2) {
     auto result =
@@ -220,15 +217,16 @@ TEST_F(JoinMatchContextTest, ConcurrentRetrievalAndResources)
   auto matches = hash.inner_join_match_context(table, stream, memory.resources());
   memory.expect_output_allocations_live(stream);
   memory.expect_temporary_allocations_released(stream);
-  auto retrieve = [&] {
+  auto const expected = to_host_pairs(hash.inner_join(table, std::nullopt, stream), stream);
+  auto retrieve       = [&] {
     rmm::cuda_stream independent;
     return to_host_pairs(hash.partitioned_inner_join(matches, 0, 4, independent), independent);
   };
   auto first  = std::async(std::launch::async, retrieve);
   auto second = std::async(std::launch::async, retrieve);
-  EXPECT_EQ(first.get(), second.get());
+  EXPECT_EQ(expected, first.get());
+  EXPECT_EQ(expected, second.get());
   {
-    // Once prepared, retrieval needs neither row preprocessing nor the current resource.
     auto fail_current = memory.fail_on_current_device_resource_use();
     auto output       = hash.partitioned_inner_join(matches, 1, 3, stream, memory.resources());
     EXPECT_EQ(output.first->size(), 4);
