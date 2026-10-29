@@ -425,7 +425,7 @@ void aggregate_result_functor::operator()<aggregation::MERGE_M2>(aggregation con
 
   cache.add_result(values,
                    agg,
-                   detail::group_merge_m2(get_unordered_grouped_values(),
+                   detail::group_merge_m2(get_grouped_values(),
                                           helper.group_offsets(stream, mr),
                                           helper.num_groups(stream, mr),
                                           stream,
