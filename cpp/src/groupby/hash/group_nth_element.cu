@@ -44,7 +44,6 @@ std::unique_ptr<column> group_nth_element(column_view const& values,
 
   auto nth_index =
     cuda::device_buffer<size_type>(stream, mr.get_temporary_mr(), num_groups, cuda::no_init);
-  // TODO: replace with async version
   thrust::uninitialized_fill_n(rmm::exec_policy_nosync(stream, mr.get_temporary_mr()),
                                nth_index.begin(),
                                num_groups,
