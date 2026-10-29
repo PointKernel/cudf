@@ -335,9 +335,9 @@ class groupby {
    * in group `j` that precedes or follows `value[i]`. If a non-null value is not found in the
    * specified direction, `value[i]` is left NULL.
    *
-   * The returned pair contains a column of the grouped keys and the result column. In result
+   * The returned pair contains a column of the grouped keys and the result column. In the result
    * column, values of the same group are in contiguous memory. In each group, the order of values
-   * maintain their original order. The order of groups are not guaranteed.
+   * maintain their original order. The ordering of groups is undefined.
    *
    * Example:
    * @code{.pseudo}
