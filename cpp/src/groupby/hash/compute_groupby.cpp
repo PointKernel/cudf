@@ -16,9 +16,11 @@
 #include <cuda/buffer>
 #include <cuda/std/array>
 
+#include <algorithm>
 #include <cstddef>
 #include <functional>
 #include <memory>
+#include <ranges>
 #include <unordered_set>
 #include <utility>
 #include <vector>
@@ -30,14 +32,23 @@ namespace {
 // The result cache shares results across requests on the same values column. Normalize the
 // extracted reductions with the same equality so an earlier compound request cannot choose the
 // resource or nullability of a later requested result, or allocate a result that the cache drops.
-// A host UDF may read any cached result, so `expose_intermediates` computes every extracted
-// reduction like a requested result.
+// For the same reason, skip reductions that an earlier call cached, such as the SUM and
+// COUNT_VALID of the STD that CORRELATION computes before its MEAN. A host UDF may read any cached
+// result, so `expose_intermediates` computes every extracted reduction like a requested result.
 auto extract_hash_groupby_aggs(std::span<aggregation_request const> requests,
+                               cudf::detail::result_cache const& cache,
                                bool expose_intermediates,
                                cuda::stream_ref stream)
 {
-  if (requests.size() <= 1 && !expose_intermediates) {
-    return extract_single_pass_aggs(requests, stream);
+  auto [values, kinds, aggs, is_intermediate, has_compound] =
+    extract_single_pass_aggs(requests, stream);
+  auto const is_cached = [&](std::size_t i) {
+    return cache.has_result(values.column(i), *aggs[i]);
+  };
+  if (requests.size() <= 1 && !expose_intermediates &&
+      std::ranges::none_of(std::views::iota(std::size_t{0}, aggs.size()), is_cached)) {
+    return std::tuple{
+      values, std::move(kinds), std::move(aggs), std::move(is_intermediate), has_compound};
   }
 
   using aggregation_set =
@@ -51,15 +62,13 @@ auto extract_hash_groupby_aggs(std::span<aggregation_request const> requests,
     }
   }
 
-  auto [values, kinds, aggs, is_intermediate, has_compound] =
-    extract_single_pass_aggs(requests, stream);
   aggregation_set extracted;
   std::vector<column_view> distinct_values;
   distinct_values.reserve(aggs.size());
   for (std::size_t i = 0; i < aggs.size(); ++i) {
     auto const key =
       std::pair<column_view, std::reference_wrapper<aggregation const>>{values.column(i), *aggs[i]};
-    if (!extracted.insert(key).second) { continue; }
+    if (is_cached(i) || !extracted.insert(key).second) { continue; }
     auto const output       = distinct_values.size();
     kinds[output]           = kinds[i];
     is_intermediate[output] = !expose_intermediates && !requested.contains(key);
@@ -93,7 +102,7 @@ void compute_groupby(std::span<aggregation_request const> requests,
 
   // Determine which grouping outputs the requested aggregations need.
   auto const [values, agg_kinds, aggs, is_agg_intermediate, has_compound_aggs] =
-    extract_hash_groupby_aggs(requests, expose_intermediates, stream);
+    extract_hash_groupby_aggs(requests, *cache, expose_intermediates, stream);
 
   // Counts without null filtering come directly from the group offsets.
   auto const needs_reduction = [&] {
