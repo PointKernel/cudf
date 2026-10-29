@@ -200,8 +200,8 @@ std::pair<std::unique_ptr<column>, std::unique_ptr<column>> make_range_windows(
     peer_keys.insert(peer_keys.end(), orderby.begin(), orderby.end());
     peer_helper.emplace(table_view{peer_keys}, null_policy::INCLUDE, sorted::YES);
     peers = rolling::grouped{
-      peer_helper->group_labels(stream, cudf::memory_resources{mr}.as_temporary()).data(),
-      peer_helper->group_offsets(stream, cudf::memory_resources{mr}.as_temporary()).data()};
+      peer_helper->group_labels(stream, cudf::get_current_device_resource_ref()).data(),
+      peer_helper->group_offsets(stream, cudf::get_current_device_resource_ref()).data()};
   }
 
   std::optional<groupby_helper> group_helper;

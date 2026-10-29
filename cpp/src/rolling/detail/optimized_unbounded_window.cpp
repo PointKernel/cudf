@@ -73,7 +73,7 @@ std::unique_ptr<column> aggregation_based_rolling_window(table_view const& group
 
   using cudf::groupby::detail::groupby_helper;
   auto helper = groupby_helper{group_keys, cudf::null_policy::INCLUDE, cudf::sorted::YES};
-  auto const& group_labels = helper.group_labels(stream, cudf::memory_resources{mr}.as_temporary());
+  auto const& group_labels = helper.group_labels(stream, cudf::get_current_device_resource_ref());
 
   auto result_columns = cudf::detail::gather(cudf::table_view{{*aggregation_result_col}},
                                              group_labels,

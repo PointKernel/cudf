@@ -116,8 +116,8 @@ std::pair<std::unique_ptr<column>, std::unique_ptr<column>> make_range_windows(
   if (group_keys.num_columns() > 0) {
     using cudf::groupby::detail::groupby_helper;
     groupby_helper helper{group_keys, null_policy::INCLUDE, sorted::YES};
-    auto const& labels   = helper.group_labels(stream, cudf::memory_resources{mr}.as_temporary());
-    auto const& offsets  = helper.group_offsets(stream, cudf::memory_resources{mr}.as_temporary());
+    auto const& labels   = helper.group_labels(stream, cudf::get_current_device_resource_ref());
+    auto const& offsets  = helper.group_offsets(stream, cudf::get_current_device_resource_ref());
     auto per_group_nulls = orderby.has_nulls() ? nulls_per_group(orderby, offsets, stream)
                                                : rmm::device_uvector<size_type>{0, stream};
     auto grouping = detail::rolling::preprocessed_group_info{labels, offsets, per_group_nulls};
