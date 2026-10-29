@@ -294,7 +294,6 @@ std::unique_ptr<column> group_merge_histogram(column_view const& values,
  * @param values_1 The second ungrouped values column to compute covariance
  * @param grouped The input rows grouped by key with their reduction schedule
  * @param group_labels ID of the group of each grouped row
- * @param num_groups Number of groups.
  * @param count The count of valid rows of the grouped values of both columns
  * @param mean_0 The mean of the first grouped values column
  * @param mean_1 The mean of the second grouped values column
@@ -307,7 +306,6 @@ std::unique_ptr<column> group_covariance(column_view const& values_0,
                                          column_view const& values_1,
                                          hash::grouped_rows const& grouped,
                                          cudf::device_span<size_type const> group_labels,
-                                         size_type num_groups,
                                          column_view const& count,
                                          column_view const& mean_0,
                                          column_view const& mean_1,

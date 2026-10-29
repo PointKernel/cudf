@@ -115,7 +115,6 @@ std::unique_ptr<column> group_covariance(column_view const& values_0,
                                          column_view const& values_1,
                                          hash::grouped_rows const& grouped,
                                          cudf::device_span<size_type const> group_labels,
-                                         size_type num_groups,
                                          column_view const& count,
                                          column_view const& mean_0,
                                          column_view const& mean_1,
@@ -128,6 +127,7 @@ std::unique_ptr<column> group_covariance(column_view const& values_0,
   static_assert(
     std::is_same_v<cudf::detail::target_type_t<result_type, aggregation::Kind::CORRELATION>,
                    result_type>);
+  auto const num_groups = static_cast<size_type>(grouped.offsets.size() - 1);
 
   // check if each child type can be converted to float64.
   auto get_base_type = [](auto const& col) {
