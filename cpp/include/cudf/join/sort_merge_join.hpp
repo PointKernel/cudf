@@ -15,9 +15,7 @@
 
 #include <cuda/stream>
 
-#include <concepts>
 #include <memory>
-#include <type_traits>
 
 /**
  * @file
@@ -115,15 +113,28 @@ class sort_merge_join {
             rmm::device_async_resource_ref mr = cudf::get_current_device_resource_ref()) const;
 
   /**
-   * @brief Creates a join_match_context for an inner join.
+   * @brief Returns context information about matches between the left and right tables.
    *
-   * See join_match_context for lifetime and stream requirements.
+   * This method computes, for each row in the left table, how many matching rows exist in
+   * the right table according to inner join semantics, and returns the number of matches through a
+   * match_context object.
    *
-   * @param left The left join-key table
+   * This method is thread-safe and can be called concurrently from multiple threads.
+   *
+   * This is particularly useful for:
+   * - Determining the total size of a potential join result without materializing it
+   * - Planning partitioned join operations for large datasets
+   *
+   * The returned join_match_context can be used directly with partitioned_inner_join()
+   * to process large joins in manageable chunks.
+   *
+   * @param left The left table to join with the pre-processed right table
    * @param stream CUDA stream used for device memory operations and kernel launches
-   * @param mr Device memory resource used to allocate retained match state
+   * @param mr Device memory resource used to allocate the result device memory
    *
-   * @return Match context for partitioned_inner_join()
+   * @return A unique_ptr to join_match_context
+   *         containing the left table view, match counts, and preprocessed left table state for
+   *         partitioned joins
    */
   std::unique_ptr<join_match_context> inner_join_match_context(
     table_view const& left,
@@ -131,20 +142,59 @@ class sort_merge_join {
     rmm::device_async_resource_ref mr = cudf::get_current_device_resource_ref()) const;
 
   /**
-   * @brief Returns inner-join indices for a partition of the left table.
+   * @brief Performs an inner join between a partition of the left table and the right table.
    *
-   * Left indices refer to the original left table. The context can be reused for other
-   * partitions.
+   * This method executes an inner join operation between a specific partition of the left table
+   * (defined by the join_partition_context) and the right table that was provided when constructing
+   * the sort_merge_join object. The join_partition_context must have been previously created by
+   * calling inner_join_match_context().
    *
-   * @throw std::invalid_argument If match counts are missing or have the wrong size,
-   * the bounds are invalid, or the context was not created by this join object.
-   * Also thrown if `context.left_table_context` is null.
+   * This method is thread-safe and can be called concurrently from multiple threads.
    *
-   * @param context Match context and left-row bounds
+   * This partitioning approach enables processing large joins in smaller, memory-efficient chunks,
+   * while maintaining consistent results as if the entire join was performed at once. This is
+   * particularly useful for handling large datasets that would otherwise exceed available memory
+   * resources.
+   *
+   * The returned indices can be used to construct the join result for this partition. The
+   * left_indices are relative to the original complete left table (not just the partition), so they
+   * can be used directly with the original left table to extract matching rows.
+   *
+   * @throw std::invalid_argument If `context.left_table_context` was not created by this object's
+   * inner_join_match_context().
+   *
+   * @param context The partition context containing match information and partition bounds
    * @param stream CUDA stream used for device memory operations and kernel launches
-   * @param mr Device memory resource used to allocate the returned indices
+   * @param mr Device memory resource used to allocate the join indices' device memory
    *
-   * @return A pair of device vectors [`left_indices`, `right_indices`]
+   * @return A pair of device vectors [`left_indices`, `right_indices`] containing the row indices
+   *         from both tables that satisfy the join condition for this partition. The left_indices
+   *         are relative to the complete left table, not just the partition.
+   *
+   * @code{.cpp}
+   * // Create join object with pre-processed right table
+   * sort_merge_join join_obj(right_table, sorted::NO);
+   *
+   * // Get match context for the entire left table
+   * auto match_ctx = join_obj.inner_join_match_context(left_table);
+   *
+   * // Create partition context
+   * cudf::join_partition_context part_ctx{std::move(match_ctx), 0, 0};
+   *
+   * // Define partition boundaries (e.g., process 1000 rows at a time)
+   * for (size_type start = 0; start < left_table.num_rows(); start += 1000) {
+   *   size_type end = std::min(start + 1000, left_table.num_rows());
+   *
+   *   // Set partition boundaries
+   *   part_ctx.left_start_idx = start;
+   *   part_ctx.left_end_idx = end;
+   *
+   *   // Get join indices for this partition
+   *   auto [left_indices, right_indices] = join_obj.partitioned_inner_join(part_ctx);
+   *
+   *   // Process the partition result...
+   * }
+   * @endcode
    */
   std::pair<std::unique_ptr<rmm::device_uvector<size_type>>,
             std::unique_ptr<rmm::device_uvector<size_type>>>
@@ -153,83 +203,7 @@ class sort_merge_join {
     cuda::stream_ref stream           = cudf::get_default_stream(),
     rmm::device_async_resource_ref mr = cudf::get_current_device_resource_ref()) const;
 
-  /**
-   * @brief Returns inner-join indices for a partition of the left table.
-   *
-   * @tparam Resources cudf::memory_resources
-   *
-   * @param context Match context and left-row bounds
-   * @param stream CUDA stream used for device memory operations and kernel launches
-   * @param resources Memory resources for output and temporary allocations
-   *
-   * @return A pair of device vectors [`left_indices`, `right_indices`]
-   */
-  template <typename Resources>
-    requires std::same_as<std::remove_cvref_t<Resources>, cudf::memory_resources>
-  [[nodiscard]] std::pair<std::unique_ptr<rmm::device_uvector<size_type>>,
-                          std::unique_ptr<rmm::device_uvector<size_type>>>
-  partitioned_inner_join(join_partition_context const& context,
-                         cuda::stream_ref stream,
-                         Resources&& resources) const
-  {
-    return partitioned_join(context, stream, resources);
-  }
-
-  /**
-   * @brief Creates a join_match_context for an inner join.
-   *
-   * @tparam Resources cudf::memory_resources
-   *
-   * @param left The left join-key table
-   * @param stream CUDA stream used for device memory operations and kernel launches
-   * @param resources Memory resources for output and temporary allocations
-   *
-   * @return Match context for partitioned_inner_join()
-   */
-  template <typename Resources>
-    requires std::same_as<std::remove_cvref_t<Resources>, cudf::memory_resources>
-  [[nodiscard]] std::unique_ptr<join_match_context> inner_join_match_context(
-    table_view const& left, cuda::stream_ref stream, Resources&& resources) const
-  {
-    return make_match_context(left, stream, resources);
-  }
-
-  /**
-   * @brief Returns inner-join indices for a partition of the left table.
-   *
-   * Left indices refer to the original left table. The context can be reused for other
-   * partitions.
-   *
-   * @throw std::invalid_argument If match counts are missing or have the wrong size,
-   * the bounds are invalid, or the context was not created by this join object.
-   *
-   * @param matches Match context for an inner join
-   * @param left_start_idx First left row, inclusive
-   * @param left_end_idx Last left row, exclusive
-   * @param stream CUDA stream used for device memory operations and kernel launches
-   * @param resources Memory resources for output and temporary allocations
-   *
-   * @return A pair of device vectors [`left_indices`, `right_indices`]
-   */
-  [[nodiscard]] std::pair<std::unique_ptr<rmm::device_uvector<size_type>>,
-                          std::unique_ptr<rmm::device_uvector<size_type>>>
-  partitioned_inner_join(
-    join_match_context const& matches,
-    size_type left_start_idx,
-    size_type left_end_idx,
-    cuda::stream_ref stream          = cudf::get_default_stream(),
-    cudf::memory_resources resources = cudf::get_current_device_resource_ref()) const;
-
  private:
-  std::unique_ptr<join_match_context> make_match_context(table_view const& left,
-                                                         cuda::stream_ref stream,
-                                                         cudf::memory_resources resources) const;
-  std::pair<std::unique_ptr<rmm::device_uvector<size_type>>,
-            std::unique_ptr<rmm::device_uvector<size_type>>>
-  partitioned_join(join_partition_context const& context,
-                   cuda::stream_ref stream,
-                   cudf::memory_resources resources) const;
-
   using impl_type = cudf::detail::sort_merge_join;  ///< Implementation type
   std::unique_ptr<impl_type const> _impl;           ///< Pointer to implementation
 };

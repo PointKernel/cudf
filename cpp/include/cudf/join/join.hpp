@@ -31,9 +31,6 @@
 
 namespace CUDF_EXPORT cudf {
 namespace detail {
-template <typename Hasher>
-class hash_join;
-class sort_merge_join;
 struct join_match_state;
 }  // namespace detail
 
@@ -87,15 +84,12 @@ enum class nullable_join : bool { YES = true, NO = false };
 CUDF_HOST_DEVICE constexpr size_type JoinNoMatch = cuda::std::numeric_limits<size_type>::min();
 
 /**
- * @brief Stores match counts and cached state for partitioned joins.
+ * @brief Holds context information about matches between tables during a join operation.
  *
- * Join factories synchronize their stream before returning. Their contexts support concurrent
- * retrieval on other streams using the creating join object and the same join kind.
- * Keep the context, join object, input data, and allocation resources alive until retrieval
- * completes. Do not modify the input data or match counts while reusing the context.
- *
- * Hash joins cache matching groups to avoid probing again; sort-merge joins retain left-table
- * preprocessing. A moved-from context may only be destroyed or assigned to.
+ * Returned by the `*_join_match_context()` factories of join objects. Besides the per-row match
+ * counts, the context caches the state a join object needs to retrieve partitions without
+ * probing again. It is valid only with the join object and join kind that created it, and the
+ * join object and left table must outlive it.
  */
 struct join_match_context {
   /// @deprecated Since 26.12. Use left_table(); this field will be removed in 27.02.
@@ -107,75 +101,66 @@ struct join_match_context {
   std::unique_ptr<rmm::device_uvector<size_type>> _match_counts;
 
   /**
-   * @brief Constructs a context from externally computed match counts.
+   * @brief Construct a join_match_context
    *
-   * Supports uncached hash-join retrieval. Does not support output_size().
+   * @deprecated Since 26.12. Use a join object's `*_join_match_context()` factory; this
+   * constructor will be removed in 27.02.
    *
-   * @param left_table Original left table
-   * @param match_counts Per-left-row match counts
+   * @param left_table View of the left table involved in the join operation
+   * @param match_counts Device vector containing the count of matching rows in the right table
+   *                     for each row in the left table
    */
+  [[deprecated("Use a *_join_match_context() factory; this constructor will be removed in 27.02.")]]
   join_match_context(table_view const& left_table,
                      std::unique_ptr<rmm::device_uvector<size_type>> match_counts);
-
-  join_match_context(join_match_context const&) = delete;
-
+  join_match_context(join_match_context const&)            = delete;
   join_match_context& operator=(join_match_context const&) = delete;
-
-  /// Move constructor.
-  join_match_context(join_match_context&&) noexcept;
-
+  join_match_context(join_match_context&&) noexcept;  ///< Move constructor
   /**
-   * @brief Move assignment operator.
-   *
-   * @return This context
+   * @brief Move assignment operator
+   * @return Reference to this object
    */
   join_match_context& operator=(join_match_context&&) noexcept;
-
-  /// Destructor.
-  virtual ~join_match_context();
+  ~join_match_context();  ///< Destructor
 
   /**
-   * @brief Returns the original left table view.
+   * @brief Returns the left table involved in the join operation
    *
-   * @return The left table
+   * @return View of the left table
    */
   [[nodiscard]] table_view left_table() const;
 
   /**
-   * @brief Returns read-only match counts in original left-row order.
+   * @brief Returns the count of matching right rows for each left row
    *
-   * Left/full join counts include one placeholder for an unmatched left row.
-   * The span borrows storage from this context.
+   * Left and full join counts are at least one per left row.
    *
-   * @throw std::invalid_argument If match counts are missing
+   * @throw std::invalid_argument If the context has no match counts
    *
-   * @return Per-left-row match counts
+   * @return Per-row match counts
    */
   [[nodiscard]] device_span<size_type const> match_counts() const;
 
   /**
-   * @brief Returns the cached output size without device work or synchronization.
+   * @brief Returns the number of row index pairs a retrieval of the whole left table produces
    *
-   * Gather maps require `2 * output_size() * sizeof(size_type)` bytes, excluding retained
-   * context state, temporary storage, and allocator overhead. For full joins, this excludes
+   * The value is cached, so this function does no device work. For full joins, it excludes the
    * unmatched right rows added by finalize_partitioned_full_join().
    *
-   * @throw std::invalid_argument If this context was not returned by a join factory
+   * @throw std::invalid_argument If the context was not created by a join object
    *
-   * @return Number of output pairs represented by these matches
+   * @return Number of row index pairs
    */
   [[nodiscard]] std::size_t output_size() const;
 
  private:
-  join_match_context(table_view const& left,
-                     std::unique_ptr<rmm::device_uvector<size_type>> counts,
+  friend struct detail::join_match_state;
+
+  join_match_context(table_view const& left_table,
+                     std::unique_ptr<rmm::device_uvector<size_type>> match_counts,
                      std::unique_ptr<detail::join_match_state> state);
 
-  std::unique_ptr<detail::join_match_state> _state;
-
-  template <typename Hasher>
-  friend class detail::hash_join;
-  friend class detail::sort_merge_join;
+  std::unique_ptr<detail::join_match_state> _state;  ///< Join-specific cached state
 };
 
 /**

@@ -94,7 +94,7 @@ class sort_merge_join {
    * @return A unique_ptr to join_match_context
    */
   std::unique_ptr<join_match_context> inner_join_match_context(
-    table_view const& left, cuda::stream_ref stream, cudf::memory_resources resources) const;
+    table_view const& left, cuda::stream_ref stream, rmm::device_async_resource_ref mr) const;
 
   /**
    * @brief Performs an inner join between a partition of the left table and the right table.
@@ -108,15 +108,7 @@ class sort_merge_join {
             std::unique_ptr<rmm::device_uvector<size_type>>>
   partitioned_inner_join(cudf::join_partition_context const& context,
                          cuda::stream_ref stream,
-                         cudf::memory_resources resources) const;
-
-  std::pair<std::unique_ptr<rmm::device_uvector<size_type>>,
-            std::unique_ptr<rmm::device_uvector<size_type>>>
-  partitioned_inner_join(cudf::join_match_context const& matches,
-                         size_type left_start_idx,
-                         size_type left_end_idx,
-                         cuda::stream_ref stream,
-                         cudf::memory_resources resources) const;
+                         rmm::device_async_resource_ref mr) const;
 
  private:
   /**
@@ -149,12 +141,10 @@ class sort_merge_join {
      * @param stream CUDA stream used for device memory operations and kernel launches
      * @return A preprocessed_table ready for join operations
      */
-    static preprocessed_table create(
-      table_view const& table,
-      null_equality compare_nulls,
-      sorted is_sorted,
-      cuda::stream_ref stream,
-      cudf::memory_resources resources = cudf::get_current_device_resource_ref());
+    static preprocessed_table create(table_view const& table,
+                                     null_equality compare_nulls,
+                                     sorted is_sorted,
+                                     cuda::stream_ref stream);
 
     /**
      * @brief Mark rows in unprocessed table with nulls at root or child levels by populating the
@@ -162,28 +152,28 @@ class sort_merge_join {
      *
      * @param stream CUDA stream used for device memory operations and kernel launches
      */
-    void populate_nonnull_filter(cuda::stream_ref stream, cudf::memory_resources resources);
+    void populate_nonnull_filter(cuda::stream_ref stream);
 
     /**
      * @brief Apply _validity_mask to the _table_view to create a null-free table
      *
      * @param stream CUDA stream used for device memory operations and kernel launches
      */
-    void apply_nonnull_filter(cuda::stream_ref stream, cudf::memory_resources resources);
+    void apply_nonnull_filter(cuda::stream_ref stream);
 
     /**
      * @brief Pre-process the unprocessed table when null equality is set to unequal
      *
      * @param stream CUDA stream used for device memory operations and kernel launches
      */
-    void preprocess_unprocessed_table(cuda::stream_ref stream, cudf::memory_resources resources);
+    void preprocess_unprocessed_table(cuda::stream_ref stream);
 
     /**
      * @brief Compute sorted ordering of the processed table
      *
      * @param stream CUDA stream used for device memory operations and kernel launches
      */
-    void compute_sorted_order(cuda::stream_ref stream, cudf::memory_resources resources);
+    void compute_sorted_order(cuda::stream_ref stream);
 
     /**
      * @brief Create mapping from processed table indices to unprocessed table indices
@@ -192,30 +182,31 @@ class sort_merge_join {
      * @return A device vector containing the mapping from processed table indices to unprocessed
      * table indices
      */
-    cuda::device_buffer<size_type> map_table_to_unprocessed(
-      cuda::stream_ref stream,
-      cudf::memory_resources resources = cudf::get_current_device_resource_ref()) const;
+    cuda::device_buffer<size_type> map_table_to_unprocessed(cuda::stream_ref stream) const;
   };
 
-  struct sort_merge_match_state final : detail::join_match_state {
-    sort_merge_match_state(void const* owner, std::size_t size, preprocessed_table preprocessed)
-      : detail::join_match_state{owner, join_kind::INNER_JOIN, size},
+  /**
+   * @brief Sort-merge join state cached in a join_match_context: the preprocessed left table
+   * needed for thread-safe partitioned join operations
+   */
+  struct sort_merge_join_match_state final : join_match_state {
+    preprocessed_table preprocessed_left;  ///< Preprocessed left table state for partitioned joins
+
+    /**
+     * @brief Construct a sort_merge_join_match_state
+     *
+     * @param owner Join object that created the context
+     * @param output_size Number of row index pairs for the whole left table
+     * @param preprocessed Preprocessed left table state
+     */
+    sort_merge_join_match_state(void const* owner,
+                                std::size_t output_size,
+                                preprocessed_table preprocessed)
+      : join_match_state{owner, join_kind::INNER_JOIN, output_size},
         preprocessed_left{std::move(preprocessed)}
     {
     }
-    preprocessed_table preprocessed_left;
   };
-
-  std::pair<rmm::device_uvector<size_type>, preprocessed_table> make_inner_join_matches(
-    table_view const& left, cuda::stream_ref stream, cudf::memory_resources resources) const;
-
-  std::pair<std::unique_ptr<rmm::device_uvector<size_type>>,
-            std::unique_ptr<rmm::device_uvector<size_type>>>
-  retrieve_inner_join(preprocessed_table const& left,
-                      size_type left_start_idx,
-                      size_type left_end_idx,
-                      cuda::stream_ref stream,
-                      cudf::memory_resources resources) const;
 
   preprocessed_table preprocessed_right;  ///< Preprocessed right table
   std::unique_ptr<cuda::device_buffer<size_type>>
@@ -235,12 +226,10 @@ class sort_merge_join {
    * @param larger_indices Indices for the larger processed table used to construct the join result
    * @param stream CUDA stream used for device memory operations and kernel launches
    */
-  void postprocess_indices(
-    preprocessed_table const& preprocessed_left,
-    device_span<size_type> smaller_indices,
-    device_span<size_type> larger_indices,
-    cuda::stream_ref stream,
-    cudf::memory_resources resources = cudf::get_current_device_resource_ref()) const;
+  void postprocess_indices(preprocessed_table const& preprocessed_left,
+                           device_span<size_type> smaller_indices,
+                           device_span<size_type> larger_indices,
+                           cuda::stream_ref stream) const;
 
   /**
    * @brief Core merge operation implementation for the sort-merge join algorithm.

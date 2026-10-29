@@ -1,5 +1,5 @@
 /*
- * SPDX-FileCopyrightText: Copyright (c) 2019-2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2019-2026, NVIDIA CORPORATION.
  * SPDX-License-Identifier: Apache-2.0
  */
 
@@ -34,8 +34,10 @@ void nvbench_inner_join(nvbench::state& state,
                    cudf::table_view const& right_input,
                    cudf::null_equality compare_nulls) {
       auto hash_joiner = cudf::hash_join(right_input, compare_nulls);
-      auto matches     = hash_joiner.inner_join_match_context(left_input);
-      return hash_joiner.partitioned_inner_join(matches, 0, left_input.num_rows());
+      auto match_ctx   = hash_joiner.inner_join_match_context(left_input);
+      auto part_ctx    = cudf::join_partition_context{
+        std::make_unique<cudf::join_match_context>(std::move(match_ctx)), 0, left_input.num_rows()};
+      return hash_joiner.partitioned_inner_join(part_ctx);
     };
     BM_join<Nullable, join_t::HASH, NullEquality>(state, dtypes, join);
   } else {
@@ -99,34 +101,6 @@ void nvbench_inner_join_selectivity(
 
   BM_join<false, join_t::HASH, NullEquality>(state, dtypes, join, 1, selectivity);
 }
-
-void nvbench_inner_join_match_context(nvbench::state& state)
-{
-  auto const rows = static_cast<cudf::size_type>(state.get_int64("left_size"));
-  auto const mode = state.get_string("mode");
-  auto [right, left] =
-    generate_input_tables<false>({cudf::type_id::INT32}, 100'000, rows, 0, 1, 0.5);
-  auto const left_view = left->view();
-  cudf::hash_join join{right->view(), cudf::null_equality::UNEQUAL};
-  state.set_cuda_stream(nvbench::make_cuda_stream_view(cudf::get_default_stream().get()));
-  state.exec(nvbench::exec_tag::sync, [&](nvbench::launch&) {
-    if (mode == "count_then_retrieve") {
-      auto const size = join.inner_join_size(left_view);
-      auto result     = join.inner_join(left_view, size);
-    } else if (mode == "cached_context") {
-      auto matches = join.inner_join_match_context(left_view);
-      auto result  = join.partitioned_inner_join(matches, 0, rows);
-      CUDF_EXPECTS(result.first->size() == matches.output_size(), "Incorrect cached join size");
-    } else {
-      auto result = join.inner_join(left_view);
-    }
-  });
-}
-
-NVBENCH_BENCH(nvbench_inner_join_match_context)
-  .set_name("inner_join_match_context")
-  .add_int64_axis("left_size", {1'000, 100'000, 1'000'000})
-  .add_string_axis("mode", {"count_then_retrieve", "cached_context", "direct"});
 
 NVBENCH_BENCH_TYPES(nvbench_inner_join,
                     NVBENCH_TYPE_AXES(JOIN_NULLABLE_RANGE,
