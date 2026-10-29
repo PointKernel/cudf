@@ -100,9 +100,7 @@ void nvbench_inner_join_selectivity(
   BM_join<false, join_t::HASH, NullEquality>(state, dtypes, join, 1, selectivity);
 }
 
-// Keep the build hash table outside the timed region to measure the repeated-batch API used
-// by callers that reserve gather-map memory before retrieving a batch.
-void nvbench_inner_join_memory_planning(nvbench::state& state)
+void nvbench_inner_join_match_context(nvbench::state& state)
 {
   auto const rows = static_cast<cudf::size_type>(state.get_int64("left_size"));
   auto const mode = state.get_string("mode");
@@ -125,8 +123,8 @@ void nvbench_inner_join_memory_planning(nvbench::state& state)
   });
 }
 
-NVBENCH_BENCH(nvbench_inner_join_memory_planning)
-  .set_name("inner_join_memory_planning")
+NVBENCH_BENCH(nvbench_inner_join_match_context)
+  .set_name("inner_join_match_context")
   .add_int64_axis("left_size", {1'000, 100'000, 1'000'000})
   .add_string_axis("mode", {"count_then_retrieve", "cached_context", "direct"});
 
