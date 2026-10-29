@@ -72,8 +72,6 @@ struct groupby_helper {
    * group is sorted in ascending order, with NULL elements positioned at the
    * end of each group.
    *
-   * @throw cudf::logic_error if `values.size() != keys.num_rows()`
-   *
    * @param values The value column to group and sort
    * @param stream CUDA stream used for device memory operations and kernel launches
    * @param mr Memory resources for returned data and temporary storage
@@ -87,8 +85,6 @@ struct groupby_helper {
    * @brief Groups a column of values according to `keys`
    *
    * The values within each group maintain their original order.
-   *
-   * @throw cudf::logic_error if `values.size() != keys.num_rows()`
    *
    * @param values The value column to group
    * @param stream CUDA stream used for device memory operations and kernel launches
@@ -168,8 +164,7 @@ struct groupby_helper {
    *
    * Gathering `keys` by these indices produces contiguous groups.
    *
-   * When ignore_null_keys = true, the result will not include indices
-   * for null keys.
+   * When `include_null_keys` is EXCLUDE, the result does not include rows with null keys.
    *
    * Computes and stores a stable grouped order on first invocation, and returns
    * the stored order on subsequent calls. Pass `keep_labels` when `group_labels`
