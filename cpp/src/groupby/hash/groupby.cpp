@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+#include "groupby/common/m2_var_std.hpp"
 #include "groupby/common/utils.hpp"
 #include "groupby/hash/compute_groupby.hpp"
 #include "groupby/hash/compute_single_pass_aggs.hpp"
@@ -145,7 +146,7 @@ struct aggregate_result_functor final : store_result_functor {
                                  : values.type();
       auto const supported   = [values_type] {
         if constexpr (k == aggregation::M2 || k == aggregation::VARIANCE || k == aggregation::STD) {
-          return hash::is_single_pass_agg_supported(values_type, aggregation::M2);
+          return is_m2_supported(values_type);
         }
         return cudf::detail::is_valid_aggregation(values_type, k);
       }();
