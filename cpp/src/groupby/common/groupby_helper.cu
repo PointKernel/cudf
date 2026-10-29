@@ -201,11 +201,10 @@ void groupby_helper::build_groups(bool need_grouped_rows,
   thrust::sequence(policy, rows.begin(), rows.end(), size_type{0});
   auto offsets = cuda::device_buffer<size_type>(
     stream, mr.get_temporary_mr(), static_cast<std::size_t>(size) + 1, cuda::no_init);
-  auto const num_groups =
-    size == 0 ? size_type{0}
-    : cudf::detail::has_nested_columns(_keys)
-      ? compute_nested_group_offsets(_keys, rows.data(), size, offsets, stream)
-      : compute_group_offsets<false>(_keys, rows.data(), size, offsets, stream);
+  auto const num_groups = size == 0 ? size_type{0}
+                          : cudf::detail::has_nested_columns(_keys)
+                            ? compute_nested_group_offsets(_keys, offsets, stream)
+                            : compute_group_offsets<false>(_keys, offsets, stream);
   thrust::fill_n(policy, offsets.data() + num_groups, 1, size);
   // The first row of each group is its representative input row, which the group offset already
   // identifies.
