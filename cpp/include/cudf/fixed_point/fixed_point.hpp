@@ -84,6 +84,9 @@ template <typename Rep,
 CUDF_HOST_DEVICE inline constexpr Rep ipow(T exponent)
 {
   cudf_assert(exponent >= 0 && "integer exponentiation with negative exponent is not possible.");
+  // cuda::ipow returns 0 when a power-of-two base yields exactly the top bit (NVIDIA/cccl#12322)
+  if constexpr (Base == numeric::Radix::BASE_2) { return static_cast<Rep>(1) << exponent; }
+
   return cuda::ipow(static_cast<Rep>(Base), exponent);
 }
 
