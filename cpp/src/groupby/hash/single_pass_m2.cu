@@ -14,8 +14,10 @@
 
 #include <cuda/iterator>
 #include <cuda/std/cmath>
+#include <cuda/std/cstdint>
 #include <cuda/std/limits>
 #include <cuda/std/tuple>
+#include <cuda/std/type_traits>
 
 namespace cudf::groupby::detail::hash {
 namespace {
@@ -23,93 +25,140 @@ namespace {
 template <typename T>
 concept count_type = cudf::is_integral_not_bool<T>() || cudf::is_floating_point<T>();
 
+// Integers of at most 32 bits have exact raw moments: the sum fits int64, the sum of squares
+// fits 96 bits, and n * sum_of_squares - sum^2 fits 127 bits for any size_type count.
+template <typename T>
+constexpr bool has_exact_moments()
+{
+  return cuda::std::is_integral_v<T> && sizeof(T) <= 4;
+}
+
 template <count_type T>
-struct m2_state {
+struct exact_moments {
+  unsigned __int128 sum_of_squares;
+  cuda::std::int64_t sum;
   T count;
-  double mean;
-  double m2;
 };
 
-struct m2_value {
+template <count_type T>
+struct exact_moments_plus {
+  __device__ exact_moments<T> operator()(exact_moments<T> const& a, exact_moments<T> const& b) const
+  {
+    return {a.sum_of_squares + b.sum_of_squares, a.sum + b.sum, a.count + b.count};
+  }
+};
+
+template <typename Source, count_type T>
+struct grouped_exact_moments {
+  size_type const* rows;
+  value_accessor<Source> value;
+  bool has_nulls;
+
+  __device__ exact_moments<T> operator()(size_type position) const
+  {
+    auto const row = rows[position];
+    if (has_nulls && value.col.is_null_nocheck(row)) { return {0, 0, T{0}}; }
+    using wide = cuda::std::
+      conditional_t<cuda::std::is_signed_v<Source>, cuda::std::int64_t, cuda::std::uint64_t>;
+    auto const x = static_cast<wide>(value(row));
+    // Below 2^64 for every source of at most 32 bits.
+    return {static_cast<cuda::std::uint64_t>(x * x), static_cast<cuda::std::int64_t>(x), T{1}};
+  }
+};
+
+template <count_type T>
+struct split_exact_moments {
+  __device__ cuda::std::tuple<double, T> operator()(exact_moments<T> const& state) const
+  {
+    if (state.count == 0) { return {0.0, state.count}; }
+    auto const n = static_cast<__int128>(state.count);
+    auto const s = static_cast<__int128>(state.sum);
+    // n * M2, exactly, rounded once.
+    auto const n_m2 = n * static_cast<__int128>(state.sum_of_squares) - s * s;
+    return {static_cast<double>(n_m2) / static_cast<double>(state.count), state.count};
+  }
+};
+
+// Other sources accumulate moments about a shift: the first value reduced by each thread. Since
+// the shift is one of the values, s^2 <= (n - 1) * q, so M2 = q - s^2 / n >= q / n and the
+// cancellation is bounded by the group size, while the per-row update stays additive.
+template <count_type T>
+struct shifted_moments {
+  double shift;
+  double sum;             // sum of (x - shift)
+  double sum_of_squares;  // sum of (x - shift)^2, NaN once any value is non-finite
+  T count;
+};
+
+struct shifted_value {
   double value;
   bool valid;
 
   template <count_type T>
-  __device__ operator m2_state<T>() const
+  __device__ operator shifted_moments<T>() const
   {
-    if (!valid) { return {T{0}, 0.0, 0.0}; }
-    return {T{1},
-            value,
-            cuda::std::isfinite(value) ? 0.0 : cuda::std::numeric_limits<double>::quiet_NaN()};
+    if (!valid) { return {0.0, 0.0, 0.0, T{0}}; }
+    return {value,
+            0.0,
+            cuda::std::isfinite(value) ? 0.0 : cuda::std::numeric_limits<double>::quiet_NaN(),
+            T{1}};
   }
 };
 
 template <count_type T>
-struct merge_m2 {
-  // Merging the intermediate states is expensive: raking avoids the overlapping partial reductions
-  // performed by the default warp-based block algorithm, and benchmarks as more performant.
-  // Although this operator is commutative, cub::BLOCK_REDUCE_RAKING_COMMUTATIVE_ONLY
-  // benchmarked as slower on B200.
-  static constexpr auto block_reduce_algorithm = cub::BLOCK_REDUCE_RAKING;
-
-  __device__ m2_state<T> operator()(m2_state<T> const& a, m2_state<T> const& b) const
+struct merge_shifted_moments {
+  // Moves b onto a's shift d = b.shift - a.shift: sum += n_b * d, and
+  // sum_of_squares += 2 * d * sum_b + n_b * d^2. A non-finite d leaves the result non-finite.
+  __device__ shifted_moments<T> operator()(shifted_moments<T> const& a,
+                                           shifted_moments<T> const& b) const
   {
-    // Avoid inf * 0 for empty partials and retain non-finite singleton M2.
     if (a.count == 0) { return b; }
     if (b.count == 0) { return a; }
-    // Make non-finite results independent of the order in which states are merged.
-    if (!cuda::std::isfinite(a.mean) || !cuda::std::isfinite(b.mean)) {
-      auto constexpr nan = cuda::std::numeric_limits<double>::quiet_NaN();
-      return {a.count + b.count, nan, nan};
-    }
-    auto const count = a.count + b.count;
-    auto const delta = b.mean - a.mean;
-    // This is the same merge operator as for whole-column reductions of M2. A rounded
-    // reciprocal avoids both full division and a count-dependent lookup, including when
-    // merging partials across chunks.
-    auto const delta_n = delta * __drcp_rn(static_cast<double>(count));
-    return {count, a.mean + delta_n * b.count, a.m2 + b.m2 + delta * delta_n * a.count * b.count};
+    auto const d     = b.shift - a.shift;
+    auto const n_b_d = static_cast<double>(b.count) * d;
+    return {a.shift,
+            a.sum + b.sum + n_b_d,
+            a.sum_of_squares + b.sum_of_squares + d * (2.0 * b.sum + n_b_d),
+            a.count + b.count};
   }
 
-  // Thread-local folds see individual values; collective reductions see full states. This
-  // is a simplification of the above merge for the case where the additional state
-  // b.count == 1.
-  __device__ m2_state<T> operator()(m2_state<T> const& a, m2_value const& b) const
+  // The per-row fold: b is a single value, so d = b.value - a.shift and b.sum == 0.
+  __device__ shifted_moments<T> operator()(shifted_moments<T> const& a,
+                                           shifted_value const& b) const
   {
     if (!b.valid) { return a; }
-    if (a.count == 0) { return static_cast<m2_state<T>>(b); }
-    auto const delta = b.value - a.mean;
-    // Preserve the general merge's non-finite/overflow behavior.
-    if (!cuda::std::isfinite(delta)) { return (*this)(a, static_cast<m2_state<T>>(b)); }
-    auto const count   = a.count + T{1};
-    auto const delta_n = delta * __drcp_rn(static_cast<double>(count));
-    // As well as avoiding some work compared to the full merge, this specialization means
-    // avoids the problem that subtracting the updated mean from b.value would lose small
-    // deviations when the rounded mean equals b.value.
-    return {count, a.mean + delta_n, a.m2 + delta * delta_n * a.count};
+    if (a.count == 0) { return static_cast<shifted_moments<T>>(b); }
+    auto const d = b.value - a.shift;
+    return {a.shift, a.sum + d, cuda::std::fma(d, d, a.sum_of_squares), a.count + T{1}};
   }
 };
 
-template <typename T>
-struct grouped_m2 {
+template <typename Source>
+struct grouped_shifted_value {
   size_type const* rows;
-  value_accessor<T> value;
+  value_accessor<Source> value;
   bool has_nulls;
 
-  __device__ m2_value operator()(size_type position) const
+  __device__ shifted_value operator()(size_type position) const
   {
     auto const row = rows[position];
     if (has_nulls && value.col.is_null_nocheck(row)) { return {0.0, false}; }
-    auto const x = static_cast<double>(value(row));
-    return {x, true};
+    return {static_cast<double>(value(row)), true};
   }
 };
 
 template <count_type T>
-struct split_m2 {
-  __device__ cuda::std::tuple<double, T> operator()(m2_state<T> const& state) const
+struct split_shifted_moments {
+  __device__ cuda::std::tuple<double, T> operator()(shifted_moments<T> const& state) const
   {
-    return {state.m2, state.count};
+    if (state.count == 0) { return {0.0, state.count}; }
+    // Any non-finite value, or overflow while shifting, yields NaN regardless of merge order.
+    if (!cuda::std::isfinite(state.sum_of_squares)) {
+      return {cuda::std::numeric_limits<double>::quiet_NaN(), state.count};
+    }
+    auto const m2 =
+      state.sum_of_squares - state.sum * (state.sum / static_cast<double>(state.count));
+    return {m2 < 0.0 ? 0.0 : m2, state.count};
   }
 };
 
@@ -122,15 +171,34 @@ struct m2_dispatch {
                   cuda::stream_ref stream,
                   cudf::memory_resources mr) const
   {
-    if constexpr (cudf::is_numeric<T>() && !cudf::is_fixed_point<T>()) {
+    if constexpr (has_exact_moments<T>()) {
       auto const values = cudf::detail::make_counting_transform_iterator(
         0,
-        grouped_m2<T>{
+        grouped_exact_moments<T, CountT>{
           ctx.grouped.rows.data(), value_accessor<T>{ctx.d_values}, ctx.values.has_nulls()});
-      auto const output =
-        cuda::transform_output_iterator{cuda::make_zip_iterator(m2, count), split_m2<CountT>{}};
-      reduce_groups(
-        ctx.grouped, values, output, merge_m2<CountT>{}, m2_state<CountT>{0, 0.0, 0.0}, stream, mr);
+      auto const output = cuda::transform_output_iterator{cuda::make_zip_iterator(m2, count),
+                                                          split_exact_moments<CountT>{}};
+      reduce_groups(ctx.grouped,
+                    values,
+                    output,
+                    exact_moments_plus<CountT>{},
+                    exact_moments<CountT>{0, 0, CountT{0}},
+                    stream,
+                    mr);
+    } else if constexpr (cudf::is_numeric<T>() && !cudf::is_fixed_point<T>()) {
+      auto const values = cudf::detail::make_counting_transform_iterator(
+        0,
+        grouped_shifted_value<T>{
+          ctx.grouped.rows.data(), value_accessor<T>{ctx.d_values}, ctx.values.has_nulls()});
+      auto const output = cuda::transform_output_iterator{cuda::make_zip_iterator(m2, count),
+                                                          split_shifted_moments<CountT>{}};
+      reduce_groups(ctx.grouped,
+                    values,
+                    output,
+                    merge_shifted_moments<CountT>{},
+                    shifted_moments<CountT>{0.0, 0.0, 0.0, CountT{0}},
+                    stream,
+                    mr);
     } else {
       CUDF_FAIL("Invalid source type for M2 aggregation.");
     }
