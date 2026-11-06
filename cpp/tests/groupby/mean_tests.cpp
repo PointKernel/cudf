@@ -13,7 +13,9 @@
 
 #include <cudf/aggregation.hpp>
 
+#include <cstdint>
 #include <initializer_list>
+#include <limits>
 #include <vector>
 
 using namespace cudf::test::iterators;
@@ -124,6 +126,25 @@ TYPED_TEST(groupby_mean_test, null_keys_and_values)
   test_single_agg(keys, vals, expect_keys, expect_vals, std::move(agg));
 }
 // clang-format on
+
+struct groupby_int64_mean_test : public cudf::test::BaseFixture {};
+
+TEST_F(groupby_int64_mean_test, sum_beyond_int64_range)
+{
+  auto constexpr max = std::numeric_limits<int64_t>::max();
+  auto constexpr min = std::numeric_limits<int64_t>::min();
+
+  // The group sums exceed int64, while their means do not.
+  cudf::test::fixed_width_column_wrapper<K> keys{1, 2, 1, 2, 2};
+  cudf::test::fixed_width_column_wrapper<int64_t> vals{max, min, max, min, min};
+
+  cudf::test::fixed_width_column_wrapper<K> expect_keys{1, 2};
+  cudf::test::fixed_width_column_wrapper<double> expect_vals{static_cast<double>(max),
+                                                             static_cast<double>(min)};
+
+  auto agg = cudf::make_mean_aggregation<cudf::groupby_aggregation>();
+  test_single_agg(keys, vals, expect_keys, expect_vals, std::move(agg));
+}
 
 struct groupby_dictionary_mean_test : public cudf::test::BaseFixture {};
 

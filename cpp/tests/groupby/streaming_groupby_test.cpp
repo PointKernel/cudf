@@ -246,13 +246,17 @@ TEST_F(StreamingGroupbyTest, CountValidTwoBatches)
 TEST_F(StreamingGroupbyTest, MeanTwoBatches)
 {
   using K = int32_t;
-  using V = double;
+  using V = int64_t;
 
+  auto constexpr max = std::numeric_limits<V>::max();
+  auto constexpr min = std::numeric_limits<V>::min();
+
+  // The group sums exceed int64 across batches, while their means do not.
   cudf::test::fixed_width_column_wrapper<K> keys1{1, 2, 1};
-  cudf::test::fixed_width_column_wrapper<V> vals1{10.0, 20.0, 30.0};
+  cudf::test::fixed_width_column_wrapper<V> vals1{max, min, max};
 
   cudf::test::fixed_width_column_wrapper<K> keys2{1, 2};
-  cudf::test::fixed_width_column_wrapper<V> vals2{50.0, 40.0};
+  cudf::test::fixed_width_column_wrapper<V> vals2{max, min};
 
   cudf::table_view batch1{{keys1, vals1}};
   cudf::table_view batch2{{keys2, vals2}};
