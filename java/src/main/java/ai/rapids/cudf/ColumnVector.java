@@ -790,6 +790,26 @@ public final class ColumnVector extends ColumnView {
   }
 
   /**
+   * Create a new column containing the XXH64 hash of the bytes of each row.
+   * <p>
+   * The bytes of a row are the UTF-8 bytes of a STRING, or the elements of a LIST of INT8 or
+   * UINT8, so a string and a list holding the same bytes have the same hash. An empty string or
+   * list hashes to the XXH64 of zero bytes. Unlike {@link #md5Hash} and {@link #sha1Hash}, a
+   * null row results in a null row in the output column.
+   *
+   * @param seed seed of the hash. Java does not have an unsigned long type, so the bits are
+   *             treated as an unsigned value.
+   * @param column column to hash: STRING, or LIST of INT8 or UINT8 whose child column has no
+   *               nulls.
+   * @return the new UINT64 ColumnVector of each row's hash value.
+   * @throws CudfException if the column has any other type, or the child column of the list
+   *                       has nulls.
+   */
+  public static ColumnVector xxhash64(long seed, ColumnView column) {
+    return new ColumnVector(xxhash64(seed, column.getNativeView()));
+  }
+
+  /**
    * Generic method to cast ColumnVector
    * When casting from a Date, Timestamp, or Boolean to a numerical type the underlying numerical
    * representation of the data will be used for the cast.
@@ -907,6 +927,8 @@ public final class ColumnVector extends ColumnView {
    * @return native handle of the resulting cudf column containing the hex-string hashing results.
    */
   private static native long sha1(long[] viewHandles) throws CudfException;
+
+  private static native long xxhash64(long seed, long viewHandle) throws CudfException;
 
   /////////////////////////////////////////////////////////////////////////////
   // INTERNAL/NATIVE ACCESS

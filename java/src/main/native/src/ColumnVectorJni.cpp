@@ -15,6 +15,7 @@
 #include <cudf/interop.hpp>
 #include <cudf/lists/combine.hpp>
 #include <cudf/lists/filling.hpp>
+#include <cudf/lists/lists_column_view.hpp>
 #include <cudf/null_mask.hpp>
 #include <cudf/reshape.hpp>
 #include <cudf/scalar/scalar_factories.hpp>
@@ -86,6 +87,35 @@ std::shared_ptr<arrow::Array> to_arrow_array(cudf::type_id id, Ts&&... args)
     default: CUDF_FAIL("Unsupported type_id conversion to arrow");
   }
 }
+
+namespace {
+
+// Views the bytes of each row of a STRING, LIST<INT8> or LIST<UINT8> column as a STRING column
+cudf::column_view bytes_as_strings(cudf::column_view const& input)
+{
+  if (input.type().id() == cudf::type_id::STRING) { return input; }
+  CUDF_EXPECTS(input.type().id() == cudf::type_id::LIST,
+               "xxhash64 requires a STRING, LIST<INT8> or LIST<UINT8> column",
+               cudf::data_type_error);
+  auto const lists = cudf::lists_column_view{input};
+  auto const child = lists.child();
+  CUDF_EXPECTS(
+    child.type().id() == cudf::type_id::INT8 || child.type().id() == cudf::type_id::UINT8,
+    "xxhash64 requires list elements of type INT8 or UINT8",
+    cudf::data_type_error);
+  CUDF_EXPECTS(!child.has_nulls(),
+               "xxhash64 requires a list child column without nulls",
+               std::invalid_argument);
+  return cudf::column_view{cudf::data_type{cudf::type_id::STRING},
+                           input.size(),
+                           child.data<char>(),
+                           input.null_mask(),
+                           input.null_count(),
+                           input.offset(),
+                           {lists.offsets()}};
+}
+
+}  // namespace
 
 extern "C" {
 
@@ -434,6 +464,26 @@ JNIEXPORT jlong JNICALL Java_ai_rapids_cudf_ColumnVector_sha1(JNIEnv* env,
     auto column_views =
       cudf::jni::native_jpointerArray<cudf::column_view>{env, column_handles}.get_dereferenced();
     return release_as_jlong(cudf::hashing::sha1(cudf::table_view{column_views}));
+  }
+  JNI_CATCH(env, 0);
+}
+
+JNIEXPORT jlong JNICALL Java_ai_rapids_cudf_ColumnVector_xxhash64(JNIEnv* env,
+                                                                  jclass,
+                                                                  jlong seed,
+                                                                  jlong column_handle)
+{
+  JNI_NULL_CHECK(env, column_handle, "column handle is null", 0);
+
+  JNI_TRY
+  {
+    cudf::jni::auto_set_device(env);
+    auto const input = reinterpret_cast<cudf::column_view const*>(column_handle);
+    // A single STRING column hashes to the XXH64 of the bytes of each row
+    auto result = cudf::hashing::xxhash_64(cudf::table_view({bytes_as_strings(*input)}),
+                                           static_cast<uint64_t>(seed));
+    result->set_null_mask(cudf::copy_bitmask(*input), input->null_count());
+    return release_as_jlong(result);
   }
   JNI_CATCH(env, 0);
 }

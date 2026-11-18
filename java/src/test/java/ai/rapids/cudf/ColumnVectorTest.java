@@ -765,6 +765,63 @@ public class ColumnVectorTest extends CudfTestBase {
     }
   }
 
+  private static final String[] XXHASH64_ROWS = {"a", "", null,
+      "h\u00e9llo w\u00f6rld \u2603", "The quick brown fox jumps over the lazy dog"};
+  private static final long XXHASH64_SEED = 0x9E3779B97F4A7C15L;
+  // xxhash.xxh64(row.encode("utf-8"), seed=0x9E3779B97F4A7C15).intdigest() from
+  // https://pypi.org/project/xxhash/, as signed longs
+  private static final Long[] XXHASH64_HASHES = {-7314851647663544119L, -4308643256842780672L,
+      null, 6251855798646382440L, 9005728555714636660L};
+
+  @Test
+  void testXxhash64() {
+    try (ColumnVector strings = ColumnVector.fromStrings(XXHASH64_ROWS);
+         ColumnVector uint8Lists = strings.asByteList();
+         ColumnView uint8Bytes = uint8Lists.getChildColumnView(0);
+         // The INT8 lists share the offsets and view the same bytes in a child with an offset
+         ColumnVector pad = ColumnVector.fromUnsignedBytes((byte) 0);
+         ColumnVector padded = ColumnVector.concatenate(pad, uint8Bytes);
+         CloseableArray<ColumnView> paddedBytes = CloseableArray.wrap(padded.splitAsViews(1));
+         ColumnView int8Bytes = paddedBytes.get(1).bitCastTo(DType.INT8);
+         ColumnView int8Lists = uint8Lists.replaceListChild(int8Bytes);
+         ColumnVector expected = ColumnVector.fromBoxedUnsignedLongs(XXHASH64_HASHES)) {
+      for (ColumnView input : new ColumnView[]{strings, uint8Lists, int8Lists}) {
+        try (ColumnVector result = ColumnVector.xxhash64(XXHASH64_SEED, input)) {
+          assertColumnsAreEqual(expected, result);
+        }
+      }
+    }
+  }
+
+  @Test
+  void testXxhash64SlicedViews() {
+    try (ColumnVector strings = ColumnVector.fromStrings(XXHASH64_ROWS);
+         ColumnVector lists = strings.asByteList();
+         ColumnVector expected = ColumnVector.fromBoxedUnsignedLongs(
+             Arrays.copyOfRange(XXHASH64_HASHES, 1, 4))) {
+      for (ColumnVector input : new ColumnVector[]{strings, lists}) {
+        try (CloseableArray<ColumnView> views = CloseableArray.wrap(input.splitAsViews(1, 4));
+             ColumnVector result = ColumnVector.xxhash64(XXHASH64_SEED, views.get(1))) {
+          assertColumnsAreEqual(expected, result);
+        }
+      }
+    }
+  }
+
+  @Test
+  void testXxhash64UnsupportedInput() {
+    try (ColumnVector ints = ColumnVector.fromInts(1, 2);
+         ColumnVector intLists = ColumnVector.fromLists(
+             new ListType(true, new BasicType(false, DType.INT32)), Arrays.asList(1, 2));
+         ColumnVector nullElement = ColumnVector.fromLists(
+             new ListType(true, new BasicType(true, DType.INT8)),
+             Arrays.asList((byte) 1, null))) {
+      assertThrows(CudfException.class, () -> ColumnVector.xxhash64(0, ints).close());
+      assertThrows(CudfException.class, () -> ColumnVector.xxhash64(0, intLists).close());
+      assertThrows(CudfException.class, () -> ColumnVector.xxhash64(0, nullElement).close());
+    }
+  }
+
   @Test
   void isNotNullTestEmptyColumn() {
     try (ColumnVector v = ColumnVector.fromBoxedInts();
